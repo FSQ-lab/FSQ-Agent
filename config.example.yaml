@@ -1,0 +1,67 @@
+agent:
+  name: auto-test-agent
+  model: gpt-5.4
+  max_steps: 50
+  step_timeout_seconds: 60
+  max_retries: 3
+
+openai_agents:
+  enabled: true
+  base_url: https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/
+  api_key_env: AZURE_OPENAI_API_KEY
+  model: gpt-5.4
+  max_turns: 50
+  tracing_enabled: false
+  trace_include_sensitive_data: false
+  use_responses: true
+
+mcp_servers:
+  - name: browser
+    transport: stdio
+    command: npx
+    args: ["-y", "@playwright/mcp@latest"]
+    require_approval: never
+    load_prompts: false
+    timeout_seconds: 60
+
+skills:
+  - name: automation-basics
+    description: Describes how the agent should use configured CLI and MCP tools for automation tasks.
+    kind: markdown
+    path: automation-basics.md
+    required: false
+
+shell:
+  enabled: false
+  # Use allowlist for normal operation. Use allow_all only for intentionally unrestricted local runs.
+  mode: allowlist
+  command_allowlist: [python, node, npm, npx]
+  timeout_seconds: 60
+  working_dir: .
+
+cli_tools:
+  - name: echo
+    command: python
+    args: ["-c", "import sys; print(' '.join(sys.argv[1:]))"]
+    description: Echo arguments for smoke tests.
+    timeout_seconds: 10
+
+observation:
+  screenshot:
+    enabled: false
+    format: png
+    quality: 85
+  ui_tree:
+    enabled: false
+    max_depth: 10
+  logging:
+    level: INFO
+    format: json
+
+output:
+  logs_dir: ./logs
+  reports_dir: ./reports
+  screenshots_dir: ./screenshots
+  traces_dir: ./logs/traces
+
+knowledge_dir: ./knowledge

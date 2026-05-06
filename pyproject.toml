@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.24.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "auto-test-agent"
+version = "0.1.0"
+description = "Goal-driven automated testing agent built around OpenAI Agents SDK, Azure OpenAI, MCP, CLI execution, observation, and reporting."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=2.25.0",
+    "openai-agents>=0.15.2",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "aiofiles>=23.0.0",
+    "mcp>=1.0.0",
+    "mss>=9.0.0",
+    "pyautogui>=0.9.54",
+    "pywinauto>=0.6.8; platform_system == 'Windows'",
+    "pillow>=10.0.0",
+    "structlog>=24.0.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+auto-test-agent = "auto_test_agent.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auto_test_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
