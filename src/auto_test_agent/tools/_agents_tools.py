@@ -36,26 +36,32 @@ class AgentsToolFactory:
         except ImportError as exc:
             raise ToolExecutionError("openai-agents is required when OpenAI Agents SDK is enabled.") from exc
 
-        tools: list[Any] = [
-            FunctionTool(
-                name="run_cli_tool",
-                description="Run one configured allowlisted CLI tool.",
-                params_json_schema=_CLIArgs.model_json_schema(),
-                on_invoke_tool=self._run_cli_tool,
-            ),
-            FunctionTool(
+        tools: list[Any] = []
+        if self.cli_runner.list_tools():
+            tools.append(
+                FunctionTool(
+                    name="run_cli_tool",
+                    description="Run one configured allowlisted CLI tool.",
+                    params_json_schema=_CLIArgs.model_json_schema(),
+                    on_invoke_tool=self._run_cli_tool,
+                )
+            )
+        tools.extend(
+            [
+                FunctionTool(
                 name="read_file",
                 description="Read a scoped workspace file.",
                 params_json_schema=_ReadFileArgs.model_json_schema(),
                 on_invoke_tool=self._read_file,
-            ),
-            FunctionTool(
-                name="write_file",
-                description="Write a scoped workspace file.",
-                params_json_schema=_WriteFileArgs.model_json_schema(),
-                on_invoke_tool=self._write_file,
-            ),
-        ]
+                ),
+                FunctionTool(
+                    name="write_file",
+                    description="Write a scoped workspace file.",
+                    params_json_schema=_WriteFileArgs.model_json_schema(),
+                    on_invoke_tool=self._write_file,
+                ),
+            ]
+        )
         if self.shell_settings.enabled:
             tools.append(
                 ShellTool(

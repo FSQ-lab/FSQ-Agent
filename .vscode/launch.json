@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Auto Test Agent: Societas Login",
+      "name": "Auto Test Agent",
       "type": "debugpy",
       "request": "launch",
       "module": "auto_test_agent.cli",

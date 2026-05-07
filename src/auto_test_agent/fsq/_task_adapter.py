@@ -35,6 +35,7 @@ class FsqTaskAdapter:
             "",
             "Execution guidance:",
             "- Prefer explicit FSQ locators such as resourceId, accessibilityId, text, xpath, and className when available.",
+            "- For Android cases, use the configured Appium MCP tools for device, session, app lifecycle, element lookup, taps, text input, key presses, page source, and screenshots. Do not use CLI tools unless the task explicitly exposes one.",
             "- Treat optional or transient UI such as dialogs, permissions, and sign-in state as runtime conditions to handle safely.",
             "- Do not edit the source FSQ YAML during execution.",
             "- Derive success criteria from the case description, assertion commands, and final intended app/page state.",
