@@ -3,9 +3,10 @@ import uuid
 from pathlib import Path
 
 from auto_test_agent.config import Settings, load_settings
-from auto_test_agent.knowledge import FlowTemplateManager, PrivateKnowledgeLoader, SkillLoader
+from auto_test_agent.knowledge import FlowTemplateManager, PrivateKnowledgeLoader
 from auto_test_agent.models import Task, TaskResult
 from auto_test_agent.report import ReportGenerator
+from auto_test_agent.skills import SkillLoader
 from auto_test_agent.tools import AgentsMCPFactory, AgentsToolFactory, CLIRunner, FileOps
 
 from auto_test_agent.agent._openai_runtime import OpenAIAgentsRuntime

@@ -11,6 +11,7 @@ This repository uses spec-driven development. Implementation must not start unti
 | tools | src/auto_test_agent/tools/SPEC.md | Provides MCP, CLI, and file operation adapters behind a common capability interface. |
 | observation | src/auto_test_agent/observation/SPEC.md | Captures screenshots, UI trees, logs, and traces after each execution step. |
 | knowledge | src/auto_test_agent/knowledge/SPEC.md | Loads private element history, application knowledge, and flow templates. |
+| skills | src/auto_test_agent/skills/SPEC.md | Loads automation skill instruction bundles and skill file metadata. |
 | report | src/auto_test_agent/report/SPEC.md | Generates task reports and evidence manifests. |
 | agent | src/auto_test_agent/agent/SPEC.md | Orchestrates planning, execution, verification, retry, and report generation. |
 | cli | src/auto_test_agent/cli/SPEC.md | Exposes command line workflows for running tasks and inspecting capabilities. |
@@ -25,11 +26,13 @@ flowchart TD
     Agent --> Tools[tools]
     Agent --> Observation[observation]
     Agent --> Knowledge[knowledge]
+    Agent --> Skills[skills]
     Agent --> Report[report]
     Config --> Models
     Tools --> Models
     Observation --> Models
     Knowledge --> Models
+    Skills --> Models
     Report --> Models
 ```
 

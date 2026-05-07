@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Coordinate the goal-driven testing workflow using OpenAI Agents SDK: load runtime settings, build the Azure OpenAI-backed agent, attach configured tools and MCP servers, load relevant knowledge and skills, derive acceptance criteria when the user only provides a task description, generate a task pre-plan with success criteria, execute and dynamically adjust that pre-plan through SDK-managed tool calls, derive verification status from structured final output, and trigger report generation.
+Coordinate the goal-driven testing workflow using OpenAI Agents SDK: load runtime settings, build the Azure OpenAI-backed agent, attach configured tools and MCP servers, load relevant knowledge, flow templates, and skills, derive acceptance criteria when the user only provides a task description, generate a task pre-plan with success criteria, execute and dynamically adjust that pre-plan through SDK-managed tool calls, derive verification status from structured final output, and trigger report generation.
 
 ## Dependencies
 
@@ -11,6 +11,7 @@ Coordinate the goal-driven testing workflow using OpenAI Agents SDK: load runtim
 - `tools`: Builds OpenAI Agents SDK tools/MCP servers and exposes diagnostic capabilities.
 - `observation`: Captures evidence after steps.
 - `knowledge`: Loads private knowledge and flow templates.
+- `skills`: Loads configured automation skill instruction bundles.
 - `report`: Generates reports and evidence bundles.
 
 ## Public Interface

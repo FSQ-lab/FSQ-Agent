@@ -1,0 +1,24 @@
+from pathlib import Path
+
+from auto_test_agent.models import SkillConfig
+from auto_test_agent.skills import SkillBundle, SkillLoader
+
+
+def test_skill_loader_loads_markdown_file(tmp_path: Path) -> None:
+    skill_path = tmp_path / "example.md"
+    skill_path.write_text("Use configured tools only.", encoding="utf-8")
+
+    bundles = SkillLoader(tmp_path).load([SkillConfig(name="example", path=skill_path)])
+
+    assert len(bundles) == 1
+    assert isinstance(bundles[0], SkillBundle)
+    assert bundles[0].name == "example"
+    assert bundles[0].instructions == "Use configured tools only."
+    assert bundles[0].files == [skill_path]
+
+
+def test_skill_loader_returns_warning_for_missing_optional_skill(tmp_path: Path) -> None:
+    bundles = SkillLoader(tmp_path).load([SkillConfig(name="missing", path=Path("missing.md"))])
+
+    assert bundles[0].instructions == ""
+    assert bundles[0].warnings
