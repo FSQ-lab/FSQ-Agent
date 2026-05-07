@@ -13,7 +13,7 @@
         "--config",
         "config.local.yaml",
         "--task",
-        "examples/tasks/societas-login.yaml"
+        "fsq-testcases\\android\\bottom_bar\\access_downloads_through_overflow_menu.codex.yaml"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
