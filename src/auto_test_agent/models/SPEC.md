@@ -13,6 +13,8 @@ No project module dependencies. May depend on external libraries such as `pydant
 Current `__init__.py` exports via `__all__`:
 
 - `Task`: Pydantic model describing a natural-language test task, optional metadata, optional user-provided acceptance criteria, retry limits, timeout, and knowledge references. Only `description` is required. When no acceptance criteria are supplied, the OpenAI Agents SDK runtime must derive them from the task description, knowledge, skills, and flow templates.
+- `FsqCaseConfig`: Pydantic model describing the metadata document from an FSQ AI Test DSL `.codex.yaml` case.
+- `FsqCase`: Pydantic model containing an FSQ case path, parsed metadata, and command list.
 - `ExecutionPlan`: Pydantic model containing ordered `ExecutionStep` items and planning rationale.
 - `ExecutionStep`: Pydantic model for one planned tool action with expected outcome and retry policy.
 - `StepResult`: Pydantic model for one executed, skipped, failed, or adjusted pre-plan step outcome, timings, evidence references, and error summary.
@@ -44,6 +46,7 @@ Current `__init__.py` exports via `__all__`:
 
 - `__init__.py`: Public exports only.
 - `_task.py`: Task, plan, step, result, and verification models.
+- `_fsq.py`: FSQ AI Test DSL case metadata and case models.
 - `_tools.py`: Tool metadata, tool call, tool result, MCP and CLI config models.
 - `_settings.py`: Settings value models.
 - `_skills.py`: Skill configuration and loaded skill bundle models.
@@ -63,4 +66,4 @@ All custom exceptions inherit from `AutoTestAgentError`. Exceptions carry concis
 - Result models store evidence paths rather than binary evidence to keep logs and reports lightweight.
 - OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration that `agent` and `tools` adapt into SDK `Agent`, `FunctionTool`, `MCPServer*`, and hosted tool objects.
 - Skills are descriptive instruction bundles. CLI/shell execution is controlled separately by configured CLI tools or `ShellSettings`.
-- User task input may contain only a task description. `Task.id` and `Task.name` have safe defaults, and `Task.acceptance_criteria` defaults to an empty list so the runtime can derive success criteria during pre-planning.
+- FSQ `.codex.yaml` cases are converted into `Task` descriptions for the agent loop. The parsed FSQ models preserve source metadata and command flow before rendering.

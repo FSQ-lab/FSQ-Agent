@@ -7,6 +7,7 @@ from auto_test_agent.models._exceptions import (
     ToolExecutionError,
     VerificationError,
 )
+from auto_test_agent.models._fsq import FsqCase, FsqCaseConfig, FsqPlatform
 from auto_test_agent.models._knowledge import KnowledgeBundle
 from auto_test_agent.models._report import ReportArtifact
 from auto_test_agent.models._settings import AgentSettings, ObservationSettings, OpenAIAgentsSettings, OutputSettings, ShellSettings
@@ -28,6 +29,9 @@ __all__ = [
     "StepResult",
     "VerificationResult",
     "TaskResult",
+    "FsqPlatform",
+    "FsqCaseConfig",
+    "FsqCase",
     "ReportArtifact",
     "KnowledgeBundle",
     "ToolDefinition",

@@ -142,6 +142,8 @@ class OpenAIAgentsRuntime:
             "Execute the pre-plan step by step with available MCP/tool/skill capabilities.",
             "Dynamically adjust the pre-plan when tool results, MCP capabilities, page state, application state, or skill instructions show a better route is needed.",
             "Use private knowledge and flow templates as planning context when they are provided.",
+            "When the task description contains FSQ AI Test DSL case context, treat its command flow as an advisory reference, not as a brittle script. Prefer its locators and assertions, but adapt for live UI state, transient dialogs, optional setup, missing steps, and recovery needs.",
+            "Do not modify source FSQ YAML case files during execution.",
             "Do not ask the user for clarification during a run. Finish with success evidence, failure evidence, or a clear inconclusive summary.",
             "Use only configured tools for external actions. Respect scoped file and CLI tool boundaries.",
             "The final answer must be JSON only, with no Markdown fences and no prose outside JSON.",

@@ -11,6 +11,7 @@ This repository uses spec-driven development. Implementation must not start unti
 | tools | src/auto_test_agent/tools/SPEC.md | Provides MCP, CLI, and file operation adapters behind a common capability interface. |
 | observation | src/auto_test_agent/observation/SPEC.md | Captures screenshots, UI trees, logs, and traces after each execution step. |
 | knowledge | src/auto_test_agent/knowledge/SPEC.md | Loads private element history, application knowledge, and flow templates. |
+| fsq | src/auto_test_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases and converts them into agent tasks. |
 | skills | src/auto_test_agent/skills/SPEC.md | Loads automation skill instruction bundles and skill file metadata. |
 | report | src/auto_test_agent/report/SPEC.md | Generates task reports and evidence manifests. |
 | agent | src/auto_test_agent/agent/SPEC.md | Orchestrates planning, execution, verification, retry, and report generation. |
@@ -21,6 +22,7 @@ This repository uses spec-driven development. Implementation must not start unti
 ```mermaid
 flowchart TD
     CLI[cli] --> Agent[agent]
+    CLI --> FSQ[fsq]
     Agent --> Config[config]
     Agent --> Models[models]
     Agent --> Tools[tools]
@@ -32,6 +34,7 @@ flowchart TD
     Tools --> Models
     Observation --> Models
     Knowledge --> Models
+    FSQ --> Models
     Skills --> Models
     Report --> Models
 ```
