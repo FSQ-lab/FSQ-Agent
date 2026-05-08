@@ -1,4 +1,4 @@
-from auto_test_agent.models import ExecutionStep, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task
+from fsq_agent.models import ExecutionStep, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task
 
 
 def test_task_defaults() -> None:

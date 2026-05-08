@@ -1,7 +1,7 @@
 import pytest
 
-from auto_test_agent.agent import Verifier
-from auto_test_agent.models import StepResult, Task
+from fsq_agent.agent import Verifier
+from fsq_agent.models import StepResult, Task
 
 
 def _task() -> Task:

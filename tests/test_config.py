@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from auto_test_agent.config import load_settings, validate_runtime_settings
-from auto_test_agent.models import ConfigurationError
+from fsq_agent.config import load_settings, validate_runtime_settings
+from fsq_agent.models import ConfigurationError
 
 
 def test_load_settings_from_yaml(tmp_path: Path) -> None:

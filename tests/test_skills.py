@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from auto_test_agent.models import SkillConfig
-from auto_test_agent.skills import SkillBundle, SkillLoader
+from fsq_agent.models import SkillConfig
+from fsq_agent.skills import SkillBundle, SkillLoader
 
 
 def test_skill_loader_loads_markdown_file(tmp_path: Path) -> None:

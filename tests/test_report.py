@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from auto_test_agent.models import StepResult, Task, VerificationResult
-from auto_test_agent.report import ReportGenerator
+from fsq_agent.models import StepResult, Task, VerificationResult
+from fsq_agent.report import ReportGenerator
 
 
 class _FailingRichReportGenerator(ReportGenerator):

@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from auto_test_agent.models import (
+from fsq_agent.models import (
     MCPServerConfig,
     MCPToolValidationSettings,
     ShellSettings,
@@ -12,7 +12,7 @@ from auto_test_agent.models import (
     ToolDefinition,
     ToolExecutionError,
 )
-from auto_test_agent.tools import (
+from fsq_agent.tools import (
     AgentsMCPFactory,
     AgentsToolFactory,
     CLIRunner,

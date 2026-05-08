@@ -3,9 +3,9 @@ from typing import Any
 
 import pytest
 
-from auto_test_agent.agent import OpenAIAgentsRuntime
-from auto_test_agent.config import Settings
-from auto_test_agent.models import KnowledgeBundle, MCPToolValidationIssue, OpenAIAgentsSettings, Task
+from fsq_agent.agent import OpenAIAgentsRuntime
+from fsq_agent.config import Settings
+from fsq_agent.models import KnowledgeBundle, MCPToolValidationIssue, OpenAIAgentsSettings, Task
 
 
 class _EmptyToolFactory:

@@ -32,14 +32,14 @@ dev = [
 ]
 
 [project.scripts]
-auto-test-agent = "auto_test_agent.cli:main"
+auto-test-agent = "fsq_agent.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/auto_test_agent"]
+packages = ["fsq_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 
 [tool.ruff]

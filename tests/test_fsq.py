@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from auto_test_agent.cli._task_loader import load_task, load_tasks
-from auto_test_agent.fsq import FsqCaseLoader, FsqTaskAdapter
-from auto_test_agent.models import ConfigurationError
+from fsq_agent.cli._task_loader import load_task, load_tasks
+from fsq_agent.fsq import FsqCaseLoader, FsqTaskAdapter
+from fsq_agent.models import ConfigurationError
 
 
 FSQ_CASE = """

@@ -6,16 +6,16 @@ This repository uses spec-driven development. Implementation must not start unti
 
 | Module | SPEC | Purpose |
 |---|---|---|
-| models | src/auto_test_agent/models/SPEC.md | Owns shared domain models, result types, and exceptions. |
-| config | src/auto_test_agent/config/SPEC.md | Loads and validates runtime configuration. |
-| tools | src/auto_test_agent/tools/SPEC.md | Provides MCP, CLI, and file operation adapters behind a common capability interface. |
-| observation | src/auto_test_agent/observation/SPEC.md | Captures screenshots, UI trees, logs, and traces after each execution step. |
-| knowledge | src/auto_test_agent/knowledge/SPEC.md | Loads private element history, application knowledge, and flow templates. |
-| fsq | src/auto_test_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases and converts them into agent tasks. |
-| skills | src/auto_test_agent/skills/SPEC.md | Loads automation skill instruction bundles and skill file metadata. |
-| report | src/auto_test_agent/report/SPEC.md | Generates task reports and evidence manifests. |
-| agent | src/auto_test_agent/agent/SPEC.md | Orchestrates planning, execution, verification, retry, and report generation. |
-| cli | src/auto_test_agent/cli/SPEC.md | Exposes command line workflows for running tasks and inspecting capabilities. |
+| models | fsq_agent/models/SPEC.md | Owns shared domain models, result types, and exceptions. |
+| config | fsq_agent/config/SPEC.md | Loads and validates runtime configuration. |
+| tools | fsq_agent/tools/SPEC.md | Provides MCP, CLI, and file operation adapters behind a common capability interface. |
+| observation | fsq_agent/observation/SPEC.md | Captures screenshots, UI trees, logs, and traces after each execution step. |
+| knowledge | fsq_agent/knowledge/SPEC.md | Loads private element history, application knowledge, and flow templates. |
+| fsq | fsq_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases and converts them into agent tasks. |
+| skills | fsq_agent/skills/SPEC.md | Loads automation skill instruction bundles and skill file metadata. |
+| report | fsq_agent/report/SPEC.md | Generates task reports and evidence manifests. |
+| agent | fsq_agent/agent/SPEC.md | Orchestrates planning, execution, verification, retry, and report generation. |
+| cli | fsq_agent/cli/SPEC.md | Exposes command line workflows for running tasks and inspecting capabilities. |
 
 ## Architecture Diagram
 

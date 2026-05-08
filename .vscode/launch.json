@@ -5,7 +5,7 @@
       "name": "Auto Test Agent",
       "type": "debugpy",
       "request": "launch",
-      "module": "auto_test_agent.cli",
+      "module": "fsq_agent.cli",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}",
       "args": [

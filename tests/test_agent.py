@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from auto_test_agent import AutoTestAgent, Task
-from auto_test_agent.models import ConfigurationError
+from fsq_agent import AutoTestAgent, Task
+from fsq_agent.models import ConfigurationError
 
 
 @pytest.mark.asyncio

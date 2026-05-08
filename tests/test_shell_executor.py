@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from auto_test_agent.models import ShellSettings, ToolExecutionError
-from auto_test_agent.tools import ShellCommandExecutor
+from fsq_agent.models import ShellSettings, ToolExecutionError
+from fsq_agent.tools import ShellCommandExecutor
 
 
 def _request(*commands: str, timeout_ms: int | None = None) -> SimpleNamespace:
