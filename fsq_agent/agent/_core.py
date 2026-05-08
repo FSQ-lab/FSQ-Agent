@@ -13,7 +13,7 @@ from fsq_agent.agent._openai_runtime import OpenAIAgentsRuntime
 from fsq_agent.agent._verifier import Verifier
 
 
-class AutoTestAgent:
+class FsqAgent:
     def __init__(
         self,
         settings: Settings,
@@ -33,16 +33,23 @@ class AutoTestAgent:
         self.runtime = runtime
 
     @classmethod
-    def from_config(cls, path: str | Path | None = None) -> "AutoTestAgent":
-        settings = load_settings(path)
-        cli_runner = CLIRunner(settings.cli_tools)
-        file_ops = FileOps(Path.cwd())
+    def from_config(cls, path: str | Path | None = None, workspace: str | Path | None = None) -> "FsqAgent":
+        return cls.from_settings(load_settings(path, workspace))
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "FsqAgent":
+        output_root = settings.output.root_dir
+        cli_runner = CLIRunner(settings.cli_tools, cwd=settings.workspace.root_dir)
+        file_ops = FileOps(
+            read_roots=[settings.cases.dir, settings.knowledge_dir, output_root],
+            write_root=output_root / "artifacts",
+        )
         tool_factory = AgentsToolFactory(cli_runner, file_ops, settings.shell)
         mcp_factory = AgentsMCPFactory(settings.mcp_servers, settings.mcp_tool_validation)
         knowledge_loader = PrivateKnowledgeLoader(settings.knowledge_dir)
         flow_manager = FlowTemplateManager(settings.knowledge_dir / "flows")
         skill_loader = SkillLoader(settings.knowledge_dir / "skills")
-        reporter = ReportGenerator(settings.output.reports_dir)
+        reporter = ReportGenerator(settings.output.runs_dir)
         return cls(
             settings,
             Verifier(),

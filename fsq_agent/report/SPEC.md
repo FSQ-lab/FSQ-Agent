@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Generate human-readable and machine-readable reports from task results, pre-plan summaries, step evidence, verification outcomes, satisfied/unmet criteria, and failure diagnostics.
+Generate human-readable and machine-readable reports under the fsq-agent output directory from task results, pre-plan summaries, step evidence, verification outcomes, satisfied/unmet criteria, and failure diagnostics.
 
 ## Dependencies
 
@@ -12,7 +12,7 @@ Generate human-readable and machine-readable reports from task results, pre-plan
 
 Current `__init__.py` exports via `__all__`:
 
-- `ReportGenerator`: Generates reports for completed task runs.
+- `ReportGenerator`: Generates reports for completed task runs under the configured output runs directory.
 - `EvidenceBundler`: Creates a manifest and optional archive containing screenshots, UI trees, logs, and traces.
 - `FailureAnalyzer`: Classifies failures as planning issue, execution issue, environment issue, verification issue, or unknown.
 
@@ -32,5 +32,6 @@ If rich Markdown/JSON report generation fails after a task run, `ReportGenerator
 ## Design Decisions
 
 - Markdown and JSON reports are part of the design because they are easy to inspect in CI and IDEs.
+- Report artifacts are stored below `output.runs_dir/<run-id>` so installed CLI usage does not create report files in the caller's current directory.
 - HTML report generation is intentionally out of scope.
 - Failure analysis starts rule-assisted and can later include LLM-assisted explanations.

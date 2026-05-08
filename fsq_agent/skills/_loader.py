@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fsq_agent.models import AutoTestAgentError, SkillBundle, SkillConfig
+from fsq_agent.models import FsqAgentError, SkillBundle, SkillConfig
 
 
 class SkillLoader:
@@ -20,7 +20,7 @@ class SkillLoader:
             return SkillBundle(name=config.name, description=config.description, kind=config.kind, instructions=config.content)
         if config.path is None:
             if config.required:
-                raise AutoTestAgentError("Required skill path is missing.", context={"skill": config.name})
+                raise FsqAgentError("Required skill path is missing.", context={"skill": config.name})
             return SkillBundle(
                 name=config.name,
                 description=config.description,
@@ -30,7 +30,7 @@ class SkillLoader:
         path = config.path if config.path.is_absolute() else self.root / config.path
         if not path.exists():
             if config.required:
-                raise AutoTestAgentError("Required skill file does not exist.", context={"path": str(path)})
+                raise FsqAgentError("Required skill file does not exist.", context={"path": str(path)})
             return SkillBundle(
                 name=config.name,
                 description=config.description,

@@ -1,4 +1,4 @@
-# Auto Test Agent Project Guide
+# fsq-agent Project Guide
 
 This repository uses spec-driven development. Implementation must not start until the relevant module SPEC files are reviewed and confirmed.
 

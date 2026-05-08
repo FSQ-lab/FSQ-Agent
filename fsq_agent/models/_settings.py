@@ -29,7 +29,7 @@ class LoggingSettings(BaseModel):
 class AgentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = "auto-test-agent"
+    name: str = "fsq-agent"
     model: str = "gpt-5.4"
     max_steps: int = Field(default=50, ge=1)
     step_timeout_seconds: int = Field(default=60, ge=1)
@@ -60,6 +60,20 @@ class ShellSettings(BaseModel):
     working_dir: Path = Path(".")
 
 
+class WorkspaceSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root_dir: Path | None = None
+    marker_file: str = ".fsq-agent-workspace"
+    auto_init: bool = True
+
+
+class CaseSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dir: Path = Path("./cases")
+
+
 class ObservationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -71,7 +85,5 @@ class ObservationSettings(BaseModel):
 class OutputSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    logs_dir: Path = Path("./logs")
-    reports_dir: Path = Path("./reports")
-    screenshots_dir: Path = Path("./screenshots")
-    traces_dir: Path = Path("./logs/traces")
+    root_dir: Path = Path("output")
+    runs_dir: Path = Path("runs")

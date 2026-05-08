@@ -7,9 +7,9 @@ from fsq_agent.report._failure_analysis import FailureAnalyzer
 
 
 class ReportGenerator:
-    def __init__(self, reports_dir: Path, evidence_bundler: EvidenceBundler | None = None) -> None:
-        self.reports_dir = reports_dir
-        self.evidence_bundler = evidence_bundler or EvidenceBundler(reports_dir)
+    def __init__(self, runs_dir: Path, evidence_bundler: EvidenceBundler | None = None) -> None:
+        self.runs_dir = runs_dir
+        self.evidence_bundler = evidence_bundler or EvidenceBundler(runs_dir)
         self.failure_analyzer = FailureAnalyzer()
 
     def generate(
@@ -19,7 +19,7 @@ class ReportGenerator:
         steps: list[StepResult],
         verification: VerificationResult,
     ) -> ReportArtifact:
-        report_dir = self.reports_dir / run_id
+        report_dir = self.runs_dir / run_id
         report_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = self.evidence_bundler.create_manifest(run_id, steps)
         report_path = report_dir / "report.md"

@@ -3,9 +3,9 @@ requires = ["hatchling>=1.24.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "auto-test-agent"
+name = "fsq-agent"
 version = "0.1.0"
-description = "Goal-driven automated testing agent built around OpenAI Agents SDK, Azure OpenAI, MCP, CLI execution, observation, and reporting."
+description = "Goal-driven FSQ automated testing agent built around OpenAI Agents SDK, Azure OpenAI, MCP, CLI execution, observation, and reporting."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -32,7 +32,7 @@ dev = [
 ]
 
 [project.scripts]
-auto-test-agent = "fsq_agent.cli:main"
+fsq-agent = "fsq_agent.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["fsq_agent"]

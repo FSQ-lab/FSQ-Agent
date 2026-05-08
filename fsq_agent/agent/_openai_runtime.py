@@ -164,7 +164,7 @@ class OpenAIAgentsRuntime:
 
     def _build_instructions(self, knowledge: KnowledgeBundle, skills: list[SkillBundle]) -> str:
         lines = [
-            "You are Auto Test Agent, a non-interactive goal-driven testing agent.",
+            "You are fsq-agent, a non-interactive goal-driven testing agent.",
             "Your job is to complete exactly one user-provided automation task by using configured MCP servers, local tools, and loaded skills.",
             "The user normally provides only a task description. Treat user-provided acceptance criteria as optional extra constraints, not required input.",
             "Before taking external actions, derive the acceptance criteria from the task description, private knowledge, matched flow templates, and loaded skills.",

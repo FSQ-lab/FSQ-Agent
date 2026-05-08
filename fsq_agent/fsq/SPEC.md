@@ -12,7 +12,7 @@ Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository and conv
 
 Current `__init__.py` exports via `__all__`:
 
-- `FsqCaseLoader`: Loads two-document `.codex.yaml` FSQ cases.
+- `FsqCaseLoader`: Loads two-document `.codex.yaml` FSQ cases from explicit paths or the configured read-only case directory.
 - `FsqTaskAdapter`: Converts an `FsqCase` into the project `Task` model.
 - `is_fsq_case_file`: Detects FSQ case file names.
 
@@ -30,6 +30,7 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Missing comm
 ## Design Decisions
 
 - `.codex.yaml` is the canonical test case input format.
+- Configured `cases.dir` is treated as read-only input. Task execution may read FSQ case files from it, but generated files and evidence must be written under the output root.
 - Markdown conversion reports are intentionally ignored and are not loaded as task inputs.
 - FSQ commands are reference flow hints rather than a mandatory deterministic script.
 - Locators and assertions are preserved in the rendered task description so the agent can prefer them while still handling optional dialogs, missing setup, or extra recovery steps.

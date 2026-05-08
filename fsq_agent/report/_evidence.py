@@ -5,11 +5,11 @@ from fsq_agent.models import StepResult
 
 
 class EvidenceBundler:
-    def __init__(self, reports_dir: Path) -> None:
-        self.reports_dir = reports_dir
+    def __init__(self, runs_dir: Path) -> None:
+        self.runs_dir = runs_dir
 
     def create_manifest(self, run_id: str, steps: list[StepResult]) -> Path:
-        path = self.reports_dir / run_id / "evidence-manifest.json"
+        path = self.runs_dir / run_id / "evidence-manifest.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         manifest = {
             "run_id": run_id,

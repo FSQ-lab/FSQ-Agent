@@ -1,4 +1,4 @@
-from fsq_agent.agent import AutoTestAgent
+from fsq_agent.agent import FsqAgent
 from fsq_agent.models import Task, TaskResult
 
-__all__ = ["AutoTestAgent", "Task", "TaskResult"]
+__all__ = ["FsqAgent", "Task", "TaskResult"]

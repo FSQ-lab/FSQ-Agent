@@ -23,7 +23,7 @@ Current `__init__.py` exports via `__all__`:
 
 ## Error Handling
 
-Missing optional skill references are returned as skill warnings. Invalid or missing required skill files raise `AutoTestAgentError` subclasses from `models` with the failing path and skill name. Inline skill bundles are accepted as descriptive instructions and do not imply shell execution authority.
+Missing optional skill references are returned as skill warnings. Invalid or missing required skill files raise `FsqAgentError` subclasses from `models` with the failing path and skill name. Inline skill bundles are accepted as descriptive instructions and do not imply shell execution authority.
 
 ## Design Decisions
 

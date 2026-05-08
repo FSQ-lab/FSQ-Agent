@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Auto Test Agent",
+      "name": "fsq-agent",
       "type": "debugpy",
       "request": "launch",
       "module": "fsq_agent.cli",

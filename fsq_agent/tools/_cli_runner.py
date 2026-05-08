@@ -1,13 +1,15 @@
 import asyncio
 import time
 from collections.abc import Mapping
+from pathlib import Path
 
 from fsq_agent.models import CLIToolConfig, ToolExecutionError, ToolResult
 
 
 class CLIRunner:
-    def __init__(self, cli_tools: list[CLIToolConfig]) -> None:
+    def __init__(self, cli_tools: list[CLIToolConfig], cwd: Path | None = None) -> None:
         self._tools = {tool.name: tool for tool in cli_tools}
+        self.cwd = cwd
 
     def list_tools(self) -> list[CLIToolConfig]:
         return list(self._tools.values())
@@ -37,6 +39,7 @@ class CLIRunner:
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
+                cwd=str(self.cwd) if self.cwd is not None else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

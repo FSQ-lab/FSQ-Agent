@@ -5,7 +5,7 @@ import os
 import yaml
 from pydantic import ValidationError
 
-from fsq_agent.config._paths import resolve_output_dirs
+from fsq_agent.config._paths import resolve_runtime_paths
 from fsq_agent.config._settings import Settings
 from fsq_agent.models import ConfigurationError
 
@@ -32,7 +32,7 @@ def _find_default_config() -> Path | None:
     return None
 
 
-def load_settings(path: str | Path | None = None) -> Settings:
+def load_settings(path: str | Path | None = None, workspace: str | Path | None = None) -> Settings:
     config_path = Path(path) if path is not None else _find_default_config()
     _load_env_files(config_path)
     data = _read_yaml(config_path) if config_path else {}
@@ -40,8 +40,11 @@ def load_settings(path: str | Path | None = None) -> Settings:
         settings = Settings.model_validate(data)
     except ValidationError as exc:
         raise ConfigurationError("Invalid configuration.", context={"errors": exc.errors()}) from exc
+    if workspace is not None:
+        settings.workspace.root_dir = Path(workspace)
     _normalize_openai_base_url(settings)
-    resolve_output_dirs(settings)
+    base_dir = config_path.parent if config_path is not None else Path.cwd()
+    resolve_runtime_paths(settings, base_dir)
     return settings
 
 
@@ -128,4 +131,10 @@ def validate_runtime_settings(settings: Settings) -> None:
             raise ConfigurationError(
                 "Shell working directory must exist.",
                 context={"working_dir": str(settings.shell.working_dir)},
+            )
+        workspace_root = settings.workspace.root_dir
+        if workspace_root is None or workspace_root not in (settings.shell.working_dir, *settings.shell.working_dir.parents):
+            raise ConfigurationError(
+                "Shell working directory must stay inside the fsq-agent workspace.",
+                context={"working_dir": str(settings.shell.working_dir), "workspace": str(workspace_root)},
             )

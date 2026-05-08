@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Own all shared data structures, configuration value models, result objects, tool metadata, skill metadata, report metadata, and exception classes used across Auto Test Agent. This module is the only place where cross-module types and custom exceptions are defined.
+Own all shared data structures, configuration value models, result objects, tool metadata, skill metadata, report metadata, and exception classes used across fsq-agent. This module is the only place where cross-module types and custom exceptions are defined.
 
 ## Dependencies
 
@@ -33,10 +33,12 @@ Current `__init__.py` exports via `__all__`:
 - `SkillConfig`: Pydantic model for one configured automation skill source.
 - `SkillBundle`: Pydantic model containing loaded skill instructions, optional files, descriptions, and warnings.
 - `AgentSettings`: Pydantic model for model name, step limits, timeouts, and retry defaults.
+- `WorkspaceSettings`: Pydantic model for the managed fsq-agent workspace root, marker file name, and auto-initialization behavior.
+- `CaseSettings`: Pydantic model for the read-only FSQ case directory.
 - `ShellSettings`: Pydantic model for optional SDK `ShellTool` execution, including disabled-by-default local shell execution, `allowlist` mode, explicit high-trust `allow_all` mode, timeout, and working directory.
 - `ObservationSettings`: Pydantic model for screenshot, UI tree, and logging configuration.
-- `OutputSettings`: Pydantic model for logs, reports, screenshots, and trace directories.
-- `AutoTestAgentError`: Base exception for all project errors.
+- `OutputSettings`: Pydantic model for the managed output root and per-run report directory. All logs, reports, screenshots, traces, and generated files must live under the output root.
+- `FsqAgentError`: Base exception for all project errors.
 - `ConfigurationError`: Raised when configuration is missing or invalid.
 - `PlanningError`: Raised when a task cannot be converted into an executable plan.
 - `ToolExecutionError`: Raised when a tool call fails after retries or returns invalid output.
@@ -59,7 +61,7 @@ Current `__init__.py` exports via `__all__`:
 
 ## Error Handling
 
-All custom exceptions inherit from `AutoTestAgentError`. Exceptions carry concise human-readable messages and optional structured context fields where useful. Other modules must import exception classes from this module rather than defining their own.
+All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise human-readable messages and optional structured context fields where useful. Other modules must import exception classes from this module rather than defining their own.
 
 ## Design Decisions
 

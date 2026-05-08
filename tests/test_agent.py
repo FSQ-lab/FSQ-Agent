@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from fsq_agent import AutoTestAgent, Task
+from fsq_agent import FsqAgent, Task
 from fsq_agent.models import ConfigurationError
 
 
@@ -18,10 +18,12 @@ observation:
   ui_tree:
     enabled: false
 output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
+  root_dir: output
+  runs_dir: runs
+workspace:
+  root_dir: workspace
+cases:
+  dir: cases
 knowledge_dir: knowledge
 """,
         encoding="utf-8",
@@ -34,4 +36,4 @@ knowledge_dir: knowledge
     )
 
     with pytest.raises(ConfigurationError, match="OpenAI Agents SDK must be enabled"):
-        await AutoTestAgent.from_config(config_path).run(task)
+        await FsqAgent.from_config(config_path).run(task)

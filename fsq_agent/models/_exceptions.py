@@ -1,28 +1,28 @@
-class AutoTestAgentError(Exception):
+class FsqAgentError(Exception):
     def __init__(self, message: str, *, context: dict[str, object] | None = None) -> None:
         super().__init__(message)
         self.context = context or {}
 
 
-class ConfigurationError(AutoTestAgentError):
+class ConfigurationError(FsqAgentError):
     pass
 
 
-class PlanningError(AutoTestAgentError):
+class PlanningError(FsqAgentError):
     pass
 
 
-class ToolExecutionError(AutoTestAgentError):
+class ToolExecutionError(FsqAgentError):
     pass
 
 
-class ObservationError(AutoTestAgentError):
+class ObservationError(FsqAgentError):
     pass
 
 
-class VerificationError(AutoTestAgentError):
+class VerificationError(FsqAgentError):
     pass
 
 
-class ReportGenerationError(AutoTestAgentError):
+class ReportGenerationError(FsqAgentError):
     pass

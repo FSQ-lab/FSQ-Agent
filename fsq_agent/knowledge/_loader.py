@@ -4,7 +4,7 @@ from typing import Any
 
 import yaml
 
-from fsq_agent.models import AutoTestAgentError, KnowledgeBundle, Task
+from fsq_agent.models import FsqAgentError, KnowledgeBundle, Task
 
 
 class PrivateKnowledgeLoader:
@@ -22,7 +22,7 @@ class PrivateKnowledgeLoader:
             try:
                 items[reference] = self._load_path(path)
             except OSError as exc:
-                raise AutoTestAgentError("Unable to load knowledge reference.", context={"path": str(path)}) from exc
+                raise FsqAgentError("Unable to load knowledge reference.", context={"path": str(path)}) from exc
         return KnowledgeBundle(items=items, warnings=warnings)
 
     def _load_path(self, path: Path) -> Any:

@@ -5,6 +5,8 @@ __pycache__/
 .ruff_cache/
 .env
 config.local.yaml
+cases/
+.fsq-agent-workspace/
 logs/
 log/
 output/

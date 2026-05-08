@@ -21,11 +21,12 @@ Current `__init__.py` exports via `__all__`:
 
 Current commands:
 
-- `auto-test-agent validate-config --config PATH`: Validate Azure OpenAI, OpenAI Agents SDK, MCP, shell, skills, CLI, and output settings without running a task.
-- `auto-test-agent run --task PATH`: Run one `.codex.yaml` FSQ case through the OpenAI Agents SDK runtime.
-- `auto-test-agent run-batch --tasks PATH --parallel N`: Run a directory tree of `.codex.yaml` FSQ cases with bounded concurrency.
-- `auto-test-agent capabilities`: Print discovered MCP, CLI, and file operation capabilities.
-- `auto-test-agent report --run-id ID --format FORMAT`: Regenerate a report for a previous run.
+- `fsq-agent init --config PATH --workspace PATH`: Initialize and mark the fsq-agent workspace.
+- `fsq-agent validate-config --config PATH --workspace PATH`: Validate Azure OpenAI, OpenAI Agents SDK, MCP, shell, skills, CLI, workspace, cases, and output settings without running a task.
+- `fsq-agent run --task PATH --config PATH --workspace PATH`: Run one `.codex.yaml` FSQ case through the OpenAI Agents SDK runtime. Relative task paths resolve against `cases.dir` first.
+- `fsq-agent run-batch --tasks PATH --parallel N --config PATH --workspace PATH`: Run a directory tree of `.codex.yaml` FSQ cases with bounded concurrency. If `--tasks` is omitted, the command scans `cases.dir`.
+- `fsq-agent capabilities --config PATH --workspace PATH`: Print discovered MCP, CLI, and file operation capabilities.
+- `fsq-agent report --run-id ID --format FORMAT --config PATH --workspace PATH`: Print a report from the configured workspace output runs directory.
 
 ## Internal Structure
 
@@ -38,7 +39,7 @@ Current commands:
 
 ## Error Handling
 
-CLI commands catch `AutoTestAgentError` subclasses from `models`, render concise user-facing messages, and exit nonzero. Unexpected exceptions are logged with trace details and summarized in the console.
+CLI commands catch `FsqAgentError` subclasses from `models`, render concise user-facing messages, and exit nonzero. Unexpected exceptions are logged with trace details and summarized in the console.
 
 ## Design Decisions
 

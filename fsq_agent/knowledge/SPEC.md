@@ -26,7 +26,7 @@ Current `__init__.py` exports via `__all__`:
 
 ## Error Handling
 
-Missing optional knowledge references are recorded as agent context warnings. Invalid required knowledge files raise `AutoTestAgentError` subclasses from `models` with the failing path and reference name.
+Missing optional knowledge references are recorded as agent context warnings. Invalid required knowledge files raise `FsqAgentError` subclasses from `models` with the failing path and reference name.
 
 ## Design Decisions
 

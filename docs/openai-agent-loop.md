@@ -1,11 +1,11 @@
 # OpenAI Agent Task Loop
 
-This project delegates the model/tool loop to OpenAI Agents SDK. Auto Test Agent does not reimplement a Responses API function-call loop. Instead, it prepares the runtime context, starts one SDK run, and then verifies the structured final output.
+This project delegates the model/tool loop to OpenAI Agents SDK. fsq-agent does not reimplement a Responses API function-call loop. Instead, it prepares the runtime context, starts one SDK run, and then verifies the structured final output.
 
 ## High-Level Flow
 
 1. The CLI loads a task file into `Task`. Only `description` is required.
-2. `AutoTestAgent.run` loads private knowledge, matched flow templates, and configured skills.
+2. `FsqAgent.run` loads private knowledge, matched flow templates, and configured skills.
 3. `OpenAIAgentsRuntime.run_task` validates Azure OpenAI and SDK settings.
 4. The runtime creates an `AsyncOpenAI` client and wraps it in `OpenAIProvider`.
 5. The runtime enters configured MCP servers and builds local SDK tools.
@@ -52,7 +52,7 @@ Structured final JSON
 
 ## Project Responsibilities
 
-Auto Test Agent owns these parts around the SDK loop:
+fsq-agent owns these parts around the SDK loop:
 
 - Build the task input from `Task.description` and optional metadata.
 - Load relevant knowledge and flow templates before the run.
@@ -102,7 +102,7 @@ The required final JSON shape is:
 OpenAI Agents SDK already provides the loop runner. Rebuilding the loop in this project would duplicate SDK behavior and increase the chance of relying on unstable or invented API details. The project boundary is therefore:
 
 - SDK runner: turn continuation and tool dispatch.
-- Auto Test Agent: task context, tool configuration, verification, reporting, and failure handling.
+- fsq-agent: task context, tool configuration, verification, reporting, and failure handling.
 
 ## Failure Handling
 

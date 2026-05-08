@@ -6,20 +6,47 @@ from fsq_agent.models import ToolExecutionError, ToolResult
 
 
 class FileOps:
-    def __init__(self, root: Path | None = None) -> None:
-        self.root = (root or Path.cwd()).resolve()
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        read_roots: list[Path] | None = None,
+        write_root: Path | None = None,
+    ) -> None:
+        default_root = (root or Path.cwd()).resolve()
+        self.read_roots = [path.resolve() for path in (read_roots or [default_root])]
+        self.write_root = (write_root or default_root).resolve()
 
-    def _resolve_scoped(self, path_value: object) -> Path:
+    def _is_inside(self, path: Path, root: Path) -> bool:
+        return root in (path, *path.parents)
+
+    def _resolve_read(self, path_value: object) -> Path:
         if not isinstance(path_value, str):
             raise ToolExecutionError("File path must be a string.")
-        path = (self.root / path_value).resolve()
-        if self.root not in (path, *path.parents):
-            raise ToolExecutionError("File path is outside the allowed root.", context={"path": str(path)})
+        raw_path = Path(path_value)
+        if raw_path.is_absolute():
+            path = raw_path.resolve()
+            if any(self._is_inside(path, root) for root in self.read_roots):
+                return path
+            raise ToolExecutionError("File path is outside the allowed read roots.", context={"path": str(path)})
+        for root in self.read_roots:
+            candidate = (root / raw_path).resolve()
+            if self._is_inside(candidate, root) and candidate.exists():
+                return candidate
+        return (self.read_roots[0] / raw_path).resolve()
+
+    def _resolve_write(self, path_value: object) -> Path:
+        if not isinstance(path_value, str):
+            raise ToolExecutionError("File path must be a string.")
+        raw_path = Path(path_value)
+        path = raw_path.expanduser().resolve() if raw_path.is_absolute() else (self.write_root / raw_path).resolve()
+        if not self._is_inside(path, self.write_root):
+            raise ToolExecutionError("File path is outside the allowed write root.", context={"path": str(path)})
         return path
 
     async def read_text(self, arguments: dict[str, Any]) -> ToolResult:
         started = time.perf_counter()
-        path = self._resolve_scoped(arguments.get("path"))
+        path = self._resolve_read(arguments.get("path"))
         try:
             content = path.read_text(encoding=str(arguments.get("encoding", "utf-8")))
         except OSError as exc:
@@ -30,7 +57,7 @@ class FileOps:
 
     async def write_text(self, arguments: dict[str, Any]) -> ToolResult:
         started = time.perf_counter()
-        path = self._resolve_scoped(arguments.get("path"))
+        path = self._resolve_write(arguments.get("path"))
         content = arguments.get("content", "")
         if not isinstance(content, str):
             raise ToolExecutionError("File content must be a string.")

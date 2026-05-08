@@ -1,6 +1,6 @@
 from fsq_agent.models._exceptions import (
-    AutoTestAgentError,
     ConfigurationError,
+    FsqAgentError,
     ObservationError,
     PlanningError,
     ReportGenerationError,
@@ -10,7 +10,15 @@ from fsq_agent.models._exceptions import (
 from fsq_agent.models._fsq import FsqCase, FsqCaseConfig, FsqPlatform
 from fsq_agent.models._knowledge import KnowledgeBundle
 from fsq_agent.models._report import ReportArtifact
-from fsq_agent.models._settings import AgentSettings, ObservationSettings, OpenAIAgentsSettings, OutputSettings, ShellSettings
+from fsq_agent.models._settings import (
+    AgentSettings,
+    CaseSettings,
+    ObservationSettings,
+    OpenAIAgentsSettings,
+    OutputSettings,
+    ShellSettings,
+    WorkspaceSettings,
+)
 from fsq_agent.models._skills import SkillBundle, SkillConfig
 from fsq_agent.models._task import (
     ExecutionPlan,
@@ -53,10 +61,12 @@ __all__ = [
     "SkillConfig",
     "SkillBundle",
     "AgentSettings",
+    "WorkspaceSettings",
+    "CaseSettings",
     "ObservationSettings",
     "OutputSettings",
     "ShellSettings",
-    "AutoTestAgentError",
+    "FsqAgentError",
     "ConfigurationError",
     "PlanningError",
     "ToolExecutionError",

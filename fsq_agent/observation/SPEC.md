@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Capture and persist execution evidence after each step, including screenshots, UI element trees, structured logs, and trace events.
+Capture and persist execution evidence under the fsq-agent output directory after each step, including screenshots, UI element trees, structured logs, and trace events.
 
 ## Dependencies
 
@@ -33,5 +33,6 @@ Observation failures that do not invalidate task execution should be recorded as
 ## Design Decisions
 
 - Evidence capture is separate from tool execution so failures can be diagnosed independently.
+- Screenshots, trace events, and structured logs must be configured below `output.root_dir` so installed CLI usage does not scatter artifacts across user directories.
 - The initial target platform is Windows, but backend boundaries allow future macOS and Linux support.
 - Each step should have a stable evidence manifest entry even when screenshot or UI tree capture is disabled.

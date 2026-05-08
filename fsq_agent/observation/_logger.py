@@ -5,12 +5,12 @@ from typing import Any
 
 
 class ExecutionLogger:
-    def __init__(self, logs_dir: Path) -> None:
-        self.logs_dir = logs_dir
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, log_root: Path) -> None:
+        self.log_root = log_root
+        self.log_root.mkdir(parents=True, exist_ok=True)
 
     def write_event(self, run_id: str, event: str, payload: dict[str, Any]) -> None:
-        path = self.logs_dir / f"{run_id}.jsonl"
+        path = self.log_root / f"{run_id}.jsonl"
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "run_id": run_id,

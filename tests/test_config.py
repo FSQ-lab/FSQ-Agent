@@ -6,10 +6,25 @@ from fsq_agent.config import load_settings, validate_runtime_settings
 from fsq_agent.models import ConfigurationError
 
 
+def _base_config(tmp_path: Path, body: str = "") -> str:
+    return f"""
+workspace:
+  root_dir: {tmp_path.as_posix()}/workspace
+cases:
+  dir: cases
+output:
+  root_dir: output
+  runs_dir: runs
+{body}
+"""
+
+
 def test_load_settings_from_yaml(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 agent:
   name: test-agent
 cli_tools:
@@ -20,12 +35,8 @@ observation:
     enabled: false
   ui_tree:
     enabled: false
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
 """,
+        ),
         encoding="utf-8",
     )
 
@@ -33,13 +44,30 @@ output:
 
     assert settings.agent.name == "test-agent"
     assert settings.cli_tools[0].name == "echo"
-    assert settings.output.logs_dir.exists()
+    assert settings.workspace.root_dir == tmp_path / "workspace"
+    assert (settings.workspace.root_dir / ".fsq-agent-workspace").exists()
+    assert settings.output.root_dir == tmp_path / "workspace" / "output"
+    assert settings.output.runs_dir.exists()
+    assert settings.cases.dir == tmp_path / "cases"
+
+
+def test_load_settings_rejects_non_empty_unmarked_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "user-file.txt").write_text("do not own this", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(_base_config(tmp_path), encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="not marked"):
+        load_settings(config_path)
 
 
 def test_load_settings_accepts_mcp_tool_validation_policy(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 mcp_tool_validation:
   enabled: true
   invalid_tool_policy: fail_fast
@@ -47,12 +75,8 @@ mcp_tool_validation:
   unsupported_schema_keywords:
     - propertyNames
   fail_when_all_tools_filtered: false
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
 """,
+        ),
         encoding="utf-8",
     )
 
@@ -67,16 +91,14 @@ output:
 def test_openai_agents_endpoint_is_normalized(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   enabled: false
   base_url: https://edgeqa-resource.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
 """,
+        ),
         encoding="utf-8",
     )
 
@@ -88,16 +110,14 @@ output:
 def test_validate_runtime_settings_requires_api_key_when_enabled(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   enabled: true
-  api_key_env: AUTO_TEST_AGENT_MISSING_KEY
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
+  api_key_env: FSQ_AGENT_MISSING_KEY
 """,
+        ),
         encoding="utf-8",
     )
     settings = load_settings(config_path)
@@ -109,15 +129,13 @@ output:
 def test_validate_runtime_settings_requires_openai_agents_enabled(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   enabled: false
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
 """,
+        ),
         encoding="utf-8",
     )
     settings = load_settings(config_path)
@@ -133,19 +151,17 @@ def test_validate_runtime_settings_requires_shell_allowlist_when_enabled(
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   enabled: true
 shell:
   enabled: true
   mode: allowlist
   command_allowlist: []
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
 """,
+        ),
         encoding="utf-8",
     )
     settings = load_settings(config_path)
@@ -161,7 +177,9 @@ def test_validate_runtime_settings_allows_shell_allow_all(
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   enabled: true
 shell:
@@ -169,17 +187,14 @@ shell:
   mode: allow_all
   command_allowlist: []
   working_dir: .
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
 """,
+        ),
         encoding="utf-8",
     )
     settings = load_settings(config_path)
 
     validate_runtime_settings(settings)
+    assert settings.shell.working_dir == settings.workspace.root_dir
 
 
 def test_load_settings_loads_dotenv_from_config_directory(
@@ -189,15 +204,13 @@ def test_load_settings_loads_dotenv_from_config_directory(
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   enabled: true
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
 """,
+        ),
         encoding="utf-8",
     )
     (tmp_path / ".env").write_text("AZURE_OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
@@ -215,15 +228,13 @@ def test_load_settings_dotenv_does_not_override_existing_env(
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "from-process")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   enabled: true
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
 """,
+        ),
         encoding="utf-8",
     )
     (tmp_path / ".env").write_text("AZURE_OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
@@ -235,7 +246,7 @@ output:
 
 def test_load_settings_rejects_invalid_dotenv_line(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("{}", encoding="utf-8")
+    config_path.write_text(_base_config(tmp_path), encoding="utf-8")
     (tmp_path / ".env").write_text("not-a-key-value-line\n", encoding="utf-8")
 
     with pytest.raises(ConfigurationError, match="Invalid .env line"):
@@ -246,23 +257,21 @@ def test_validate_runtime_settings_rejects_placeholder_api_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("AUTO_TEST_AGENT_PLACEHOLDER_KEY", raising=False)
+    monkeypatch.delenv("FSQ_AGENT_PLACEHOLDER_KEY", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   enabled: true
-  api_key_env: AUTO_TEST_AGENT_PLACEHOLDER_KEY
-output:
-  logs_dir: logs
-  reports_dir: reports
-  screenshots_dir: screenshots
-  traces_dir: traces
+  api_key_env: FSQ_AGENT_PLACEHOLDER_KEY
 """,
+        ),
         encoding="utf-8",
     )
     (tmp_path / ".env").write_text(
-        "AUTO_TEST_AGENT_PLACEHOLDER_KEY=replace-with-your-azure-openai-api-key\n",
+        "FSQ_AGENT_PLACEHOLDER_KEY=replace-with-your-azure-openai-api-key\n",
         encoding="utf-8",
     )
     settings = load_settings(config_path)

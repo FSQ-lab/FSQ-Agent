@@ -18,21 +18,22 @@ Coordinate the goal-driven testing workflow using OpenAI Agents SDK: load runtim
 
 Current `__init__.py` exports via `__all__`:
 
-- `AutoTestAgent`: Main orchestration class.
+- `FsqAgent`: Main orchestration class.
 - `OpenAIAgentsRuntime`: Builds and runs an OpenAI Agents SDK `Agent` with Azure OpenAI configuration, tools, MCP servers, skills, turn limits, and tracing policy.
 - `Verifier`: Parses SDK structured final output and converts task status, satisfied criteria, unmet criteria, evidence, and diagnostics into a `VerificationResult`.
 
 Planned signatures:
 
-- `AutoTestAgent.from_config(path: str | Path | None = None) -> AutoTestAgent`
-- `AutoTestAgent.run(task: Task) -> TaskResult`
+- `FsqAgent.from_config(path: str | Path | None = None, workspace: str | Path | None = None) -> FsqAgent`
+- `FsqAgent.from_settings(settings: Settings) -> FsqAgent`
+- `FsqAgent.run(task: Task) -> TaskResult`
 - `OpenAIAgentsRuntime.run_task(task: Task) -> list[StepResult]`
 - `Verifier.verify(task: Task, results: list[StepResult]) -> VerificationResult`
 
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
-- `_core.py`: `AutoTestAgent` orchestration and lifecycle.
+- `_core.py`: `FsqAgent` orchestration and lifecycle.
 - `_openai_runtime.py`: OpenAI Agents SDK client/provider setup, agent construction, MCP context management, MCP validation diagnostic step injection, and `Runner.run` invocation.
 - `_structured_output.py`: Shared parser for the SDK final JSON contract and helpers for structured list fields.
 - `_verifier.py`: Acceptance criteria verification and failure diagnostics.

@@ -15,8 +15,8 @@ Current `__init__.py` exports via `__all__`:
 - `CapabilityRegistry`: Maintains discovered MCP, CLI, and file operation capabilities.
 - `AgentsMCPFactory`: Builds OpenAI Agents SDK MCP server/tool objects from `MCPServerConfig` values, validates discovered local MCP tool schemas, applies manual and automatic tool filters, and exposes validation diagnostics from the latest run.
 - `MCPToolValidator`: Validates local MCP tool schemas against the project's configured strict OpenAI tool schema compatibility policy.
-- `CLIRunner`: Executes configured CLI commands asynchronously with timeout and output capture.
-- `FileOps`: Performs scoped file reads and writes for task inputs, logs, and reports.
+- `CLIRunner`: Executes configured CLI commands asynchronously with timeout, output capture, and a configured workspace current working directory.
+- `FileOps`: Performs scoped file reads and writes. Read roots include configured case, knowledge, and output directories; writes are restricted to the configured output root.
 - `AgentsToolFactory`: Builds OpenAI Agents SDK `FunctionTool` objects for CLI and file operations, plus optional SDK `ShellTool` when configured.
 - `ShellCommandExecutor`: Executes SDK `ShellTool` command requests with configured `allowlist` or explicit `allow_all` command policy.
 - `ToolExecutor`: Compatibility adapter for direct tests and diagnostics; routes `ToolCall` requests to CLI or file operation backends and returns normalized `ToolResult` objects. MCP execution is SDK-only.
@@ -41,7 +41,8 @@ Tool failures are surfaced according to the tool mode. During SDK-managed runs, 
 ## Design Decisions
 
 - The OpenAI Agents SDK runner sees SDK tool objects; diagnostics and CLI `capabilities` see serializable `ToolDefinition` metadata.
-- CLI execution is allowlisted through configuration to avoid arbitrary command execution by default.
+- CLI execution is allowlisted through configuration to avoid arbitrary command execution by default. Configured CLI tools run from the fsq-agent workspace so relative side effects do not land in the user's current directory.
+- File operation tools treat `cases.dir` as read-only input and write generated files only under the output root.
 - Skills remain descriptive instruction files. If shell is enabled, file-backed skills are attached to the SDK `ShellTool` local environment as skill metadata, while command execution is governed by `ShellSettings`.
 - `shell.mode: allow_all` is supported for intentionally unrestricted local runs and should be treated as a high-trust mode.
 - MCP connection lifecycle is delegated to OpenAI Agents SDK context managers and server manager objects. This module only translates project config into SDK objects.
