@@ -6,6 +6,7 @@ from auto_test_agent.models import (
     AgentSettings,
     CLIToolConfig,
     MCPServerConfig,
+    MCPToolValidationSettings,
     ObservationSettings,
     OpenAIAgentsSettings,
     OutputSettings,
@@ -20,6 +21,7 @@ class Settings(BaseModel):
     agent: AgentSettings = Field(default_factory=AgentSettings)
     openai_agents: OpenAIAgentsSettings = Field(default_factory=OpenAIAgentsSettings)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
+    mcp_tool_validation: MCPToolValidationSettings = Field(default_factory=MCPToolValidationSettings)
     cli_tools: list[CLIToolConfig] = Field(default_factory=list)
     shell: ShellSettings = Field(default_factory=ShellSettings)
     skills: list[SkillConfig] = Field(default_factory=list)

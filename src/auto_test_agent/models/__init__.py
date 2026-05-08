@@ -20,7 +20,15 @@ from auto_test_agent.models._task import (
     TaskResult,
     VerificationResult,
 )
-from auto_test_agent.models._tools import CLIToolConfig, MCPServerConfig, ToolCall, ToolDefinition, ToolResult
+from auto_test_agent.models._tools import (
+    CLIToolConfig,
+    MCPServerConfig,
+    MCPToolValidationIssue,
+    MCPToolValidationSettings,
+    ToolCall,
+    ToolDefinition,
+    ToolResult,
+)
 
 __all__ = [
     "Task",
@@ -38,6 +46,8 @@ __all__ = [
     "ToolCall",
     "ToolResult",
     "MCPServerConfig",
+    "MCPToolValidationIssue",
+    "MCPToolValidationSettings",
     "CLIToolConfig",
     "OpenAIAgentsSettings",
     "SkillConfig",

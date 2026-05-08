@@ -45,6 +45,7 @@ class OpenAIAgentsRuntime:
             try:
                 async with AsyncExitStack() as stack:
                     mcp_servers, hosted_tools = await self.mcp_factory.enter_servers(stack)
+                    validation_steps = self._build_mcp_validation_steps()
                     agent = Agent(
                         name=self.settings.agent.name,
                         model=self.settings.openai_agents.model,
@@ -76,7 +77,11 @@ class OpenAIAgentsRuntime:
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         final_output = str(result.final_output)
-        structured_steps = self._build_pre_plan_step_results(final_output, duration_ms)
+        pre_plan_steps = self._build_pre_plan_step_results(final_output, duration_ms)
+        structured_steps = [
+            *validation_steps,
+            *self._offset_step_ids(pre_plan_steps, len(validation_steps)),
+        ]
         return [
             *structured_steps,
             StepResult(
@@ -88,6 +93,32 @@ class OpenAIAgentsRuntime:
                 tool_output=final_output,
             )
         ]
+
+    def _offset_step_ids(self, steps: list[StepResult], offset: int) -> list[StepResult]:
+        if offset <= 0:
+            return steps
+        return [step.model_copy(update={"step_id": step.step_id + offset}) for step in steps]
+
+    def _build_mcp_validation_steps(self) -> list[StepResult]:
+        get_validation_issues = getattr(self.mcp_factory, "get_validation_issues", None)
+        if not callable(get_validation_issues):
+            return []
+        issues = get_validation_issues()
+        steps: list[StepResult] = []
+        for index, issue in enumerate(issues, start=1):
+            outcome = f"Ignored MCP tool `{issue.server_name}.{issue.tool_name}`: {issue.reason}"
+            if issue.schema_path:
+                outcome = f"{outcome} at {issue.schema_path}"
+            steps.append(
+                StepResult(
+                    step_id=index,
+                    status="skipped",
+                    actual_outcome=outcome,
+                    tool_name="mcp_tool_validation",
+                    tool_output=issue.model_dump(mode="json"),
+                )
+            )
+        return steps
 
     def _build_pre_plan_step_results(self, final_output: str, duration_ms: int) -> list[StepResult]:
         payload = parse_structured_output(final_output)

@@ -7,6 +7,36 @@ from pydantic import BaseModel, ConfigDict, Field
 ToolKind = Literal["mcp", "cli", "file"]
 ToolStatus = Literal["success", "failed", "skipped"]
 MCPTransport = Literal["stdio", "streamable_http", "sse", "hosted"]
+MCPInvalidToolPolicy = Literal["auto_ignore", "fail_fast", "warn_only"]
+
+
+class MCPToolValidationSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    invalid_tool_policy: MCPInvalidToolPolicy = "auto_ignore"
+    strict_schema: bool = True
+    unsupported_schema_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "propertyNames",
+            "patternProperties",
+            "dependencies",
+            "dependentSchemas",
+            "unevaluatedProperties",
+            "unevaluatedItems",
+        ]
+    )
+    fail_when_all_tools_filtered: bool = True
+
+
+class MCPToolValidationIssue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    server_name: str
+    tool_name: str
+    reason: str
+    policy: MCPInvalidToolPolicy
+    schema_path: str = ""
 
 
 class MCPServerConfig(BaseModel):

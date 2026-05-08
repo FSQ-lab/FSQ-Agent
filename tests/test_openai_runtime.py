@@ -5,7 +5,7 @@ import pytest
 
 from auto_test_agent.agent import OpenAIAgentsRuntime
 from auto_test_agent.config import Settings
-from auto_test_agent.models import KnowledgeBundle, OpenAIAgentsSettings, Task
+from auto_test_agent.models import KnowledgeBundle, MCPToolValidationIssue, OpenAIAgentsSettings, Task
 
 
 class _EmptyToolFactory:
@@ -16,6 +16,19 @@ class _EmptyToolFactory:
 class _FailingMCPFactory:
     async def enter_servers(self, _stack: AsyncExitStack) -> tuple[list[Any], list[Any]]:
         raise RuntimeError("MCP startup failed")
+
+
+class _DiagnosticMCPFactory:
+    def get_validation_issues(self) -> list[MCPToolValidationIssue]:
+        return [
+            MCPToolValidationIssue(
+                server_name="appium-mcp",
+                tool_name="appium_driver_settings",
+                reason="Unsupported JSON Schema keyword: propertyNames",
+                policy="auto_ignore",
+                schema_path="$.propertyNames",
+            )
+        ]
 
 
 @pytest.mark.asyncio
@@ -84,3 +97,15 @@ def test_runtime_task_input_requests_derived_acceptance_criteria() -> None:
 
     assert "User-provided acceptance criteria: none" in task_input
     assert "Derive acceptance criteria" in task_input
+
+
+def test_runtime_builds_mcp_validation_diagnostic_steps() -> None:
+    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _DiagnosticMCPFactory())
+
+    steps = runtime._build_mcp_validation_steps()
+
+    assert steps[0].status == "skipped"
+    assert steps[0].tool_name == "mcp_tool_validation"
+    assert "appium-mcp.appium_driver_settings" in steps[0].actual_outcome
+    assert steps[0].tool_output["schema_path"] == "$.propertyNames"

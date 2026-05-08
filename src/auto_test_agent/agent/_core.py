@@ -38,7 +38,7 @@ class AutoTestAgent:
         cli_runner = CLIRunner(settings.cli_tools)
         file_ops = FileOps(Path.cwd())
         tool_factory = AgentsToolFactory(cli_runner, file_ops, settings.shell)
-        mcp_factory = AgentsMCPFactory(settings.mcp_servers)
+        mcp_factory = AgentsMCPFactory(settings.mcp_servers, settings.mcp_tool_validation)
         knowledge_loader = PrivateKnowledgeLoader(settings.knowledge_dir)
         flow_manager = FlowTemplateManager(settings.knowledge_dir / "flows")
         skill_loader = SkillLoader(settings.knowledge_dir / "skills")

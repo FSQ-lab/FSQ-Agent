@@ -22,11 +22,13 @@ Current `__init__.py` exports via `__all__`:
 - `TaskResult`: Pydantic model returned by the agent after execution, verification, and report generation.
 - `ReportArtifact`: Pydantic model describing generated report paths and evidence bundle paths.
 - `KnowledgeBundle`: Pydantic model containing loaded private knowledge, matched flow templates, and warnings for agent context.
+- `MCPToolValidationSettings`: Pydantic model controlling startup-time MCP tool compatibility checks, including enabled state, invalid tool policy, strict schema conversion, unsupported schema keyword checks, and all-tools-filtered behavior.
+- `MCPToolValidationIssue`: Pydantic model describing one MCP tool that was ignored or failed validation, including server name, tool name, reason, policy, and schema path.
 - `ToolDefinition`: Pydantic model describing a discovered MCP, CLI, or file operation capability.
 - `ToolCall`: Pydantic model describing a tool invocation request.
 - `ToolResult`: Pydantic model describing a normalized tool invocation response.
 - `OpenAIAgentsSettings`: Pydantic model for OpenAI Agents SDK provider configuration, including Azure OpenAI base URL, API key environment variable, model deployment name, tracing policy, turn limits, and Responses API options.
-- `MCPServerConfig`: Pydantic model for OpenAI Agents SDK MCP configuration. Supports `stdio`, `streamable_http`, `sse`, and `hosted` transports plus approval policy, headers, tool filters, and prompt loading policy.
+- `MCPServerConfig`: Pydantic model for OpenAI Agents SDK MCP configuration. Supports `stdio`, `streamable_http`, `sse`, and `hosted` transports plus approval policy, headers, manual tool filters, and prompt loading policy.
 - `CLIToolConfig`: Pydantic model for configured CLI tools.
 - `SkillConfig`: Pydantic model for one configured automation skill source.
 - `SkillBundle`: Pydantic model containing loaded skill instructions, optional files, descriptions, and warnings.
@@ -47,7 +49,7 @@ Current `__init__.py` exports via `__all__`:
 - `__init__.py`: Public exports only.
 - `_task.py`: Task, plan, step, result, and verification models.
 - `_fsq.py`: FSQ AI Test DSL case metadata and case models.
-- `_tools.py`: Tool metadata, tool call, tool result, MCP and CLI config models.
+- `_tools.py`: Tool metadata, tool call, tool result, MCP validation issue/settings, MCP config, and CLI config models.
 - `_settings.py`: Settings value models.
 - `_skills.py`: Skill configuration and loaded skill bundle models.
 - `_report.py`: Report artifact and evidence models.
@@ -67,3 +69,4 @@ All custom exceptions inherit from `AutoTestAgentError`. Exceptions carry concis
 - OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration that `agent` and `tools` adapt into SDK `Agent`, `FunctionTool`, `MCPServer*`, and hosted tool objects.
 - Skills are descriptive instruction bundles. CLI/shell execution is controlled separately by configured CLI tools or `ShellSettings`.
 - FSQ `.codex.yaml` cases are converted into `Task` descriptions for the agent loop. The parsed FSQ models preserve source metadata and command flow before rendering.
+- MCP tool validation settings are global runtime policy. Per-server `allowed_tools` and `blocked_tools` remain explicit operator controls and are combined with automatically detected invalid tools during MCP server startup.

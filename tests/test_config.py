@@ -36,6 +36,34 @@ output:
     assert settings.output.logs_dir.exists()
 
 
+def test_load_settings_accepts_mcp_tool_validation_policy(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+mcp_tool_validation:
+  enabled: true
+  invalid_tool_policy: fail_fast
+  strict_schema: false
+  unsupported_schema_keywords:
+    - propertyNames
+  fail_when_all_tools_filtered: false
+output:
+  logs_dir: logs
+  reports_dir: reports
+  screenshots_dir: screenshots
+  traces_dir: traces
+""",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.mcp_tool_validation.invalid_tool_policy == "fail_fast"
+    assert settings.mcp_tool_validation.strict_schema is False
+    assert settings.mcp_tool_validation.unsupported_schema_keywords == ["propertyNames"]
+    assert settings.mcp_tool_validation.fail_when_all_tools_filtered is False
+
+
 def test_openai_agents_endpoint_is_normalized(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

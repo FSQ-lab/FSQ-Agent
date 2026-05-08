@@ -33,7 +33,7 @@ Planned signatures:
 
 - `__init__.py`: Public exports only.
 - `_core.py`: `AutoTestAgent` orchestration and lifecycle.
-- `_openai_runtime.py`: OpenAI Agents SDK client/provider setup, agent construction, MCP context management, and `Runner.run` invocation.
+- `_openai_runtime.py`: OpenAI Agents SDK client/provider setup, agent construction, MCP context management, MCP validation diagnostic step injection, and `Runner.run` invocation.
 - `_structured_output.py`: Shared parser for the SDK final JSON contract and helpers for structured list fields.
 - `_verifier.py`: Acceptance criteria verification and failure diagnostics.
 - `SPEC.md`: Module design.
@@ -54,5 +54,6 @@ Configuration errors are raised before task execution when OpenAI Agents SDK is 
 - Skills are descriptive guidance. Command execution is performed only through configured CLI tools, MCP tools, or optional SDK `ShellTool` governed by `ShellSettings`.
 - The final SDK output must be JSON containing `status`, `summary`, `pre_plan`, `plan_updates`, `satisfied_criteria`, `unmet_criteria`, `evidence`, and `errors`.
 - The runtime converts `pre_plan` entries from final JSON into `StepResult` records, then appends one SDK runner summary step containing the raw final output.
+- MCP tool validation diagnostics from startup filtering are prepended as skipped diagnostic `StepResult` records so generated reports explain any automatically ignored tools.
 - Task execution is non-interactive. Any human-in-the-loop SDK feature must be disabled or backed by deterministic programmatic approval.
 - The verifier is independent from the runtime prompt to reduce confirmation bias between intended goal and actual outcome.
