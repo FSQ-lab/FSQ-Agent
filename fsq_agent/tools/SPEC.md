@@ -17,7 +17,7 @@ Current `__init__.py` exports via `__all__`:
 - `MCPToolValidator`: Validates local MCP tool schemas against the project's configured strict OpenAI tool schema compatibility policy.
 - `CLIRunner`: Executes configured CLI commands asynchronously with timeout, output capture, and a configured workspace current working directory.
 - `FileOps`: Performs scoped file reads and writes. Read roots include configured case, knowledge, and output directories; writes are restricted to the configured output root.
-- `AgentsToolFactory`: Builds OpenAI Agents SDK `FunctionTool` objects for CLI and file operations, plus optional SDK `ShellTool` when configured.
+- `AgentsToolFactory`: Builds OpenAI Agents SDK `FunctionTool` objects for CLI and file operations, a progress publication tool for user-visible planning updates, plus optional SDK `ShellTool` when configured.
 - `ShellCommandExecutor`: Executes SDK `ShellTool` command requests with configured `allowlist` or explicit `allow_all` command policy.
 - `ToolExecutor`: Compatibility adapter for direct tests and diagnostics; routes `ToolCall` requests to CLI or file operation backends and returns normalized `ToolResult` objects. MCP execution is SDK-only.
 
@@ -27,7 +27,7 @@ Current `__init__.py` exports via `__all__`:
 - `_registry.py`: Capability discovery and lookup.
 - `_agents_mcp.py`: OpenAI Agents SDK MCP server construction for stdio, Streamable HTTP, SSE, and hosted MCP.
 - `_mcp_tool_validator.py`: Startup-time MCP tool schema compatibility validation and automatic ignore issue generation.
-- `_agents_tools.py`: OpenAI Agents SDK function tool construction for configured local tools.
+- `_agents_tools.py`: OpenAI Agents SDK function tool construction for configured local tools and user-visible progress events.
 - `_shell_executor.py`: Local SDK `ShellTool` executor with command policy enforcement and timeout handling.
 - `_cli_runner.py`: Async subprocess execution and command allowlisting.
 - `_file_ops.py`: Scoped file operations.
@@ -41,6 +41,8 @@ Tool failures are surfaced according to the tool mode. During SDK-managed runs, 
 ## Design Decisions
 
 - The OpenAI Agents SDK runner sees SDK tool objects; diagnostics and CLI `capabilities` see serializable `ToolDefinition` metadata.
+- SDK-managed local tools emit live `RunEvent` values for start, completion, and failure when a run event sink is provided. MCP tool execution remains SDK-owned and is observed through SDK stream events.
+- A `publish_progress` SDK function tool lets the agent report planning, reasoning summaries, and plan updates in a user-visible way without exposing hidden chain-of-thought.
 - CLI execution is allowlisted through configuration to avoid arbitrary command execution by default. Configured CLI tools run from the fsq-agent workspace so relative side effects do not land in the user's current directory.
 - File operation tools treat `cases.dir` as read-only input and write generated files only under the output root.
 - Skills remain descriptive instruction files. If shell is enabled, file-backed skills are attached to the SDK `ShellTool` local environment as skill metadata, while command execution is governed by `ShellSettings`.

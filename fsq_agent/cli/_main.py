@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 
 from fsq_agent.agent import FsqAgent
-from fsq_agent.cli._formatting import console, print_capabilities, print_result
+from fsq_agent.cli._formatting import console, print_capabilities, print_result, print_run_event
 from fsq_agent.cli._task_loader import load_task, load_tasks
 from fsq_agent.config import load_settings, validate_runtime_settings
 from fsq_agent.models import FsqAgentError
@@ -33,11 +33,14 @@ def init(config_path: str | None, workspace_path: str | None) -> None:
 @click.option("--config", "config_path", type=click.Path(exists=False, dir_okay=False), default=None)
 @click.option("--workspace", "workspace_path", type=click.Path(file_okay=False), default=None)
 @click.option("--task", "task_path", type=click.Path(exists=False, dir_okay=False), required=True)
-def run(config_path: str | None, workspace_path: str | None, task_path: str) -> None:
+@click.option("--stream/--no-stream", "stream", default=True, show_default=True)
+@click.option("--stream-format", type=click.Choice(["rich", "jsonl"]), default="rich", show_default=True)
+def run(config_path: str | None, workspace_path: str | None, task_path: str, stream: bool, stream_format: str) -> None:
     try:
         settings = load_settings(config_path, workspace_path)
         task = load_task(task_path, settings.cases.dir)
-        result = asyncio.run(FsqAgent.from_settings(settings).run(task))
+        sink = (lambda event: print_run_event(event, stream_format)) if stream else None
+        result = asyncio.run(FsqAgent.from_settings(settings).run(task, event_sink=sink))
         print_result(result)
     except FsqAgentError as exc:
         console.print(f"Error: {exc}")
@@ -49,7 +52,16 @@ def run(config_path: str | None, workspace_path: str | None, task_path: str) -> 
 @click.option("--workspace", "workspace_path", type=click.Path(file_okay=False), default=None)
 @click.option("--tasks", "tasks_path", type=click.Path(exists=False), default=None)
 @click.option("--parallel", "parallelism", type=int, default=1, show_default=True)
-def run_batch(config_path: str | None, workspace_path: str | None, tasks_path: str | None, parallelism: int) -> None:
+@click.option("--stream/--no-stream", "stream", default=True, show_default=True)
+@click.option("--stream-format", type=click.Choice(["rich", "jsonl"]), default="rich", show_default=True)
+def run_batch(
+    config_path: str | None,
+    workspace_path: str | None,
+    tasks_path: str | None,
+    parallelism: int,
+    stream: bool,
+    stream_format: str,
+) -> None:
     async def _run_all() -> None:
         settings = load_settings(config_path, workspace_path)
         task_root = tasks_path or settings.cases.dir
@@ -57,7 +69,8 @@ def run_batch(config_path: str | None, workspace_path: str | None, tasks_path: s
 
         async def _run_one(task_path_task):
             async with semaphore:
-                return await FsqAgent.from_settings(settings).run(task_path_task)
+                sink = (lambda event: print_run_event(event, stream_format)) if stream else None
+                return await FsqAgent.from_settings(settings).run(task_path_task, event_sink=sink)
 
         results = await asyncio.gather(*[_run_one(task) for task in load_tasks(task_root, settings.cases.dir)])
         for result in results:

@@ -6,7 +6,7 @@ Capture and persist execution evidence under the fsq-agent output directory afte
 
 ## Dependencies
 
-- `models`: Uses `ExecutionStep`, `StepResult`, `ObservationSettings`, and `ObservationError`.
+- `models`: Uses `ExecutionStep`, `StepResult`, `RunEvent`, `ObservationSettings`, and `ObservationError`.
 
 ## Public Interface
 
@@ -14,7 +14,7 @@ Current `__init__.py` exports via `__all__`:
 
 - `ScreenCapture`: Captures screenshots to configured storage and returns evidence paths.
 - `UITreeExtractor`: Extracts accessibility or window control trees for the current application state.
-- `ExecutionLogger`: Writes structured step logs and run-level trace events.
+- `ExecutionLogger`: Writes structured step logs, run-level trace events, and per-run live event timelines.
 - `ObservationRecorder`: Coordinates screenshot, UI tree, timing, and log capture for each execution step.
 
 ## Internal Structure
@@ -34,5 +34,6 @@ Observation failures that do not invalidate task execution should be recorded as
 
 - Evidence capture is separate from tool execution so failures can be diagnosed independently.
 - Screenshots, trace events, and structured logs must be configured below `output.root_dir` so installed CLI usage does not scatter artifacts across user directories.
+- Live run event timelines are persisted as `output.runs_dir/<run-id>/events.jsonl` so interrupted or long-running tasks can be inspected before final reports are generated.
 - The initial target platform is Windows, but backend boundaries allow future macOS and Linux support.
 - Each step should have a stable evidence manifest entry even when screenshot or UI tree capture is disabled.

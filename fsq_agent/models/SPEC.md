@@ -20,6 +20,8 @@ Current `__init__.py` exports via `__all__`:
 - `StepResult`: Pydantic model for one executed, skipped, failed, or adjusted pre-plan step outcome, timings, evidence references, and error summary.
 - `VerificationResult`: Pydantic model describing whether the task goal was achieved and why.
 - `TaskResult`: Pydantic model returned by the agent after execution, verification, and report generation.
+- `RunEvent`: Pydantic model for one live execution timeline event emitted during a task run, including run/task identity, sequence, timestamp, event type, title, message, optional tool call metadata, output preview, duration, and structured payload.
+- `RunEventSink`: Callable type accepted by orchestration/runtime/tool code to receive `RunEvent` values synchronously or asynchronously.
 - `ReportArtifact`: Pydantic model describing generated report paths and evidence bundle paths.
 - `KnowledgeBundle`: Pydantic model containing loaded private knowledge, matched flow templates, and warnings for agent context.
 - `MCPToolValidationSettings`: Pydantic model controlling startup-time MCP tool compatibility checks, including enabled state, invalid tool policy, strict schema conversion, unsupported schema keyword checks, and all-tools-filtered behavior.
@@ -50,6 +52,7 @@ Current `__init__.py` exports via `__all__`:
 
 - `__init__.py`: Public exports only.
 - `_task.py`: Task, plan, step, result, and verification models.
+- `_events.py`: Live run event model and event sink type alias.
 - `_fsq.py`: FSQ AI Test DSL case metadata and case models.
 - `_tools.py`: Tool metadata, tool call, tool result, MCP validation issue/settings, MCP config, and CLI config models.
 - `_settings.py`: Settings value models.
@@ -68,6 +71,7 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Centralizing types prevents circular imports and inconsistent result schemas.
 - Pydantic is used at boundaries where external inputs, config files, agent output, and tool output enter the system.
 - Result models store evidence paths rather than binary evidence to keep logs and reports lightweight.
+- Live run events are serializable and intentionally store user-visible summaries rather than hidden model chain-of-thought. Tool inputs and outputs may be redacted or preview-truncated by emitters before display or persistence.
 - OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration that `agent` and `tools` adapt into SDK `Agent`, `FunctionTool`, `MCPServer*`, and hosted tool objects.
 - Skills are descriptive instruction bundles. CLI/shell execution is controlled separately by configured CLI tools or `ShellSettings`.
 - FSQ `.codex.yaml` cases are converted into `Task` descriptions for the agent loop. The parsed FSQ models preserve source metadata and command flow before rendering.

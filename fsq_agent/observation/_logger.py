@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from fsq_agent.models import RunEvent
+
 
 class ExecutionLogger:
     def __init__(self, log_root: Path) -> None:
@@ -19,3 +21,9 @@ class ExecutionLogger:
         }
         with path.open("a", encoding="utf-8") as log_file:
             log_file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def write_run_event(self, event: RunEvent) -> None:
+        path = self.log_root / event.run_id / "events.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as log_file:
+            log_file.write(event.model_dump_json() + "\n")

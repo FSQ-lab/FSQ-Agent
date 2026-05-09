@@ -6,6 +6,7 @@ import pytest
 from fsq_agent.models import (
     MCPServerConfig,
     MCPToolValidationSettings,
+    RunEvent,
     ShellSettings,
     SkillBundle,
     ToolCall,
@@ -99,6 +100,22 @@ def test_agents_tool_factory_adds_shell_tool_with_file_backed_skill(tmp_path: Pa
     assert shell_tool.environment["type"] == "local"
     assert shell_tool.environment["skills"][0]["name"] == "browser-cli"
     assert shell_tool.environment["skills"][0]["path"] == str(skill_file)
+
+
+@pytest.mark.asyncio
+async def test_agents_tool_factory_publish_progress_emits_event(tmp_path: Path) -> None:
+    events: list[RunEvent] = []
+    factory = AgentsToolFactory(CLIRunner([]), FileOps(tmp_path))
+    factory.build_tools(run_id="run-1", task_id="task-1", event_sink=events.append)
+
+    output = await factory._publish_progress(
+        None,
+        '{"kind":"planning_update","message":"Checking current screen.","next_action":"Open menu."}',
+    )
+
+    assert output == '{"ok": true}'
+    assert events[0].type == "planning_update"
+    assert events[0].message == "Checking current screen. Next: Open menu."
 
 
 def test_agents_mcp_factory_applies_client_session_timeout() -> None:

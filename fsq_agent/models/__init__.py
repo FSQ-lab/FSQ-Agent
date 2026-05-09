@@ -7,6 +7,7 @@ from fsq_agent.models._exceptions import (
     ToolExecutionError,
     VerificationError,
 )
+from fsq_agent.models._events import RunEvent, RunEventSink
 from fsq_agent.models._fsq import FsqCase, FsqCaseConfig, FsqPlatform
 from fsq_agent.models._knowledge import KnowledgeBundle
 from fsq_agent.models._report import ReportArtifact
@@ -45,6 +46,8 @@ __all__ = [
     "StepResult",
     "VerificationResult",
     "TaskResult",
+    "RunEvent",
+    "RunEventSink",
     "FsqPlatform",
     "FsqCaseConfig",
     "FsqCase",

@@ -43,7 +43,7 @@ async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPat
         acceptance_criteria=["A failed step is returned."],
     )
 
-    results = await runtime.run_task(task, KnowledgeBundle(), [])
+    results = await runtime.run_task(task, KnowledgeBundle(), [], "runtime-failure-2026-05-09_00-00-00")
 
     assert results[0].status == "failed"
     assert results[0].tool_name == "openai_agents.runner"

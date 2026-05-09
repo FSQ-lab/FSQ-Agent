@@ -1,10 +1,11 @@
 import os
 import time
+import inspect
 from contextlib import AsyncExitStack
 from typing import Any
 
 from fsq_agent.config import Settings, validate_runtime_settings
-from fsq_agent.models import ConfigurationError, KnowledgeBundle, SkillBundle, StepResult, Task
+from fsq_agent.models import ConfigurationError, KnowledgeBundle, RunEvent, RunEventSink, SkillBundle, StepResult, Task
 from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory
 
 from fsq_agent.agent._structured_output import coerce_string_list, parse_structured_output
@@ -26,6 +27,8 @@ class OpenAIAgentsRuntime:
         task: Task,
         knowledge: KnowledgeBundle,
         skills: list[SkillBundle],
+        run_id: str,
+        event_sink: RunEventSink | None = None,
     ) -> list[StepResult]:
         validate_runtime_settings(self.settings)
         started = time.perf_counter()
@@ -46,22 +49,60 @@ class OpenAIAgentsRuntime:
                 async with AsyncExitStack() as stack:
                     mcp_servers, hosted_tools = await self.mcp_factory.enter_servers(stack)
                     validation_steps = self._build_mcp_validation_steps()
+                    for step in validation_steps:
+                        await self._emit(
+                            event_sink,
+                            RunEvent(
+                                run_id=run_id,
+                                task_id=task.id,
+                                type="mcp_tools_listed",
+                                title="MCP tool validation",
+                                message=step.actual_outcome,
+                                tool_name=step.tool_name,
+                                payload={"step_id": step.step_id, "tool_output": step.tool_output},
+                            ),
+                        )
                     agent = Agent(
                         name=self.settings.agent.name,
                         model=self.settings.openai_agents.model,
                         instructions=self._build_instructions(knowledge, skills),
-                        tools=[*self.tool_factory.build_tools(skills), *hosted_tools],
+                        tools=[*self.tool_factory.build_tools(skills, run_id=run_id, task_id=task.id, event_sink=event_sink), *hosted_tools],
                         mcp_servers=mcp_servers,
                         mcp_config={"convert_schemas_to_strict": True},
                     )
-                    result = await Runner.run(
+                    await self._emit(
+                        event_sink,
+                        RunEvent(
+                            run_id=run_id,
+                            task_id=task.id,
+                            type="planning_started",
+                            title="Planning started",
+                            message="The agent is deriving success criteria and preparing the first actions.",
+                        ),
+                    )
+                    result = Runner.run_streamed(
                         agent,
                         input=self._build_task_input(task),
                         max_turns=self.settings.openai_agents.max_turns,
                         run_config=RunConfig(model_provider=provider),
                     )
+                    async for event in result.stream_events():
+                        run_event = self._map_stream_event(event, run_id, task.id)
+                        if run_event:
+                            await self._emit(event_sink, run_event)
             except Exception as exc:
                 duration_ms = int((time.perf_counter() - started) * 1000)
+                await self._emit(
+                    event_sink,
+                    RunEvent(
+                        run_id=run_id,
+                        task_id=task.id,
+                        type="run_failed",
+                        title="SDK run failed",
+                        message=str(exc),
+                        duration_ms=duration_ms,
+                    ),
+                )
                 return [
                     StepResult(
                         step_id=1,
@@ -93,6 +134,120 @@ class OpenAIAgentsRuntime:
                 tool_output=final_output,
             )
         ]
+
+    async def _emit(self, event_sink: RunEventSink | None, event: RunEvent) -> None:
+        if not event_sink:
+            return
+        result = event_sink(event)
+        if inspect.isawaitable(result):
+            await result
+
+    def _map_stream_event(self, event: Any, run_id: str, task_id: str) -> RunEvent | None:
+        event_type = getattr(event, "type", "")
+        if event_type == "agent_updated_stream_event":
+            new_agent = getattr(event, "new_agent", None)
+            agent_name = getattr(new_agent, "name", "agent")
+            return RunEvent(run_id=run_id, task_id=task_id, type="agent_started", title="Agent updated", message=str(agent_name))
+        if event_type != "run_item_stream_event":
+            return None
+
+        name = getattr(event, "name", "")
+        item = getattr(event, "item", None)
+        if name == "tool_called":
+            return RunEvent(
+                run_id=run_id,
+                task_id=task_id,
+                type="tool_call_started",
+                title="Tool call started",
+                message=self._tool_call_message(item),
+                tool_name=self._tool_name(item),
+                tool_call_id=self._tool_call_id(item),
+                tool_arguments=self._tool_arguments(item),
+            )
+        if name == "tool_output":
+            return RunEvent(
+                run_id=run_id,
+                task_id=task_id,
+                type="tool_call_completed",
+                title="Tool call completed",
+                message=self._tool_output_message(item),
+                tool_call_id=self._tool_call_id(item),
+                tool_output_preview=self._preview(getattr(item, "output", None)),
+            )
+        if name == "reasoning_item_created":
+            summary = self._reasoning_summary(item)
+            return RunEvent(run_id=run_id, task_id=task_id, type="reasoning_summary", title="Reasoning summary", message=summary)
+        if name == "mcp_list_tools":
+            return RunEvent(
+                run_id=run_id,
+                task_id=task_id,
+                type="mcp_tools_listed",
+                title="MCP tools listed",
+                message=self._preview(getattr(item, "raw_item", item)),
+            )
+        if name == "message_output_created":
+            return RunEvent(
+                run_id=run_id,
+                task_id=task_id,
+                type="planning_update",
+                title="Agent message",
+                message=self._preview(getattr(item, "raw_item", item)),
+            )
+        return None
+
+    def _tool_name(self, item: Any) -> str | None:
+        value = getattr(item, "tool_name", None)
+        if value:
+            return str(value)
+        raw_item = getattr(item, "raw_item", None)
+        if isinstance(raw_item, dict):
+            return raw_item.get("name")
+        return str(getattr(raw_item, "name", "")) or None
+
+    def _tool_call_id(self, item: Any) -> str | None:
+        value = getattr(item, "call_id", None)
+        if value:
+            return str(value)
+        raw_item = getattr(item, "raw_item", None)
+        if isinstance(raw_item, dict):
+            return str(raw_item.get("call_id") or raw_item.get("id") or "") or None
+        return str(getattr(raw_item, "call_id", None) or getattr(raw_item, "id", "")) or None
+
+    def _tool_arguments(self, item: Any) -> dict[str, Any] | str | None:
+        raw_item = getattr(item, "raw_item", None)
+        if isinstance(raw_item, dict):
+            return self._redact(raw_item.get("arguments") or raw_item.get("input") or raw_item)
+        arguments = getattr(raw_item, "arguments", None) or getattr(raw_item, "input", None)
+        return self._redact(arguments) if arguments is not None else None
+
+    def _tool_call_message(self, item: Any) -> str:
+        tool_name = self._tool_name(item) or "tool"
+        return f"Calling {tool_name}."
+
+    def _tool_output_message(self, item: Any) -> str:
+        return "Tool returned output."
+
+    def _reasoning_summary(self, item: Any) -> str:
+        raw_item = getattr(item, "raw_item", None)
+        summary = getattr(raw_item, "summary", None)
+        if isinstance(summary, list) and summary:
+            return self._preview(summary)
+        if isinstance(summary, str) and summary:
+            return summary
+        return "The model produced a reasoning summary."
+
+    def _preview(self, value: Any, limit: int = 1000) -> str:
+        text = value if isinstance(value, str) else repr(value)
+        text = text.replace("\r", " ").replace("\n", " ")
+        return text if len(text) <= limit else f"{text[:limit]}..."
+
+    def _redact(self, value: Any) -> Any:
+        sensitive = ("token", "key", "secret", "password", "authorization", "cookie")
+        if isinstance(value, dict):
+            return {key: "***" if any(part in str(key).lower() for part in sensitive) else self._redact(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._redact(item) for item in value]
+        return value
 
     def _offset_step_ids(self, steps: list[StepResult], offset: int) -> list[StepResult]:
         if offset <= 0:
@@ -170,6 +325,7 @@ class OpenAIAgentsRuntime:
             "Before taking external actions, derive the acceptance criteria from the task description, private knowledge, matched flow templates, and loaded skills.",
             "If the task description is too broad or underspecified to derive domain-specific checks, define success as completing the executable task flow without unrecovered errors and with enough evidence to show the flow finished.",
             "First create a pre-plan before taking external actions. The pre-plan must include the derived or user-provided acceptance criteria that define success.",
+            "Use the publish_progress tool to report short user-visible planning updates, reasoning summaries, and plan changes before major external actions. Do not include hidden chain-of-thought; summarize only what is safe and useful for the user to see.",
             "Execute the pre-plan step by step with available MCP/tool/skill capabilities.",
             "Dynamically adjust the pre-plan when tool results, MCP capabilities, page state, application state, or skill instructions show a better route is needed.",
             "Use private knowledge and flow templates as planning context when they are provided.",
