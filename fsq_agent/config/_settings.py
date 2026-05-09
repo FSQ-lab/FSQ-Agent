@@ -8,7 +8,6 @@ from fsq_agent.models import (
     CLIToolConfig,
     MCPServerConfig,
     MCPToolValidationSettings,
-    ObservationSettings,
     OpenAIAgentsSettings,
     OutputSettings,
     ShellSettings,
@@ -29,6 +28,5 @@ class Settings(BaseModel):
     cli_tools: list[CLIToolConfig] = Field(default_factory=list)
     shell: ShellSettings = Field(default_factory=ShellSettings)
     skills: list[SkillConfig] = Field(default_factory=list)
-    observation: ObservationSettings = Field(default_factory=ObservationSettings)
     output: OutputSettings = Field(default_factory=OutputSettings)
     knowledge_dir: Path = Path("./knowledge")

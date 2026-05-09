@@ -41,13 +41,11 @@ Current `__init__.py` exports via `__all__`:
 - `WorkspaceSettings`: Pydantic model for the managed fsq-agent workspace root, marker file name, and auto-initialization behavior.
 - `CaseSettings`: Pydantic model for the read-only FSQ case directory.
 - `ShellSettings`: Pydantic model for optional SDK `ShellTool` execution, including disabled-by-default local shell execution, `allowlist` mode, explicit high-trust `allow_all` mode, timeout, and working directory.
-- `ObservationSettings`: Pydantic model for screenshot, UI tree, and logging configuration.
-- `OutputSettings`: Pydantic model for the managed output root and per-run report directory. All logs, reports, screenshots, traces, and generated files must live under the output root.
+- `OutputSettings`: Pydantic model for the managed output root and per-run report directory. All logs, reports, tool artifacts, and generated files must live under the output root.
 - `FsqAgentError`: Base exception for all project errors.
 - `ConfigurationError`: Raised when configuration is missing or invalid.
 - `PlanningError`: Raised when a task cannot be converted into an executable plan.
 - `ToolExecutionError`: Raised when a tool call fails after retries or returns invalid output.
-- `ObservationError`: Raised when evidence capture fails unexpectedly.
 - `VerificationError`: Raised when verification cannot complete.
 - `ReportGenerationError`: Raised when report generation fails.
 
@@ -77,6 +75,7 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Live run events are serializable and intentionally store user-visible summaries rather than hidden model chain-of-thought. Tool inputs and outputs may be redacted or preview-truncated by emitters before display or persistence.
 - Context and local tool output settings are GPT-5.4 tuned by default: recent small or moderate tool outputs remain inline for fewer extra tool turns, while older or very large outputs are written to artifacts and represented by bounded previews.
 - Runtime prompt text is template-owned through `OpenAIAgentPromptConfig`. The agent runtime assembles prompt models for knowledge, flow templates, skills, task input, custom instructions, and variables, then renders Jinja template files. Static behavioral text, headings, loops, and formatting should live in template files instead of hidden code paths or ad hoc string concatenation.
+- fsq-agent does not own native screenshot or UI tree capture settings. Those observations are used only when supplied by configured MCP servers or tools.
 - OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration that `agent` and `tools` adapt into SDK `Agent`, `FunctionTool`, `MCPServer*`, and hosted tool objects.
 - Skills are descriptive instruction bundles. CLI/shell execution is controlled separately by configured CLI tools or `ShellSettings`.
 - FSQ `.codex.yaml` cases are converted into `Task` descriptions for the agent loop. The parsed FSQ models preserve source metadata and command flow before rendering.

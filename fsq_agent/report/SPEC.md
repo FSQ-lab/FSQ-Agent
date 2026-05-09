@@ -13,7 +13,7 @@ Generate human-readable and machine-readable reports under the fsq-agent output 
 Current `__init__.py` exports via `__all__`:
 
 - `ReportGenerator`: Generates reports for completed task runs under the configured output runs directory.
-- `EvidenceBundler`: Creates a manifest and optional archive containing screenshots, UI trees, logs, and traces.
+- `EvidenceBundler`: Creates a manifest for evidence references supplied by execution steps, including paths or snapshots produced by configured MCP/tools.
 - `FailureAnalyzer`: Classifies failures as planning issue, execution issue, environment issue, verification issue, or unknown.
 
 ## Internal Structure

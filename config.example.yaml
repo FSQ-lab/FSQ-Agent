@@ -75,18 +75,6 @@ cli_tools:
     description: Echo arguments for smoke tests.
     timeout_seconds: 10
 
-observation:
-  screenshot:
-    enabled: false
-    format: png
-    quality: 85
-  ui_tree:
-    enabled: false
-    max_depth: 10
-  logging:
-    level: INFO
-    format: json
-
 output:
   root_dir: output
   runs_dir: runs

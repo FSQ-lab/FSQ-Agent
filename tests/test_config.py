@@ -30,11 +30,6 @@ agent:
 cli_tools:
   - name: echo
     command: python
-observation:
-  screenshot:
-    enabled: false
-  ui_tree:
-    enabled: false
 """,
         ),
         encoding="utf-8",

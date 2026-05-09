@@ -2,38 +2,30 @@
 
 ## Purpose
 
-Capture and persist execution evidence under the fsq-agent output directory after each step, including screenshots, UI element trees, structured logs, and trace events.
+Persist run-level event timelines under the fsq-agent output directory. Screenshots, UI trees, page sources, and other runtime observations are not captured by fsq-agent itself; they are available only when configured MCP servers or tools provide those capabilities.
 
 ## Dependencies
 
-- `models`: Uses `ExecutionStep`, `StepResult`, `RunEvent`, `ObservationSettings`, and `ObservationError`.
+- `models`: Uses `RunEvent`.
 
 ## Public Interface
 
 Current `__init__.py` exports via `__all__`:
 
-- `ScreenCapture`: Captures screenshots to configured storage and returns evidence paths.
-- `UITreeExtractor`: Extracts accessibility or window control trees for the current application state.
 - `ExecutionLogger`: Writes structured step logs, run-level trace events, and per-run live event timelines.
-- `ObservationRecorder`: Coordinates screenshot, UI tree, timing, and log capture for each execution step.
 
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
-- `_screenshot.py`: Screenshot capture using platform-specific backends such as `mss` or `pyautogui`.
-- `_ui_tree.py`: UI tree extraction using platform accessibility APIs such as `pywinauto` on Windows.
 - `_logger.py`: Structured logging setup and event writing.
-- `_recorder.py`: Evidence coordination after step execution.
 - `SPEC.md`: Module design.
 
 ## Error Handling
 
-Observation failures that do not invalidate task execution should be recorded as degraded evidence when possible. Unexpected capture failures raise `ObservationError` from `models` with context about the backend and target artifact.
+Event logging failures are treated as I/O errors from the underlying filesystem. Observation capture failures belong to the MCP/tool that provided the observation capability.
 
 ## Design Decisions
 
-- Evidence capture is separate from tool execution so failures can be diagnosed independently.
-- Screenshots, trace events, and structured logs must be configured below `output.root_dir` so installed CLI usage does not scatter artifacts across user directories.
+- fsq-agent does not implement its own screenshot or UI tree capture. Tool-specific observations should be requested through configured MCP/tools, and if a capability is not exposed by those tools then that observation type is unavailable for the run.
 - Live run event timelines are persisted as `output.runs_dir/<run-id>/events.jsonl` so interrupted or long-running tasks can be inspected before final reports are generated.
-- The initial target platform is Windows, but backend boundaries allow future macOS and Linux support.
-- Each step should have a stable evidence manifest entry even when screenshot or UI tree capture is disabled.
+- Event timelines, reports, and tool artifacts must be written under the configured output directories so installed CLI usage does not scatter artifacts across user directories.

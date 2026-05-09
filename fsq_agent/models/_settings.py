@@ -4,28 +4,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class ScreenshotSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = True
-    format: Literal["png", "jpg", "jpeg"] = "png"
-    quality: int = Field(default=85, ge=1, le=100)
-
-
-class UITreeSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = True
-    max_depth: int = Field(default=10, ge=1)
-
-
-class LoggingSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    level: str = "INFO"
-    format: Literal["json", "text"] = "json"
-
-
 class AgentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -115,14 +93,6 @@ class CaseSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dir: Path = Path("./cases")
-
-
-class ObservationSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    screenshot: ScreenshotSettings = Field(default_factory=ScreenshotSettings)
-    ui_tree: UITreeSettings = Field(default_factory=UITreeSettings)
-    logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
 class OutputSettings(BaseModel):

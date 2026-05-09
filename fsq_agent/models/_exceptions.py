@@ -16,10 +16,6 @@ class ToolExecutionError(FsqAgentError):
     pass
 
 
-class ObservationError(FsqAgentError):
-    pass
-
-
 class VerificationError(FsqAgentError):
     pass
 

@@ -15,12 +15,7 @@ async def test_agent_run_requires_openai_agents_runtime(tmp_path: Path, monkeypa
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        """
-observation:
-  screenshot:
-    enabled: false
-  ui_tree:
-    enabled: false
+                """
 output:
   root_dir: output
   runs_dir: runs
