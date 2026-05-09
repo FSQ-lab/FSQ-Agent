@@ -1,0 +1,13 @@
+Task ID: {{ task.id }}
+Task Name: {{ task.name }}
+Description:
+{{ task.description }}
+
+{% if task.acceptance_criteria %}
+Task acceptance criteria:
+{% for criterion in task.acceptance_criteria %}
+- {{ criterion }}
+{% endfor %}
+{% else %}
+Task acceptance criteria: none. Derive acceptance criteria from the description, knowledge, and matched flows. If the description is too broad, use successful flow completion as the success standard.
+{% endif %}

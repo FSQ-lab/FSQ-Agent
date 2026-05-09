@@ -7,8 +7,93 @@ from typing import Any
 from fsq_agent.config import Settings, validate_runtime_settings
 from fsq_agent.models import ConfigurationError, KnowledgeBundle, RunEvent, RunEventSink, SkillBundle, StepResult, Task
 from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory
+from fsq_agent.tools._tool_artifacts import ToolArtifactStore
 
+from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._structured_output import coerce_string_list, parse_structured_output
+
+
+class _RecentToolOutputInputFilter:
+    def __init__(
+        self,
+        sdk_filter: Any | None,
+        recent_tool_outputs: int,
+        max_output_chars: int,
+        preview_chars: int,
+        trimmable_tools: set[str] | None,
+        artifact_store: ToolArtifactStore | None,
+    ) -> None:
+        self.sdk_filter = sdk_filter
+        self.recent_tool_outputs = recent_tool_outputs
+        self.max_output_chars = max_output_chars
+        self.preview_chars = preview_chars
+        self.trimmable_tools = trimmable_tools
+        self.artifact_store = artifact_store
+        self.artifact_paths_by_call_id: dict[str, str] = {}
+
+    def __call__(self, data: Any) -> Any:
+        from agents.run_config import ModelInputData
+
+        model_data = self.sdk_filter(data) if self.sdk_filter else data.model_data
+        items = model_data.input
+        if not items or self.recent_tool_outputs < 0:
+            return model_data
+
+        call_id_to_names = self._call_id_to_names(items)
+        output_indices = [index for index, item in enumerate(items) if isinstance(item, dict) and item.get("type") == "function_call_output"]
+        protected = set(output_indices[-self.recent_tool_outputs :]) if self.recent_tool_outputs else set()
+        new_items: list[Any] = []
+        for index, item in enumerate(items):
+            if not isinstance(item, dict) or item.get("type") != "function_call_output":
+                new_items.append(item)
+                continue
+            tool_names = call_id_to_names.get(str(item.get("call_id") or item.get("id") or ""), set())
+            output = item.get("output", "")
+            output_text = output if isinstance(output, str) else str(output)
+            artifact_path = self._artifact_path_for(item, tool_names, output_text)
+            if index in protected:
+                new_items.append(item)
+                continue
+            if self.trimmable_tools and not tool_names.intersection(self.trimmable_tools):
+                new_items.append(item)
+                continue
+            if len(output_text) <= self.max_output_chars:
+                new_items.append(item)
+                continue
+            trimmed_item = dict(item)
+            preview = output_text[: self.preview_chars]
+            display_name = next(iter(tool_names), "tool")
+            artifact_line = f" Artifact path: {artifact_path}." if artifact_path else ""
+            trimmed_item["output"] = f"[Trimmed historical {display_name} output: {len(output_text)} chars, preview follows].{artifact_line}\n{preview}..."
+            new_items.append(trimmed_item)
+        return ModelInputData(input=new_items, instructions=model_data.instructions)
+
+    def _call_id_to_names(self, items: list[Any]) -> dict[str, set[str]]:
+        mapping: dict[str, set[str]] = {}
+        for item in items:
+            if not isinstance(item, dict) or item.get("type") != "function_call":
+                continue
+            call_id = str(item.get("call_id") or item.get("id") or "")
+            if not call_id:
+                continue
+            names = {str(value) for value in (item.get("name"), item.get("tool_name")) if value}
+            mapping[call_id] = names
+        return mapping
+
+    def _artifact_path_for(self, item: dict[str, Any], tool_names: set[str], output_text: str) -> str | None:
+        if not self.artifact_store:
+            return None
+        call_id = str(item.get("call_id") or item.get("id") or "")
+        if call_id in self.artifact_paths_by_call_id:
+            return self.artifact_paths_by_call_id[call_id]
+        tool_name = next(iter(tool_names), "sdk_tool")
+        path = self.artifact_store.write(tool_name, output_text, {"source": "model_input_filter", "call_id": call_id})
+        if not path:
+            return None
+        artifact_path = str(path)
+        if call_id:
+            self.artifact_paths_by_call_id[call_id] = artifact_path
+        return artifact_path
 
 
 class OpenAIAgentsRuntime:
@@ -34,6 +119,7 @@ class OpenAIAgentsRuntime:
         started = time.perf_counter()
         try:
             from agents import Agent, OpenAIProvider, RunConfig, Runner, set_tracing_disabled
+            from agents.extensions import ToolOutputTrimmer
             from openai import AsyncOpenAI
         except ImportError as exc:
             raise ConfigurationError("openai-agents and openai packages are required when SDK runtime is enabled.") from exc
@@ -84,7 +170,7 @@ class OpenAIAgentsRuntime:
                         agent,
                         input=self._build_task_input(task),
                         max_turns=self.settings.openai_agents.max_turns,
-                        run_config=RunConfig(model_provider=provider),
+                        run_config=self._build_run_config(RunConfig, ToolOutputTrimmer, provider, run_id),
                     )
                     async for event in result.stream_events():
                         run_event = self._map_stream_event(event, run_id, task.id)
@@ -141,6 +227,33 @@ class OpenAIAgentsRuntime:
         result = event_sink(event)
         if inspect.isawaitable(result):
             await result
+
+    def _build_run_config(self, run_config_cls: Any, tool_output_trimmer_cls: Any, provider: Any, run_id: str = "") -> Any:
+        trimming = self.settings.openai_agents.context_trimming
+        local_output = self.settings.openai_agents.local_tool_output
+        input_filter = None
+        if trimming.enabled:
+            trimmable_tools = set(trimming.trimmable_tools) if trimming.trimmable_tools else None
+            artifact_store = (
+                ToolArtifactStore(self.settings.output.runs_dir, run_id, local_output)
+                if run_id and local_output.artifact_enabled
+                else None
+            )
+            sdk_filter = tool_output_trimmer_cls(
+                recent_turns=trimming.recent_turns,
+                max_output_chars=trimming.max_tool_output_chars,
+                preview_chars=trimming.preview_chars,
+                trimmable_tools=frozenset(trimmable_tools) if trimmable_tools else None,
+            )
+            input_filter = _RecentToolOutputInputFilter(
+                sdk_filter,
+                local_output.recent_full_output_count,
+                trimming.max_tool_output_chars,
+                trimming.preview_chars,
+                trimmable_tools,
+                artifact_store,
+            )
+        return run_config_cls(model_provider=provider, call_model_input_filter=input_filter)
 
     def _map_stream_event(self, event: Any, run_id: str, task_id: str) -> RunEvent | None:
         event_type = getattr(event, "type", "")
@@ -318,57 +431,11 @@ class OpenAIAgentsRuntime:
         )
 
     def _build_instructions(self, knowledge: KnowledgeBundle, skills: list[SkillBundle]) -> str:
-        lines = [
-            "You are fsq-agent, a non-interactive goal-driven testing agent.",
-            "Your job is to complete exactly one user-provided automation task by using configured MCP servers, local tools, and loaded skills.",
-            "The user normally provides only a task description. Treat user-provided acceptance criteria as optional extra constraints, not required input.",
-            "Before taking external actions, derive the acceptance criteria from the task description, private knowledge, matched flow templates, and loaded skills.",
-            "If the task description is too broad or underspecified to derive domain-specific checks, define success as completing the executable task flow without unrecovered errors and with enough evidence to show the flow finished.",
-            "First create a pre-plan before taking external actions. The pre-plan must include the derived or user-provided acceptance criteria that define success.",
-            "Use the publish_progress tool to report short user-visible planning updates, reasoning summaries, and plan changes before major external actions. Do not include hidden chain-of-thought; summarize only what is safe and useful for the user to see.",
-            "Execute the pre-plan step by step with available MCP/tool/skill capabilities.",
-            "Dynamically adjust the pre-plan when tool results, MCP capabilities, page state, application state, or skill instructions show a better route is needed.",
-            "Use private knowledge and flow templates as planning context when they are provided.",
-            "When the task description contains FSQ AI Test DSL case context, treat its command flow as an advisory reference, not as a brittle script. Prefer its locators and assertions, but adapt for live UI state, transient dialogs, optional setup, missing steps, and recovery needs.",
-            "Do not modify source FSQ YAML case files during execution.",
-            "Do not ask the user for clarification during a run. Finish with success evidence, failure evidence, or a clear inconclusive summary.",
-            "Use only configured tools for external actions. Respect scoped file and CLI tool boundaries.",
-            "The final answer must be JSON only, with no Markdown fences and no prose outside JSON.",
-            "The final JSON schema is:",
-            '{"status":"success|failed|inconclusive","summary":"string","pre_plan":[{"step_id":1,"action":"string","success_criteria":["string"],"status":"success|failed|skipped|adjusted"}],"plan_updates":["string"],"satisfied_criteria":["string"],"unmet_criteria":["string"],"evidence":["string"],"errors":["string"]}',
-            "Use satisfied_criteria and unmet_criteria to report the concrete criteria you derived or received from the user.",
-            "Use status=success only when every derived or user-provided task acceptance criterion is satisfied with evidence.",
-            "Use status=failed when one or more criteria cannot be satisfied or an execution step fails permanently.",
-            "Use status=inconclusive when the task ran but available evidence cannot prove success or failure.",
-        ]
-        if knowledge.items:
-            lines.extend(["", "Private knowledge:"])
-            lines.extend(f"- {key}: {value}" for key, value in knowledge.items.items())
-        if knowledge.flow_templates:
-            lines.extend(["", "Relevant flow templates:"])
-            lines.extend(f"- {name}: {template}" for name, template in knowledge.flow_templates.items())
-        if knowledge.warnings:
-            lines.extend(["", "Knowledge warnings:"])
-            lines.extend(f"- {warning}" for warning in knowledge.warnings)
-        for skill in skills:
-            if skill.instructions:
-                lines.extend(["", f"Skill: {skill.name}", skill.instructions])
-            lines.extend(f"Skill warning: {warning}" for warning in skill.warnings)
-        return "\n".join(lines)
+        prompt = self.settings.openai_agents.prompt
+        model = PromptModelBuilder(prompt).build_agent_prompt(knowledge, skills)
+        return PromptRenderer(prompt).render_agent_prompt(model)
 
     def _build_task_input(self, task: Task) -> str:
-        lines = [
-            f"Task ID: {task.id}\n"
-            f"Task Name: {task.name}\n"
-            f"Description:\n{task.description}\n\n"
-        ]
-        if task.acceptance_criteria:
-            criteria = "\n".join(f"- {criterion}" for criterion in task.acceptance_criteria)
-            lines.append(f"User-provided acceptance criteria:\n{criteria}\n")
-        else:
-            lines.append(
-                "User-provided acceptance criteria: none. Derive acceptance criteria from the description, "
-                "knowledge, and matched flows. If the description is too broad, use successful flow completion "
-                "as the success standard.\n"
-            )
-        return "".join(lines)
+        prompt = self.settings.openai_agents.prompt
+        model = PromptModelBuilder(prompt).build_task_prompt(task)
+        return PromptRenderer(prompt).render_task_prompt(model)

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Generate human-readable and machine-readable reports under the fsq-agent output directory from task results, pre-plan summaries, step evidence, verification outcomes, satisfied/unmet criteria, and failure diagnostics.
+Generate human-readable and machine-readable reports under the fsq-agent output directory from task results, plan summaries, execution records, tool-call events, verification outcomes, satisfied/unmet criteria, and failure diagnostics.
 
 ## Dependencies
 
@@ -19,7 +19,7 @@ Current `__init__.py` exports via `__all__`:
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
-- `_generator.py`: Markdown and JSON report generation with minimal JSON fallback.
+- `_generator.py`: Markdown and JSON report generation with minimal JSON fallback, plan/execution/verification report shaping, and tool-call event summarization from `events.jsonl`.
 - `_evidence.py`: Evidence manifest and bundle creation.
 - `_failure_analysis.py`: Failure classification helpers.
 - `templates/`: Optional report templates.
@@ -32,6 +32,7 @@ If rich Markdown/JSON report generation fails after a task run, `ReportGenerator
 ## Design Decisions
 
 - Markdown and JSON reports are part of the design because they are easy to inspect in CI and IDEs.
+- JSON reports are structured by lifecycle concern: `task`, `plan`, `execution`, `verification`, and `failure_classification`. The `execution.tool_calls` collection contains real MCP/local tool calls reconstructed from run events; step records use `source` for runtime/provenance labels rather than overloading it as a tool name.
 - Report artifacts are stored below `output.runs_dir/<run-id>` so installed CLI usage does not create report files in the caller's current directory.
 - HTML report generation is intentionally out of scope.
 - Failure analysis starts rule-assisted and can later include LLM-assisted explanations.

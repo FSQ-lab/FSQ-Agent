@@ -86,6 +86,12 @@ def resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> N
     settings.cases.dir = _resolve_path(settings.cases.dir, config_base)
     settings.knowledge_dir = _resolve_path(settings.knowledge_dir, config_base)
 
+    prompt = settings.openai_agents.prompt
+    if prompt.agent_template_path is not None:
+        prompt.agent_template_path = _resolve_path(prompt.agent_template_path, config_base)
+    if prompt.task_template_path is not None:
+        prompt.task_template_path = _resolve_path(prompt.task_template_path, config_base)
+
     shell_dir = settings.shell.working_dir
     settings.shell.working_dir = workspace_root if shell_dir == Path(".") else _resolve_path(shell_dir, workspace_root)
     _ensure_inside(

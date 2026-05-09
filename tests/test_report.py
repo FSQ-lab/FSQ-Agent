@@ -36,14 +36,86 @@ def _verification() -> VerificationResult:
     )
 
 
+def _steps() -> list[StepResult]:
+    return [
+        StepResult(
+            step_id=1,
+            status="failed",
+            actual_outcome="Action: Press Back.",
+            tool_name="pre_plan",
+            tool_output={"step_id": 1, "status": "failed"},
+        ),
+        StepResult(
+            step_id=2,
+            status="success",
+            actual_outcome='{"status":"failed","summary":"Back failed","pre_plan":[{"step_id":1,"action":"Press Back","success_criteria":["Back is pressed"],"status":"failed"}],"plan_updates":["Back payload failed"],"satisfied_criteria":[],"unmet_criteria":["Back is pressed"],"evidence":[],"errors":["Back failed"]}',
+            tool_name="openai_agents.runner",
+        ),
+    ]
+
+
 def test_report_generator_writes_markdown_and_json(tmp_path: Path) -> None:
-    artifact = ReportGenerator(tmp_path).generate("run-1", _task(), [], _verification())
+    artifact = ReportGenerator(tmp_path).generate("run-1", _task(), _steps(), _verification())
 
     assert artifact.path.name == "report.md"
     assert artifact.path.exists()
-    assert (tmp_path / "run-1" / "report.json").exists()
+    payload = json.loads((tmp_path / "run-1" / "report.json").read_text(encoding="utf-8"))
+    assert "steps" not in payload
+    assert payload["plan"]["source"] == "openai_agents.runner.final_output"
+    assert payload["plan"]["items"][0]["action"] == "Press Back"
+    assert payload["execution"]["step_records"][0]["source"] == "pre_plan"
+    assert payload["execution"]["tool_calls"] == []
     assert artifact.evidence_manifest_path is not None
     assert artifact.evidence_manifest_path.exists()
+
+
+def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-events"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "tool_call_started",
+                        "sequence": 10,
+                        "timestamp": "2026-05-09T00:00:00Z",
+                        "tool_call_id": "call-1",
+                        "tool_name": "appium_find_element",
+                        "tool_arguments": {"strategy": "id", "selector": "target"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "tool_call_completed",
+                        "sequence": 11,
+                        "timestamp": "2026-05-09T00:00:01Z",
+                        "tool_call_id": "call-1",
+                        "tool_output_preview": "found",
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ReportGenerator(tmp_path).generate("run-events", _task(), [], _verification())
+
+    payload = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    assert payload["execution"]["tool_calls"] == [
+        {
+            "tool_call_id": "call-1",
+            "tool_name": "appium_find_element",
+            "status": "completed",
+            "started_sequence": 10,
+            "completed_sequence": 11,
+            "started_at": "2026-05-09T00:00:00Z",
+            "completed_at": "2026-05-09T00:00:01Z",
+            "arguments": {"strategy": "id", "selector": "target"},
+            "output_preview": "found",
+            "duration_ms": None,
+        }
+    ]
 
 
 def test_report_generator_writes_minimal_json_fallback(tmp_path: Path) -> None:

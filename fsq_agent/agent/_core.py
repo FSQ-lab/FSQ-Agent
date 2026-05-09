@@ -48,7 +48,13 @@ class FsqAgent:
             read_roots=[settings.cases.dir, settings.knowledge_dir, output_root],
             write_root=output_root / "artifacts",
         )
-        tool_factory = AgentsToolFactory(cli_runner, file_ops, settings.shell)
+        tool_factory = AgentsToolFactory(
+            cli_runner,
+            file_ops,
+            settings.shell,
+            settings.openai_agents.local_tool_output,
+            settings.output.runs_dir,
+        )
         mcp_factory = AgentsMCPFactory(settings.mcp_servers, settings.mcp_tool_validation)
         knowledge_loader = PrivateKnowledgeLoader(settings.knowledge_dir)
         flow_manager = FlowTemplateManager(settings.knowledge_dir / "flows")

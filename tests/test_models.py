@@ -1,4 +1,6 @@
-from fsq_agent.models import ExecutionStep, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task
+import pytest
+
+from fsq_agent.models import ExecutionStep, LocalToolOutputSettings, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task
 
 
 def test_task_defaults() -> None:
@@ -30,6 +32,14 @@ def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:
     assert settings.enabled is False
     assert settings.model == "gpt-5.4"
     assert settings.api_key_env == "AZURE_OPENAI_API_KEY"
+    assert settings.prompt.custom_instructions == []
+    assert settings.prompt.agent_template_path is None
+    assert settings.prompt.task_template_path is None
+    assert settings.prompt.variables == {}
+    assert settings.context_trimming.enabled is True
+    assert settings.context_trimming.max_tool_output_chars == 8000
+    assert settings.local_tool_output.always_write_artifact is True
+    assert settings.local_tool_output.full_output_max_chars == 30000
 
 
 def test_skill_config_defaults_to_markdown() -> None:
@@ -45,3 +55,8 @@ def test_shell_settings_defaults_to_disabled_allowlist() -> None:
     assert settings.enabled is False
     assert settings.mode == "allowlist"
     assert settings.command_allowlist == []
+
+
+def test_local_tool_output_rejects_artifact_subdir_escape() -> None:
+    with pytest.raises(ValueError, match="artifact_subdir"):
+        LocalToolOutputSettings(artifact_subdir="../outside")

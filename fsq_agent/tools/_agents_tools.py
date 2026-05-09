@@ -6,10 +6,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from fsq_agent.models import RunEvent, RunEventSink, ShellSettings, SkillBundle, ToolExecutionError
+from fsq_agent.models import LocalToolOutputSettings, RunEvent, RunEventSink, ShellSettings, SkillBundle, ToolExecutionError
 from fsq_agent.tools._cli_runner import CLIRunner
 from fsq_agent.tools._file_ops import FileOps
 from fsq_agent.tools._shell_executor import ShellCommandExecutor
+from fsq_agent.tools._tool_artifacts import ToolArtifactStore
 
 
 class _CLIArgs(BaseModel):
@@ -32,14 +33,38 @@ class _ProgressArgs(BaseModel):
     next_action: str | None = Field(default=None, description="Optional next action summary.")
 
 
+class _SearchArtifactArgs(BaseModel):
+    artifact_path: str = Field(description="Artifact path returned by a previous tool response.")
+    query: str = Field(description="Text to search for inside the artifact.")
+    case_sensitive: bool = Field(default=False, description="Whether the search is case-sensitive.")
+    max_matches: int = Field(default=20, ge=1, le=100, description="Maximum number of matches to return.")
+    context_chars: int = Field(default=300, ge=0, le=2000, description="Characters of context around each match.")
+
+
+class _ReadArtifactSliceArgs(BaseModel):
+    artifact_path: str = Field(description="Artifact path returned by a previous tool response.")
+    offset: int = Field(default=0, ge=0, description="Character offset to start reading from.")
+    length: int = Field(default=12000, ge=1, le=30000, description="Maximum characters to read.")
+
+
 class AgentsToolFactory:
-    def __init__(self, cli_runner: CLIRunner, file_ops: FileOps, shell_settings: ShellSettings | None = None) -> None:
+    def __init__(
+        self,
+        cli_runner: CLIRunner,
+        file_ops: FileOps,
+        shell_settings: ShellSettings | None = None,
+        local_tool_output_settings: LocalToolOutputSettings | None = None,
+        runs_dir: Path | None = None,
+    ) -> None:
         self.cli_runner = cli_runner
         self.file_ops = file_ops
         self.shell_settings = shell_settings or ShellSettings()
+        self.local_tool_output_settings = local_tool_output_settings or LocalToolOutputSettings()
+        self.runs_dir = runs_dir
         self.run_id = ""
         self.task_id = ""
         self.event_sink: RunEventSink | None = None
+        self.artifact_store: ToolArtifactStore | None = None
 
     def build_tools(
         self,
@@ -57,6 +82,11 @@ class AgentsToolFactory:
         self.run_id = run_id
         self.task_id = task_id
         self.event_sink = event_sink
+        self.artifact_store = (
+            ToolArtifactStore(self.runs_dir, run_id, self.local_tool_output_settings)
+            if self.runs_dir and run_id and self.local_tool_output_settings.artifact_enabled
+            else None
+        )
         tools: list[Any] = []
         tools.append(
             FunctionTool(
@@ -88,6 +118,18 @@ class AgentsToolFactory:
                     description="Write a scoped workspace file.",
                     params_json_schema=_WriteFileArgs.model_json_schema(),
                     on_invoke_tool=self._write_file,
+                ),
+                FunctionTool(
+                    name="search_artifact",
+                    description="Search a large tool-output artifact by text and return offsets with local context.",
+                    params_json_schema=_SearchArtifactArgs.model_json_schema(),
+                    on_invoke_tool=self._search_artifact,
+                ),
+                FunctionTool(
+                    name="read_artifact_slice",
+                    description="Read a bounded character slice from a large tool-output artifact by offset and length.",
+                    params_json_schema=_ReadArtifactSliceArgs.model_json_schema(),
+                    on_invoke_tool=self._read_artifact_slice,
                 ),
             ]
         )
@@ -132,7 +174,11 @@ class AgentsToolFactory:
         except Exception as exc:
             await self._emit_tool_failed("run_cli_tool", str(exc), started)
             raise
-        output = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+        output = self._format_tool_response(
+            "run_cli_tool",
+            result.model_dump(mode="json"),
+            {"configured_tool": parsed.tool_name},
+        )
         await self._emit_tool_completed("run_cli_tool", output, started)
         return output
 
@@ -145,7 +191,7 @@ class AgentsToolFactory:
         except Exception as exc:
             await self._emit_tool_failed("read_file", str(exc), started)
             raise
-        output = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+        output = self._format_tool_response("read_file", result.model_dump(mode="json"), {"path": parsed.path})
         await self._emit_tool_completed("read_file", output, started)
         return output
 
@@ -158,8 +204,44 @@ class AgentsToolFactory:
         except Exception as exc:
             await self._emit_tool_failed("write_file", str(exc), started)
             raise
-        output = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
+        output = self._format_tool_response("write_file", result.model_dump(mode="json"), {"path": parsed.path})
         await self._emit_tool_completed("write_file", output, started)
+        return output
+
+    async def _search_artifact(self, _ctx: Any, args: str) -> str:
+        parsed = _SearchArtifactArgs.model_validate_json(args)
+        started = time.perf_counter()
+        await self._emit_tool_started("search_artifact", parsed.model_dump(mode="json"))
+        try:
+            if not self.artifact_store:
+                raise ToolExecutionError("Tool artifact storage is not enabled for this run.")
+            result = self.artifact_store.search(
+                parsed.artifact_path,
+                parsed.query,
+                parsed.case_sensitive,
+                parsed.max_matches,
+                parsed.context_chars,
+            )
+        except Exception as exc:
+            await self._emit_tool_failed("search_artifact", str(exc), started)
+            raise
+        output = json.dumps(result, ensure_ascii=False)
+        await self._emit_tool_completed("search_artifact", output, started)
+        return output
+
+    async def _read_artifact_slice(self, _ctx: Any, args: str) -> str:
+        parsed = _ReadArtifactSliceArgs.model_validate_json(args)
+        started = time.perf_counter()
+        await self._emit_tool_started("read_artifact_slice", parsed.model_dump(mode="json"))
+        try:
+            if not self.artifact_store:
+                raise ToolExecutionError("Tool artifact storage is not enabled for this run.")
+            result = self.artifact_store.read_slice(parsed.artifact_path, parsed.offset, parsed.length)
+        except Exception as exc:
+            await self._emit_tool_failed("read_artifact_slice", str(exc), started)
+            raise
+        output = json.dumps(result, ensure_ascii=False)
+        await self._emit_tool_completed("read_artifact_slice", output, started)
         return output
 
     async def _publish_progress(self, _ctx: Any, args: str) -> str:
@@ -230,6 +312,46 @@ class AgentsToolFactory:
         text = value if isinstance(value, str) else repr(value)
         text = text.replace("\r", " ").replace("\n", " ")
         return text if len(text) <= limit else f"{text[:limit]}..."
+
+    def _format_tool_response(self, tool_name: str, payload: dict[str, Any], metadata: dict[str, Any]) -> str:
+        full_output = json.dumps(payload, ensure_ascii=False)
+        artifact_path = self.artifact_store.write(tool_name, full_output, metadata) if self.artifact_store else None
+        settings = self.local_tool_output_settings
+        artifact = {
+            "path": str(artifact_path) if artifact_path else None,
+            "content_chars": len(full_output),
+        }
+        if len(full_output) <= settings.full_output_max_chars:
+            return json.dumps(
+                {
+                    "tool_name": tool_name,
+                    "model_output": "full",
+                    "artifact": artifact,
+                    "result": payload,
+                },
+                ensure_ascii=False,
+            )
+
+        preview = full_output[: settings.historical_preview_chars]
+        response = {
+            "tool_name": tool_name,
+            "model_output": settings.historical_output_mode,
+            "artifact": artifact,
+            "preview": preview,
+            "instructions": "Use search_artifact or read_artifact_slice with artifact.path when details beyond the preview are needed.",
+        }
+        encoded = json.dumps(response, ensure_ascii=False)
+        if len(encoded) <= settings.model_response_max_chars:
+            return encoded
+        preview_limit = len(preview)
+        while preview_limit > 0:
+            response["preview"] = preview[:preview_limit]
+            encoded = json.dumps(response, ensure_ascii=False)
+            if len(encoded) <= settings.model_response_max_chars:
+                return encoded
+            preview_limit //= 2
+        response["preview"] = ""
+        return json.dumps(response, ensure_ascii=False)
 
     def _redact(self, value: Any) -> Any:
         sensitive = ("token", "key", "secret", "password", "authorization", "cookie")

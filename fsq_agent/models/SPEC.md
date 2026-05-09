@@ -29,7 +29,10 @@ Current `__init__.py` exports via `__all__`:
 - `ToolDefinition`: Pydantic model describing a discovered MCP, CLI, or file operation capability.
 - `ToolCall`: Pydantic model describing a tool invocation request.
 - `ToolResult`: Pydantic model describing a normalized tool invocation response.
-- `OpenAIAgentsSettings`: Pydantic model for OpenAI Agents SDK provider configuration, including Azure OpenAI base URL, API key environment variable, model deployment name, tracing policy, turn limits, and Responses API options.
+- `OpenAIAgentsSettings`: Pydantic model for OpenAI Agents SDK provider configuration, including Azure OpenAI base URL, API key environment variable, model deployment name, tracing policy, turn limits, Responses API options, file-based prompt template customization, context trimming policy, and local tool output artifact policy.
+- `OpenAIAgentPromptConfig`: Pydantic model containing optional Jinja template file paths, custom operator instructions, and scalar prompt variables.
+- `ContextTrimmingSettings`: Pydantic model controlling SDK model-input trimming for older large tool outputs, including recent turn retention, maximum inline tool output size, preview size, and optional trimmable tool names.
+- `LocalToolOutputSettings`: Pydantic model controlling how local SDK function tools write full outputs to per-run artifacts and decide whether model-facing responses contain full output or artifact references.
 - `MCPServerConfig`: Pydantic model for OpenAI Agents SDK MCP configuration. Supports `stdio`, `streamable_http`, `sse`, and `hosted` transports plus approval policy, headers, manual tool filters, and prompt loading policy.
 - `CLIToolConfig`: Pydantic model for configured CLI tools.
 - `SkillConfig`: Pydantic model for one configured automation skill source.
@@ -72,6 +75,8 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Pydantic is used at boundaries where external inputs, config files, agent output, and tool output enter the system.
 - Result models store evidence paths rather than binary evidence to keep logs and reports lightweight.
 - Live run events are serializable and intentionally store user-visible summaries rather than hidden model chain-of-thought. Tool inputs and outputs may be redacted or preview-truncated by emitters before display or persistence.
+- Context and local tool output settings are GPT-5.4 tuned by default: recent small or moderate tool outputs remain inline for fewer extra tool turns, while older or very large outputs are written to artifacts and represented by bounded previews.
+- Runtime prompt text is template-owned through `OpenAIAgentPromptConfig`. The agent runtime assembles prompt models for knowledge, flow templates, skills, task input, custom instructions, and variables, then renders Jinja template files. Static behavioral text, headings, loops, and formatting should live in template files instead of hidden code paths or ad hoc string concatenation.
 - OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration that `agent` and `tools` adapt into SDK `Agent`, `FunctionTool`, `MCPServer*`, and hosted tool objects.
 - Skills are descriptive instruction bundles. CLI/shell execution is controlled separately by configured CLI tools or `ShellSettings`.
 - FSQ `.codex.yaml` cases are converted into `Task` descriptions for the agent loop. The parsed FSQ models preserve source metadata and command flow before rendering.

@@ -6,11 +6,23 @@ from fsq_agent.models import FsqCase, Task
 
 class FsqTaskAdapter:
     def to_task(self, case: FsqCase) -> Task:
+        acceptance_criteria = self.extract_ordered_key_actions(case)
         return Task(
             id=case.id,
             name=case.config.name,
             description=self.render_description(case),
+            acceptance_criteria=acceptance_criteria,
         )
+
+    def extract_ordered_key_actions(self, case: FsqCase) -> list[str]:
+        key_actions = [
+            rendered
+            for command in case.commands
+            if (rendered := self._render_key_action(command)) is not None
+        ]
+        if key_actions:
+            return [f"Key action {index}: {action}" for index, action in enumerate(key_actions, start=1)]
+        return [f"Goal completed: {case.config.name}"]
 
     def render_description(self, case: FsqCase) -> str:
         config = case.config
@@ -38,8 +50,14 @@ class FsqTaskAdapter:
             "- For Android cases, use the configured Appium MCP tools for device, session, app lifecycle, element lookup, taps, text input, key presses, page source, and screenshots. Do not use CLI tools unless the task explicitly exposes one.",
             "- Treat optional or transient UI such as dialogs, permissions, and sign-in state as runtime conditions to handle safely.",
             "- Do not edit the source FSQ YAML during execution.",
-            "- Derive success criteria from the case description, assertion commands, and final intended app/page state.",
+            "- Treat ordered key actions as the goal's required validation spine, not as a brittle one-for-one script. Preserve their relative order while allowing recovery, wait, evidence, and transient-dialog steps between them.",
+            "- Derive success criteria from the ordered key actions when present; otherwise derive them from the case name, description, assertion commands, and final intended app/page state.",
             "- Use success only when the intended scenario is completed with evidence from the live UI or tool outputs.",
+            "",
+            "Ordered key actions for success:",
+        ])
+        lines.extend(f"{index}. {action}" for index, action in enumerate(self.extract_ordered_key_actions(case), start=1))
+        lines.extend([
             "",
             "Reference FSQ command flow:",
         ])
@@ -56,3 +74,47 @@ class FsqTaskAdapter:
             name, value = next(iter(command.items()))
             return f"{name}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}"
         return json.dumps(command, ensure_ascii=False, sort_keys=True)
+
+    def _render_key_action(self, command: Any) -> str | None:
+        if isinstance(command, str):
+            if command in {"launchApp", "killApp"}:
+                return None
+            return command
+        if not isinstance(command, dict) or len(command) != 1:
+            return self._render_command(command)
+
+        name, value = next(iter(command.items()))
+        if name in {"launchApp", "killApp"}:
+            return None
+        if isinstance(value, dict) and value.get("optional") is True:
+            return None
+        return self._format_key_action(name, value)
+
+    def _format_key_action(self, name: str, value: Any) -> str:
+        if not isinstance(value, dict):
+            return f"{name}: {value}"
+
+        target = value.get("target") or value.get("prompt") or value.get("text")
+        if not target and isinstance(value.get("element"), dict):
+            target = self._format_locator(value["element"])
+        if name == "inputText" and value.get("text") and value.get("target"):
+            action = f"{name} {value['text']} into {value['target']}"
+        else:
+            action = f"{name} {target}" if target else name
+
+        details = []
+        if isinstance(value.get("locator"), dict):
+            details.append(f"locator: {self._format_locator(value['locator'])}")
+        if isinstance(value.get("element"), dict):
+            details.append(f"element: {self._format_locator(value['element'])}")
+        if isinstance(value.get("text"), dict):
+            details.append(f"text: {json.dumps(value['text'], ensure_ascii=False, sort_keys=True)}")
+        elif isinstance(value.get("text"), str) and name != "inputText":
+            details.append(f"text: {value['text']}")
+
+        if details:
+            return f"{action} ({'; '.join(details)})"
+        return action
+
+    def _format_locator(self, locator: dict[str, Any]) -> str:
+        return ", ".join(f"{key}={value}" for key, value in locator.items())

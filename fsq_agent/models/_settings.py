@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ScreenshotSettings(BaseModel):
@@ -36,6 +36,46 @@ class AgentSettings(BaseModel):
     max_retries: int = Field(default=3, ge=0)
 
 
+class ContextTrimmingSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    recent_turns: int = Field(default=2, ge=1)
+    max_tool_output_chars: int = Field(default=8000, ge=1)
+    preview_chars: int = Field(default=1000, ge=0)
+    trimmable_tools: list[str] = Field(default_factory=list)
+
+
+class LocalToolOutputSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_enabled: bool = True
+    always_write_artifact: bool = True
+    artifact_subdir: str = "artifacts/tools"
+    recent_full_output_count: int = Field(default=3, ge=0)
+    full_output_max_chars: int = Field(default=30000, ge=1)
+    historical_output_mode: Literal["artifact_reference"] = "artifact_reference"
+    historical_preview_chars: int = Field(default=1000, ge=0)
+    model_response_max_chars: int = Field(default=4000, ge=500)
+
+    @field_validator("artifact_subdir")
+    @classmethod
+    def validate_artifact_subdir(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("artifact_subdir must be a relative path inside the run directory")
+        return value
+
+
+class OpenAIAgentPromptConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_template_path: Path | None = None
+    task_template_path: Path | None = None
+    custom_instructions: list[str] = Field(default_factory=list)
+    variables: dict[str, Any] = Field(default_factory=dict)
+
+
 class OpenAIAgentsSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -48,6 +88,9 @@ class OpenAIAgentsSettings(BaseModel):
     trace_include_sensitive_data: bool = False
     use_responses: bool = True
     fail_without_api_key: bool = True
+    prompt: OpenAIAgentPromptConfig = Field(default_factory=OpenAIAgentPromptConfig)
+    context_trimming: ContextTrimmingSettings = Field(default_factory=ContextTrimmingSettings)
+    local_tool_output: LocalToolOutputSettings = Field(default_factory=LocalToolOutputSettings)
 
 
 class ShellSettings(BaseModel):

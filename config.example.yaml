@@ -14,6 +14,27 @@ openai_agents:
   tracing_enabled: false
   trace_include_sensitive_data: false
   use_responses: true
+  prompt:
+    agent_template_path: ./fsq_agent/agent/templates/agent_instructions.j2
+    task_template_path: ./fsq_agent/agent/templates/task_input.j2
+    custom_instructions:
+      - Prefer targeted artifact searches over full artifact reads when recovering details from large tool outputs.
+    variables: {}
+  context_trimming:
+    enabled: true
+    recent_turns: 2
+    max_tool_output_chars: 8000
+    preview_chars: 1000
+    trimmable_tools: []
+  local_tool_output:
+    artifact_enabled: true
+    always_write_artifact: true
+    artifact_subdir: artifacts/tools
+    recent_full_output_count: 3
+    full_output_max_chars: 30000
+    historical_output_mode: artifact_reference
+    historical_preview_chars: 1000
+    model_response_max_chars: 4000
 
 mcp_servers:
   - name: browser

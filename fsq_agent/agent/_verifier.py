@@ -7,6 +7,20 @@ from fsq_agent.agent._structured_output import coerce_string_list, parse_structu
 
 class Verifier:
     async def verify(self, task: Task, results: list[StepResult]) -> VerificationResult:
+        sdk_steps = [step for step in results if step.tool_name == "openai_agents.runner"]
+        if sdk_steps:
+            sdk_result = self._verify_sdk_result(task, sdk_steps[-1])
+            failed_steps = [step for step in results if step.status == "failed" and step.tool_name != "openai_agents.runner"]
+            if failed_steps and sdk_result.status == "success":
+                return VerificationResult(
+                    status="inconclusive",
+                    summary=f"{sdk_result.summary} Success was downgraded because one or more execution steps failed.",
+                    satisfied_criteria=sdk_result.satisfied_criteria,
+                    unmet_criteria=sdk_result.unmet_criteria,
+                    diagnostics=[*sdk_result.diagnostics, *[step.error or step.actual_outcome for step in failed_steps]],
+                )
+            return sdk_result
+
         failed_steps = [step for step in results if step.status == "failed"]
         if failed_steps:
             return VerificationResult(
@@ -15,9 +29,6 @@ class Verifier:
                 unmet_criteria=task.acceptance_criteria or ["The task flow did not complete successfully."],
                 diagnostics=[step.error or step.actual_outcome for step in failed_steps],
             )
-        sdk_steps = [step for step in results if step.tool_name == "openai_agents.runner"]
-        if sdk_steps:
-            return self._verify_sdk_result(task, sdk_steps[-1])
         return VerificationResult(
             status="inconclusive",
             summary="Execution completed, but final acceptance criteria require an MCP/LLM verifier or domain-specific checks.",

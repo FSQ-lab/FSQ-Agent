@@ -62,11 +62,69 @@ def test_fsq_task_adapter_renders_case_as_advisory_description(tmp_path: Path) -
 
     assert task.id == "fundamental_test_bing_com_website"
     assert task.name == "Fundamental Test bing.com website"
-    assert task.acceptance_criteria == []
+    assert task.acceptance_criteria == [
+        "Key action 1: assertVisible New Tab Page account menu (locator: accessibilityId=Account menu)",
+        "Key action 2: tapOn Search box in NTP page (locator: resourceId=com.microsoft.emmx:id/search_box_text)",
+        "Key action 3: inputText bing.com into Search box (locator: resourceId=com.microsoft.emmx:id/url_bar)",
+        "Key action 4: pressKey: Enter",
+        "Key action 5: assertWithAI Analyze the screenshot to verify bing webpage displayed normally.",
+    ]
     assert "advisory for execution details" in task.description
+    assert "Ordered key actions for success" in task.description
     assert "App ID: com.microsoft.emmx" in task.description
     assert "assertWithAI" in task.description
     assert "resourceId" in task.description
+
+
+def test_fsq_task_adapter_skips_optional_and_setup_teardown_key_actions(tmp_path: Path) -> None:
+    case_path = tmp_path / "optional_case.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Optional Case
+platform: android
+---
+- launchApp
+- assertVisible:
+    target: Optional promo
+    locator:
+      text: Promo
+    optional: true
+- tapOn:
+    target: Required button
+    locator:
+      accessibilityId: Required
+- killApp
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    task = FsqTaskAdapter().to_task(case)
+
+    assert task.acceptance_criteria == [
+        "Key action 1: tapOn Required button (locator: accessibilityId=Required)",
+    ]
+
+
+def test_fsq_task_adapter_falls_back_to_goal_when_no_key_actions(tmp_path: Path) -> None:
+    case_path = tmp_path / "goal_only.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Goal Only Case
+platform: android
+---
+- launchApp
+- killApp
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    task = FsqTaskAdapter().to_task(case)
+
+    assert task.acceptance_criteria == ["Goal completed: Goal Only Case"]
 
 
 def test_load_task_detects_fsq_codex_yaml(tmp_path: Path) -> None:
@@ -76,6 +134,7 @@ def test_load_task_detects_fsq_codex_yaml(tmp_path: Path) -> None:
     task = load_task(case_path)
 
     assert task.name == "Fundamental Test bing.com website"
+    assert task.acceptance_criteria[0].startswith("Key action 1:")
     assert "Reference FSQ command flow" in task.description
 
 

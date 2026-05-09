@@ -1,11 +1,14 @@
 from pathlib import Path
 from typing import Any
 
+import json
+
 import pytest
 
 from fsq_agent.models import (
     MCPServerConfig,
     MCPToolValidationSettings,
+    LocalToolOutputSettings,
     RunEvent,
     ShellSettings,
     SkillBundle,
@@ -116,6 +119,75 @@ async def test_agents_tool_factory_publish_progress_emits_event(tmp_path: Path) 
     assert output == '{"ok": true}'
     assert events[0].type == "planning_update"
     assert events[0].message == "Checking current screen. Next: Open menu."
+
+
+def test_agents_tool_factory_writes_full_output_artifact_and_returns_inline(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    factory = AgentsToolFactory(
+        CLIRunner([]),
+        FileOps(tmp_path),
+        local_tool_output_settings=LocalToolOutputSettings(full_output_max_chars=1000),
+        runs_dir=runs_dir,
+    )
+    factory.build_tools(run_id="run-1", task_id="task-1")
+
+    output = factory._format_tool_response(
+        "read_file",
+        {"tool_name": "read_file", "status": "success", "output": "hello"},
+        {"path": "file.txt"},
+    )
+
+    payload = json.loads(output)
+    artifact_path = Path(payload["artifact"]["path"])
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert payload["model_output"] == "full"
+    assert payload["result"]["output"] == "hello"
+    assert artifact["metadata"] == {"path": "file.txt"}
+    assert '"output": "hello"' in artifact["content"]
+
+
+@pytest.mark.asyncio
+async def test_agents_tool_factory_large_output_uses_artifact_search_and_slice(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    factory = AgentsToolFactory(
+        CLIRunner([]),
+        FileOps(tmp_path),
+        local_tool_output_settings=LocalToolOutputSettings(
+            full_output_max_chars=50,
+            historical_preview_chars=20,
+            model_response_max_chars=500,
+        ),
+        runs_dir=runs_dir,
+    )
+    factory.build_tools(run_id="run-1", task_id="task-1")
+
+    output = factory._format_tool_response(
+        "read_file",
+        {"tool_name": "read_file", "status": "success", "output": "alpha beta gamma " * 20},
+        {"path": "large.txt"},
+    )
+    payload = json.loads(output)
+
+    assert payload["model_output"] == "artifact_reference"
+    assert "result" not in payload
+    search_output = await factory._search_artifact(
+        None,
+        json.dumps({"artifact_path": payload["artifact"]["path"], "query": "gamma"}),
+    )
+    search_payload = json.loads(search_output)
+    assert search_payload["matches"][0]["offset"] >= 0
+
+    slice_output = await factory._read_artifact_slice(
+        None,
+        json.dumps(
+            {
+                "artifact_path": payload["artifact"]["path"],
+                "offset": search_payload["matches"][0]["offset"],
+                "length": 30,
+            }
+        ),
+    )
+    assert "gamma" in json.loads(slice_output)["content"]
 
 
 def test_agents_mcp_factory_applies_client_session_timeout() -> None:

@@ -52,6 +52,77 @@ async def test_verifier_downgrades_success_with_unmet_criteria() -> None:
 
 
 @pytest.mark.asyncio
+async def test_verifier_downgrades_success_when_acceptance_criterion_is_not_reported() -> None:
+    result = await Verifier().verify(
+        _task(),
+        [
+            StepResult(
+                step_id=1,
+                status="success",
+                actual_outcome='{"status":"success","summary":"Partial","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Criterion A"],"unmet_criteria":[],"evidence":["Observed A"],"errors":[]}',
+                tool_name="openai_agents.runner",
+            )
+        ],
+    )
+
+    assert result.status == "inconclusive"
+    assert result.unmet_criteria == ["Criterion B"]
+
+
+@pytest.mark.asyncio
+async def test_verifier_uses_structured_sdk_unmet_criteria_when_pre_plan_step_failed() -> None:
+    result = await Verifier().verify(
+        _task(),
+        [
+            StepResult(
+                step_id=1,
+                status="failed",
+                actual_outcome="Action: Complete criterion B.\nSuccess criteria:\n- Criterion B",
+                tool_name="pre_plan",
+            ),
+            StepResult(
+                step_id=2,
+                status="success",
+                actual_outcome='{"status":"failed","summary":"Only B failed","pre_plan":[],"plan_updates":["B tool failed"],"satisfied_criteria":["Criterion A"],"unmet_criteria":["Criterion B"],"evidence":["Observed A"],"errors":["B failed"]}',
+                tool_name="openai_agents.runner",
+            ),
+        ],
+    )
+
+    assert result.status == "failed"
+    assert result.satisfied_criteria == ["Criterion A"]
+    assert result.unmet_criteria == ["Criterion B"]
+    assert result.diagnostics == ["Observed A", "B tool failed", "B failed"]
+
+
+@pytest.mark.asyncio
+async def test_verifier_downgrades_structured_success_when_execution_step_failed() -> None:
+    result = await Verifier().verify(
+        _task(),
+        [
+            StepResult(
+                step_id=1,
+                status="failed",
+                actual_outcome="A recovery step failed.",
+                tool_name="pre_plan",
+            ),
+            StepResult(
+                step_id=2,
+                status="success",
+                actual_outcome='{"status":"success","summary":"Done","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Criterion A","Criterion B"],"unmet_criteria":[],"evidence":["Observed A and B"],"errors":[]}',
+                tool_name="openai_agents.runner",
+            ),
+        ],
+    )
+
+    assert result.status == "inconclusive"
+    assert result.satisfied_criteria == ["Criterion A", "Criterion B"]
+    assert result.unmet_criteria == []
+    assert "Success was downgraded" in result.summary
+    assert "A recovery step failed." in result.diagnostics
+
+
+@pytest.mark.asyncio
 async def test_verifier_marks_non_json_output_inconclusive() -> None:
     result = await Verifier().verify(
         _task(),

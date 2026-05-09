@@ -107,6 +107,57 @@ openai_agents:
     assert settings.openai_agents.base_url == "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/"
 
 
+def test_load_settings_accepts_context_and_tool_output_policy(tmp_path: Path) -> None:
+    agent_template = tmp_path / "agent.j2"
+    task_template = tmp_path / "task.j2"
+    agent_template.write_text("Agent {{ variables.voice }}", encoding="utf-8")
+    task_template.write_text("Task {{ task.id }}", encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+openai_agents:
+  enabled: false
+  prompt:
+    agent_template_path: ./agent.j2
+    task_template_path: ./task.j2
+    custom_instructions:
+      - Prefer semantic UI assertions before visual fallback.
+    variables:
+      voice: concise
+  context_trimming:
+    enabled: true
+    recent_turns: 3
+    max_tool_output_chars: 12000
+    preview_chars: 1500
+    trimmable_tools: [run_cli_tool]
+  local_tool_output:
+    artifact_enabled: true
+    always_write_artifact: true
+    artifact_subdir: artifacts/tools
+    recent_full_output_count: 4
+    full_output_max_chars: 40000
+    historical_output_mode: artifact_reference
+    historical_preview_chars: 1500
+    model_response_max_chars: 5000
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.openai_agents.context_trimming.recent_turns == 3
+    assert settings.openai_agents.prompt.agent_template_path == agent_template.resolve()
+    assert settings.openai_agents.prompt.task_template_path == task_template.resolve()
+    assert settings.openai_agents.prompt.custom_instructions == ["Prefer semantic UI assertions before visual fallback."]
+    assert settings.openai_agents.prompt.variables == {"voice": "concise"}
+    assert settings.openai_agents.context_trimming.trimmable_tools == ["run_cli_tool"]
+    assert settings.openai_agents.local_tool_output.recent_full_output_count == 4
+    assert settings.openai_agents.local_tool_output.full_output_max_chars == 40000
+
+
 def test_validate_runtime_settings_requires_api_key_when_enabled(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
