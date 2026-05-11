@@ -56,28 +56,23 @@ def run(config_path: str | None, workspace_path: str | None, task_path: str, str
 @click.option("--config", "config_path", type=click.Path(exists=False, dir_okay=False), default=None)
 @click.option("--workspace", "workspace_path", type=click.Path(file_okay=False), default=None)
 @click.option("--tasks", "tasks_path", type=click.Path(exists=False), default=None)
-@click.option("--parallel", "parallelism", type=int, default=1, show_default=True)
 @click.option("--stream/--no-stream", "stream", default=True, show_default=True)
 @click.option("--stream-format", type=click.Choice(["rich", "jsonl"]), default="rich", show_default=True)
 def run_batch(
     config_path: str | None,
     workspace_path: str | None,
     tasks_path: str | None,
-    parallelism: int,
     stream: bool,
     stream_format: str,
 ) -> None:
     async def _run_all() -> None:
         settings = load_settings(config_path, workspace_path)
         task_root = tasks_path or settings.cases.dir
-        semaphore = asyncio.Semaphore(max(1, parallelism))
 
-        async def _run_one(task_path_task):
-            async with semaphore:
-                sink = (lambda event: log_run_event(event, stream_format)) if stream else None
-                return await FsqAgent.from_settings(settings).run(task_path_task, event_sink=sink)
-
-        results = await asyncio.gather(*[_run_one(task) for task in load_tasks(task_root, settings.cases.dir)])
+        results = []
+        for task in load_tasks(task_root, settings.cases.dir):
+            sink = (lambda event: log_run_event(event, stream_format)) if stream else None
+            results.append(await FsqAgent.from_settings(settings).run(task, event_sink=sink))
         for result in results:
             log_result(result)
 

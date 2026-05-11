@@ -24,7 +24,7 @@ Current commands:
 - `fsq-agent init --config PATH --workspace PATH`: Initialize and mark the fsq-agent workspace.
 - `fsq-agent validate-config --config PATH --workspace PATH`: Validate Azure OpenAI, OpenAI Agents SDK, MCP, shell, skills, CLI, workspace, cases, and output settings without running a task.
 - `fsq-agent run --task PATH --config PATH --workspace PATH --stream/--no-stream --stream-format rich|jsonl`: Run one `.codex.yaml` FSQ case through the OpenAI Agents SDK runtime. Relative task paths resolve against `cases.dir` first. Streaming is enabled by default.
-- `fsq-agent run-batch --tasks PATH --parallel N --config PATH --workspace PATH --stream/--no-stream --stream-format rich|jsonl`: Run a directory tree of `.codex.yaml` FSQ cases with bounded concurrency. If `--tasks` is omitted, the command scans `cases.dir`.
+- `fsq-agent run-batch --tasks PATH --config PATH --workspace PATH --stream/--no-stream --stream-format rich|jsonl`: Run a directory tree of `.codex.yaml` FSQ cases serially. If `--tasks` is omitted, the command scans `cases.dir`.
 - `fsq-agent capabilities --config PATH --workspace PATH`: Print discovered MCP, CLI, and file operation capabilities.
 - `fsq-agent report --run-id ID --format FORMAT --config PATH --workspace PATH`: Print a report from the configured workspace output runs directory.
 
@@ -47,5 +47,5 @@ CLI commands catch `FsqAgentError` subclasses from `models`, render concise user
 - CLI commands are thin adapters over module APIs, not a second orchestration layer.
 - Streaming CLI output logs live `RunEvent` values from the agent. Rich format is optimized for humans and includes `HH:MM:SS LEVEL` log prefixes so operators can distinguish informational, warning, and error events. JSONL format emits one raw serialized event per log message for CI and log processors; the CLI formatter bypasses prefixes for those raw JSONL records so the stream remains machine-readable.
 - FSQ `.codex.yaml` is the primary case input. The loader treats FSQ command flow as structured reference context and lets the OpenAI Agents SDK runtime derive success criteria from the case description, assertions, locators, knowledge, and skills.
-- Batch execution uses bounded concurrency and creates independent agent runtime state per task so SDK sessions, MCP connections, and tool approvals do not leak across tasks.
+- Batch execution is intentionally serial because UI automation cases share external device and application state. Each task still creates independent agent runtime state so SDK sessions, MCP connections, and tool approvals do not leak across tasks.
 - CLI logging never emits API key values; it may log the configured API key environment variable name and whether it is present.

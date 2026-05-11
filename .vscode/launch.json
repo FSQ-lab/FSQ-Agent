@@ -31,9 +31,7 @@
         "--config",
         "config.local.yaml",
         "--tasks",
-        "fsq-testcases\\android",
-        "--parallel",
-        "1"
+        "fsq-testcases\\android"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
