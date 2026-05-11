@@ -45,6 +45,13 @@ class LocalToolOutputSettings(BaseModel):
         return value
 
 
+class LifecycleControllerSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    controller: str = "none"
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
 class OpenAIAgentPromptConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

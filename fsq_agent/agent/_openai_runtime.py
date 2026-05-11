@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import inspect
@@ -5,12 +6,22 @@ from contextlib import AsyncExitStack
 from typing import Any
 
 from fsq_agent.config import Settings, validate_runtime_settings
-from fsq_agent.models import ConfigurationError, KnowledgeBundle, RunEvent, RunEventSink, SkillBundle, StepResult, Task
-from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory
+from fsq_agent.models import AgentFinalOutput, ConfigurationError, KnowledgeBundle, RunEvent, RunEventSink, SkillBundle, StepResult, Task
+from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory, LifecycleControllerFactory, MCPToolCaller
 from fsq_agent.tools._tool_artifacts import ToolArtifactStore
 
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
-from fsq_agent.agent._structured_output import coerce_string_list, parse_structured_output
+from fsq_agent.agent._structured_output import coerce_agent_final_output, coerce_string_list, serialize_agent_final_output
+
+
+_LOCAL_TOOL_NAMES = {
+    "publish_progress",
+    "run_cli_tool",
+    "read_file",
+    "write_file",
+    "search_artifact",
+    "read_artifact_slice",
+}
 
 
 class _RecentToolOutputInputFilter:
@@ -134,6 +145,9 @@ class OpenAIAgentsRuntime:
             try:
                 async with AsyncExitStack() as stack:
                     mcp_servers, hosted_tools = await self.mcp_factory.enter_servers(stack)
+                    lifecycle_controller = LifecycleControllerFactory.create(self.settings.lifecycle)
+                    lifecycle_caller = MCPToolCaller(mcp_servers, run_id, task.id, event_sink)
+                    lifecycle_setup_completed = False
                     validation_steps = self._build_mcp_validation_steps()
                     for step in validation_steps:
                         await self._emit(
@@ -148,34 +162,43 @@ class OpenAIAgentsRuntime:
                                 payload={"step_id": step.step_id, "tool_output": step.tool_output},
                             ),
                         )
-                    agent = Agent(
-                        name=self.settings.agent.name,
-                        model=self.settings.openai_agents.model,
-                        instructions=self._build_instructions(knowledge, skills),
-                        tools=[*self.tool_factory.build_tools(skills, run_id=run_id, task_id=task.id, event_sink=event_sink), *hosted_tools],
-                        mcp_servers=mcp_servers,
-                        mcp_config={"convert_schemas_to_strict": True},
-                    )
-                    await self._emit(
-                        event_sink,
-                        RunEvent(
-                            run_id=run_id,
-                            task_id=task.id,
-                            type="planning_started",
-                            title="Planning started",
-                            message="The agent is deriving success criteria and preparing the first actions.",
-                        ),
-                    )
-                    result = Runner.run_streamed(
-                        agent,
-                        input=self._build_task_input(task),
-                        max_turns=self.settings.openai_agents.max_turns,
-                        run_config=self._build_run_config(RunConfig, ToolOutputTrimmer, provider, run_id),
-                    )
-                    async for event in result.stream_events():
-                        run_event = self._map_stream_event(event, run_id, task.id)
-                        if run_event:
-                            await self._emit(event_sink, run_event)
+                    try:
+                        await lifecycle_controller.batch_setup(lifecycle_caller)
+                        lifecycle_setup_completed = True
+                        await lifecycle_controller.case_setup(lifecycle_caller, task)
+                        agent = Agent(
+                            name=self.settings.agent.name,
+                            model=self.settings.openai_agents.model,
+                            instructions=self._build_instructions(knowledge, skills),
+                            tools=[*self.tool_factory.build_tools(skills, run_id=run_id, task_id=task.id, event_sink=event_sink), *hosted_tools],
+                            mcp_servers=mcp_servers,
+                            mcp_config={"convert_schemas_to_strict": True},
+                            output_type=AgentFinalOutput,
+                        )
+                        await self._emit(
+                            event_sink,
+                            RunEvent(
+                                run_id=run_id,
+                                task_id=task.id,
+                                type="planning_started",
+                                title="Planning started",
+                                message="The agent is deriving success criteria and preparing the first actions.",
+                            ),
+                        )
+                        result = Runner.run_streamed(
+                            agent,
+                            input=self._build_task_input(task, lifecycle_controller.runtime_policy()),
+                            max_turns=self.settings.openai_agents.max_turns,
+                            run_config=self._build_run_config(RunConfig, ToolOutputTrimmer, provider, run_id),
+                        )
+                        async for event in result.stream_events():
+                            run_event = self._map_stream_event(event, run_id, task.id)
+                            if run_event:
+                                await self._emit(event_sink, run_event)
+                    finally:
+                        if lifecycle_setup_completed:
+                            await lifecycle_controller.case_teardown(lifecycle_caller, task)
+                            await lifecycle_controller.batch_teardown(lifecycle_caller)
             except Exception as exc:
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 await self._emit(
@@ -203,7 +226,8 @@ class OpenAIAgentsRuntime:
             await client.close()
 
         duration_ms = int((time.perf_counter() - started) * 1000)
-        final_output = str(result.final_output)
+        final_output = coerce_agent_final_output(result.final_output) or str(result.final_output)
+        serialized_final_output = serialize_agent_final_output(final_output)
         pre_plan_steps = self._build_pre_plan_step_results(final_output, duration_ms)
         structured_steps = [
             *validation_steps,
@@ -214,10 +238,10 @@ class OpenAIAgentsRuntime:
             StepResult(
                 step_id=len(structured_steps) + 1,
                 status="success",
-                actual_outcome=final_output,
+                actual_outcome=serialized_final_output,
                 duration_ms=duration_ms,
                 tool_name="openai_agents.runner",
-                tool_output=final_output,
+                tool_output=final_output.model_dump(mode="json") if isinstance(final_output, AgentFinalOutput) else serialized_final_output,
             )
         ]
 
@@ -276,6 +300,7 @@ class OpenAIAgentsRuntime:
                 tool_name=self._tool_name(item),
                 tool_call_id=self._tool_call_id(item),
                 tool_arguments=self._tool_arguments(item),
+                payload={"tool_origin": self._tool_origin(self._tool_name(item))},
             )
         if name == "tool_output":
             return RunEvent(
@@ -286,6 +311,7 @@ class OpenAIAgentsRuntime:
                 message=self._tool_output_message(item),
                 tool_call_id=self._tool_call_id(item),
                 tool_output_preview=self._preview(getattr(item, "output", None)),
+                payload={"artifact_path": self._artifact_path_from_output(getattr(item, "output", None))},
             )
         if name == "reasoning_item_created":
             summary = self._reasoning_summary(item)
@@ -388,19 +414,15 @@ class OpenAIAgentsRuntime:
             )
         return steps
 
-    def _build_pre_plan_step_results(self, final_output: str, duration_ms: int) -> list[StepResult]:
-        payload = parse_structured_output(final_output)
+    def _build_pre_plan_step_results(self, final_output: AgentFinalOutput | str, duration_ms: int) -> list[StepResult]:
+        payload = coerce_agent_final_output(final_output)
         if not payload:
             return []
-        pre_plan = payload.get("pre_plan")
-        if not isinstance(pre_plan, list):
-            return []
-        plan_updates = coerce_string_list(payload.get("plan_updates"))
+        pre_plan = payload.pre_plan
+        plan_updates = payload.plan_updates
         steps: list[StepResult] = []
         for index, item in enumerate(pre_plan, start=1):
-            if not isinstance(item, dict):
-                continue
-            steps.append(self._build_pre_plan_step(index, item, plan_updates, duration_ms))
+            steps.append(self._build_pre_plan_step(index, item.model_dump(mode="json"), plan_updates, duration_ms))
         return steps
 
     def _build_pre_plan_step(
@@ -435,7 +457,34 @@ class OpenAIAgentsRuntime:
         model = PromptModelBuilder(prompt).build_agent_prompt(knowledge, skills)
         return PromptRenderer(prompt).render_agent_prompt(model)
 
-    def _build_task_input(self, task: Task) -> str:
+    def _build_task_input(self, task: Task, runtime_policy: list[str] | None = None) -> str:
         prompt = self.settings.openai_agents.prompt
-        model = PromptModelBuilder(prompt).build_task_prompt(task)
+        model = PromptModelBuilder(prompt).build_task_prompt(task, runtime_policy)
         return PromptRenderer(prompt).render_task_prompt(model)
+
+    def _tool_origin(self, tool_name: str | None) -> str:
+        if not tool_name:
+            return "unknown"
+        if tool_name == "shell":
+            return "shell"
+        if tool_name in _LOCAL_TOOL_NAMES:
+            return "local"
+        return "mcp"
+
+    def _artifact_path_from_output(self, output: Any) -> str | None:
+        if isinstance(output, str):
+            text = output
+        else:
+            text = str(output) if output is not None else ""
+        if not text:
+            return None
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        artifact = payload.get("artifact")
+        if isinstance(artifact, dict) and artifact.get("path"):
+            return str(artifact["path"])
+        return None

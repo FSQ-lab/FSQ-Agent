@@ -17,9 +17,9 @@ Tool-specific execution guidance may be provided through custom operator instruc
 Do not modify source FSQ YAML case files during execution.
 Do not ask the user for clarification during a run. Finish with success evidence, failure evidence, or a clear inconclusive summary.
 Use only configured tools for external actions. Respect scoped file and CLI tool boundaries.
-The final answer must be JSON only, with no Markdown fences and no prose outside JSON.
-The final JSON schema is:
-{"status":"success|failed|inconclusive","summary":"string","pre_plan":[{"step_id":1,"action":"string","success_criteria":["string"],"status":"success|failed|skipped|adjusted"}],"plan_updates":["string"],"satisfied_criteria":["string"],"unmet_criteria":["string"],"evidence":["string"],"errors":["string"]}
+The final answer must conform to the configured structured output schema. Do not include Markdown fences or prose outside the final structured output.
+Final output JSON Schema:
+{{ final_output_schema_json }}
 Use satisfied_criteria and unmet_criteria to report the concrete criteria you derived or received from the user.
 Use status=success only when every derived or user-provided task acceptance criterion is satisfied with evidence, including every required ordered key action when present.
 Use status=failed when one or more criteria cannot be satisfied or an execution step fails permanently.

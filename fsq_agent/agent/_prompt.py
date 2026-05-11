@@ -1,10 +1,11 @@
 from dataclasses import asdict, dataclass, field
+import json
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 
-from fsq_agent.models import ConfigurationError, KnowledgeBundle, OpenAIAgentPromptConfig, SkillBundle, Task
+from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ConfigurationError, KnowledgeBundle, OpenAIAgentPromptConfig, SkillBundle, Task
 
 
 _DEFAULT_TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -38,6 +39,7 @@ class AgentPromptModel:
     flow_templates: list[PromptFlowTemplate] = field(default_factory=list)
     knowledge_warnings: list[str] = field(default_factory=list)
     skills: list[PromptSkill] = field(default_factory=list)
+    final_output_schema_json: str = ""
     variables: dict[str, Any] = field(default_factory=dict)
 
 
@@ -47,6 +49,7 @@ class TaskPromptModel:
     name: str
     description: str
     acceptance_criteria: list[str] = field(default_factory=list)
+    input_json: str = ""
     variables: dict[str, Any] = field(default_factory=dict)
 
 
@@ -68,15 +71,28 @@ class PromptModelBuilder:
                 )
                 for skill in skills
             ],
+            final_output_schema_json=json.dumps(AgentFinalOutput.model_json_schema(), indent=2, ensure_ascii=False),
             variables=dict(self.settings.variables),
         )
 
-    def build_task_prompt(self, task: Task) -> TaskPromptModel:
+    def build_task_prompt(self, task: Task, runtime_policy: list[str] | None = None) -> TaskPromptModel:
+        acceptance_policy = (
+            "Use the provided task acceptance criteria as required success criteria."
+            if task.acceptance_criteria
+            else "Derive acceptance criteria from the task description, knowledge, matched flows, and loaded skills. If the task is too broad, use successful flow completion with enough evidence as the success standard."
+        )
+        task_input = AgentTaskInput(
+            task=task,
+            acceptance_criteria=list(task.acceptance_criteria),
+            runtime_policy=list(runtime_policy or []),
+            acceptance_policy=acceptance_policy,
+        )
         return TaskPromptModel(
             id=task.id,
             name=task.name,
             description=task.description,
             acceptance_criteria=list(task.acceptance_criteria),
+            input_json=task_input.model_dump_json(indent=2),
             variables=dict(self.settings.variables),
         )
 

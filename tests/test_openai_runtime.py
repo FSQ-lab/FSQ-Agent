@@ -104,6 +104,8 @@ def test_runtime_task_input_requests_derived_acceptance_criteria() -> None:
 
     task_input = runtime._build_task_input(task)
 
+    assert "Structured task input:" in task_input
+    assert '"schema_version": "task_input_v1"' in task_input
     assert "Task acceptance criteria: none" in task_input
     assert "Derive acceptance criteria" in task_input
 
@@ -121,6 +123,8 @@ def test_runtime_instructions_include_custom_operator_instructions() -> None:
 
     assert "Custom operator instructions:" in instructions
     assert "Prefer accessibility locators before coordinate-based actions." in instructions
+    assert "Final output JSON Schema:" in instructions
+    assert "AgentFinalOutput" in instructions
 
 
 def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) -> None:
@@ -170,7 +174,9 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
 
     assert "Custom operator instructions:" in renderer.render_agent_prompt(agent_model)
     assert "- Custom." in renderer.render_agent_prompt(agent_model)
-    assert "Task ID: task-1" in renderer.render_task_prompt(task_model)
+    rendered_task = renderer.render_task_prompt(task_model)
+    assert "Structured task input:" in rendered_task
+    assert '"id": "task-1"' in rendered_task
     assert "- Done." in renderer.render_task_prompt(task_model)
 
 

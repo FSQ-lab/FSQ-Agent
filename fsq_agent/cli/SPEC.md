@@ -34,7 +34,8 @@ Current commands:
 - `__main__.py`: Package entry point for `python -m fsq_agent.cli` and VS Code launch configurations.
 - `_main.py`: Click command group and command handlers.
 - `_task_loader.py`: FSQ `.codex.yaml` loading and conversion to agent tasks.
-- `_formatting.py`: Rich console rendering helpers.
+- `_formatting.py`: Logging-backed CLI rendering helpers for task results, live events, and capability tables.
+- `_logging.py`: CLI logging configuration.
 - `SPEC.md`: Module design.
 
 ## Error Handling
@@ -44,7 +45,7 @@ CLI commands catch `FsqAgentError` subclasses from `models`, render concise user
 ## Design Decisions
 
 - CLI commands are thin adapters over module APIs, not a second orchestration layer.
-- Streaming CLI output renders live `RunEvent` values from the agent. Rich format is optimized for humans; JSONL format emits one serialized event per line for CI and log processors.
+- Streaming CLI output logs live `RunEvent` values from the agent. Rich format is optimized for humans and includes `HH:MM:SS LEVEL` log prefixes so operators can distinguish informational, warning, and error events. JSONL format emits one raw serialized event per log message for CI and log processors; the CLI formatter bypasses prefixes for those raw JSONL records so the stream remains machine-readable.
 - FSQ `.codex.yaml` is the primary case input. The loader treats FSQ command flow as structured reference context and lets the OpenAI Agents SDK runtime derive success criteria from the case description, assertions, locators, knowledge, and skills.
 - Batch execution uses bounded concurrency and creates independent agent runtime state per task so SDK sessions, MCP connections, and tool approvals do not leak across tasks.
-- CLI output never prints API key values; it may print the configured API key environment variable name and whether it is present.
+- CLI logging never emits API key values; it may log the configured API key environment variable name and whether it is present.

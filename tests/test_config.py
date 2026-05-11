@@ -153,6 +153,26 @@ openai_agents:
     assert settings.openai_agents.local_tool_output.full_output_max_chars == 40000
 
 
+def test_load_settings_accepts_lifecycle_controller(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+lifecycle:
+  controller: appium_android
+  options: {}
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.lifecycle.controller == "appium_android"
+    assert settings.lifecycle.options == {}
+
+
 def test_validate_runtime_settings_requires_api_key_when_enabled(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

@@ -1,62 +1,61 @@
 import json
-
-from rich.console import Console
-from rich.table import Table
+import logging
 
 from fsq_agent.models import RunEvent, TaskResult, ToolDefinition
 
 
-console = Console()
+logger = logging.getLogger(__name__)
 
 
-def print_capabilities(capabilities: list[ToolDefinition]) -> None:
-    table = Table(title="Available Capabilities")
-    table.add_column("Name")
-    table.add_column("Kind")
-    table.add_column("Description")
-    for capability in capabilities:
-        table.add_row(capability.name, capability.kind, capability.description)
-    console.print(table)
+def log_capabilities(capabilities: list[ToolDefinition]) -> None:
+    rows = [("Name", "Kind", "Description"), *[(capability.name, capability.kind, capability.description) for capability in capabilities]]
+    widths = [max(len(str(row[index])) for row in rows) for index in range(3)]
+    separator = "-+-".join("-" * width for width in widths)
+    lines = ["Available Capabilities", _format_row(rows[0], widths), separator]
+    lines.extend(_format_row(row, widths) for row in rows[1:])
+    logger.info("\n".join(lines))
 
 
-def print_result(result: TaskResult) -> None:
-    console.print(f"Task {result.task_id}: {result.status}")
-    console.print(f"Report: {result.report.path}")
+def log_result(result: TaskResult) -> None:
+    logger.info("Task %s: %s", result.task_id, result.status)
+    logger.info("Report: %s", result.report.path)
 
 
-def print_run_event(event: RunEvent, stream_format: str = "rich") -> None:
+def log_run_event(event: RunEvent, stream_format: str = "rich") -> None:
     if stream_format == "jsonl":
-        console.print(json.dumps(event.model_dump(mode="json"), ensure_ascii=False))
+        logger.info(json.dumps(event.model_dump(mode="json"), ensure_ascii=False), extra={"fsq_raw_message": True})
         return
 
+    log = _event_logger(event)
     prefix = f"[{event.sequence}] {event.title}"
     if event.type in {"tool_call_started", "tool_call_completed", "tool_call_failed"} and event.tool_name:
         prefix = f"{prefix}: {event.tool_name}"
-    style = _event_style(event.type)
-    console.print(f"{prefix}", style=style)
+    log(prefix)
     if event.message:
-        console.print(f"  {event.message}")
+        log("  %s", event.message)
     if event.tool_arguments is not None:
-        console.print(f"  args: {_compact(event.tool_arguments)}")
+        log("  args: %s", _compact(event.tool_arguments))
     if event.tool_output_preview:
-        console.print(f"  output: {event.tool_output_preview}")
+        log("  output: %s", event.tool_output_preview)
     if event.duration_ms is not None:
-        console.print(f"  duration: {event.duration_ms}ms")
+        log("  duration: %sms", event.duration_ms)
 
 
-def _event_style(event_type: str) -> str:
-    if event_type.endswith("failed") or event_type == "run_failed":
-        return "bold red"
-    if event_type.endswith("completed") or event_type == "run_completed":
-        return "green"
-    if event_type.startswith("tool_call"):
-        return "cyan"
-    if event_type in {"planning_started", "planning_update", "reasoning_summary"}:
-        return "magenta"
-    return "bold"
+def _event_logger(event: RunEvent):
+    if event.type in {"tool_call_failed", "run_failed"}:
+        return logger.error
+    if event.type == "step_completed" and event.payload.get("source") == "mcp_validation":
+        return logger.warning
+    if event.title.lower().startswith("mcp tool validation"):
+        return logger.warning
+    return logger.info
 
 
 def _compact(value: object, limit: int = 1000) -> str:
     text = json.dumps(value, ensure_ascii=False, default=str) if not isinstance(value, str) else value
     text = text.replace("\r", " ").replace("\n", " ")
     return text if len(text) <= limit else f"{text[:limit]}..."
+
+
+def _format_row(row: tuple[str, str, str], widths: list[int]) -> str:
+    return " | ".join(str(value).ljust(widths[index]) for index, value in enumerate(row))

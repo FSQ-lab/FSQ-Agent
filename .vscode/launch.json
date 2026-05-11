@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "fsq-agent",
+      "name": "fsq-agent: android single",
       "type": "debugpy",
       "request": "launch",
       "module": "fsq_agent.cli",
@@ -14,6 +14,26 @@
         "config.local.yaml",
         "--task",
         "fsq-testcases\\android\\search_bottom_mode\\complete_search_process_with_bottom_omnibox.codex.yaml"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "fsq-agent: android batch",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "fsq_agent.cli",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "run-batch",
+        "--config",
+        "config.local.yaml",
+        "--tasks",
+        "fsq-testcases\\android",
+        "--parallel",
+        "1"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,

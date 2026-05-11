@@ -61,9 +61,10 @@ def test_report_generator_writes_markdown_and_json(tmp_path: Path) -> None:
     assert artifact.path.exists()
     payload = json.loads((tmp_path / "run-1" / "report.json").read_text(encoding="utf-8"))
     assert "steps" not in payload
-    assert payload["plan"]["source"] == "openai_agents.runner.final_output"
-    assert payload["plan"]["items"][0]["action"] == "Press Back"
-    assert payload["execution"]["step_records"][0]["source"] == "pre_plan"
+    assert "plan" not in payload
+    assert payload["agent_output"]["schema_version"] == "task_run_v1"
+    assert payload["agent_output"]["pre_plan"][0]["action"] == "Press Back"
+    assert payload["execution"]["runtime_steps"][0]["source"] == "pre_plan"
     assert payload["execution"]["tool_calls"] == []
     assert artifact.evidence_manifest_path is not None
     assert artifact.evidence_manifest_path.exists()
@@ -83,6 +84,7 @@ def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> N
                         "tool_call_id": "call-1",
                         "tool_name": "appium_find_element",
                         "tool_arguments": {"strategy": "id", "selector": "target"},
+                        "payload": {"tool_origin": "mcp"},
                     }
                 ),
                 json.dumps(
@@ -92,6 +94,7 @@ def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> N
                         "timestamp": "2026-05-09T00:00:01Z",
                         "tool_call_id": "call-1",
                         "tool_output_preview": "found",
+                        "payload": {"artifact_path": None},
                     }
                 ),
             ]
@@ -106,6 +109,7 @@ def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> N
         {
             "tool_call_id": "call-1",
             "tool_name": "appium_find_element",
+            "tool_origin": "mcp",
             "status": "completed",
             "started_sequence": 10,
             "completed_sequence": 11,
@@ -113,9 +117,50 @@ def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> N
             "completed_at": "2026-05-09T00:00:01Z",
             "arguments": {"strategy": "id", "selector": "target"},
             "output_preview": "found",
+            "artifact_path": None,
+            "error": None,
             "duration_ms": None,
         }
     ]
+
+
+def test_report_generator_summarizes_local_tool_calls_without_call_id(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-local-events"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "tool_call_started",
+                        "sequence": 3,
+                        "timestamp": "2026-05-09T00:00:00Z",
+                        "tool_name": "search_artifact",
+                        "tool_arguments": {"query": "Settings"},
+                        "payload": {"tool_origin": "local"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "tool_call_completed",
+                        "sequence": 4,
+                        "timestamp": "2026-05-09T00:00:01Z",
+                        "tool_name": "search_artifact",
+                        "tool_output_preview": "match",
+                        "payload": {"tool_origin": "local", "artifact_path": "output/runs/run/artifacts/tools/a.json"},
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ReportGenerator(tmp_path).generate("run-local-events", _task(), [], _verification())
+
+    payload = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    assert payload["execution"]["tool_calls"][0]["tool_name"] == "search_artifact"
+    assert payload["execution"]["tool_calls"][0]["tool_origin"] == "local"
+    assert payload["execution"]["tool_calls"][0]["artifact_path"] == "output/runs/run/artifacts/tools/a.json"
 
 
 def test_report_generator_writes_minimal_json_fallback(tmp_path: Path) -> None:

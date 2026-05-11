@@ -1,3 +1,10 @@
+from fsq_agent.models._agent_io import (
+    AGENT_FINAL_OUTPUT_SCHEMA_VERSION,
+    AgentFinalOutput,
+    AgentPlanItem,
+    AgentTaskInput,
+    ToolCallRecord,
+)
 from fsq_agent.models._exceptions import (
     ConfigurationError,
     FsqAgentError,
@@ -14,6 +21,7 @@ from fsq_agent.models._settings import (
     AgentSettings,
     CaseSettings,
     ContextTrimmingSettings,
+    LifecycleControllerSettings,
     LocalToolOutputSettings,
     OpenAIAgentPromptConfig,
     OpenAIAgentsSettings,
@@ -41,6 +49,11 @@ from fsq_agent.models._tools import (
 )
 
 __all__ = [
+    "AGENT_FINAL_OUTPUT_SCHEMA_VERSION",
+    "AgentTaskInput",
+    "AgentPlanItem",
+    "AgentFinalOutput",
+    "ToolCallRecord",
     "Task",
     "ExecutionPlan",
     "ExecutionStep",
@@ -64,6 +77,7 @@ __all__ = [
     "OpenAIAgentsSettings",
     "OpenAIAgentPromptConfig",
     "ContextTrimmingSettings",
+    "LifecycleControllerSettings",
     "LocalToolOutputSettings",
     "SkillConfig",
     "SkillBundle",

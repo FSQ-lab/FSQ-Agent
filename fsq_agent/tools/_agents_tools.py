@@ -271,6 +271,7 @@ class AgentsToolFactory:
                 message=f"Calling {tool_name}.",
                 tool_name=tool_name,
                 tool_arguments=self._redact(arguments),
+                payload={"tool_origin": "local"},
             )
         )
 
@@ -285,6 +286,7 @@ class AgentsToolFactory:
                 tool_name=tool_name,
                 tool_output_preview=self._preview(output),
                 duration_ms=int((time.perf_counter() - started) * 1000),
+                payload={"tool_origin": "local", "artifact_path": self._artifact_path_from_response(output)},
             )
         )
 
@@ -298,6 +300,7 @@ class AgentsToolFactory:
                 message=error,
                 tool_name=tool_name,
                 duration_ms=int((time.perf_counter() - started) * 1000),
+                payload={"tool_origin": "local"},
             )
         )
 
@@ -352,6 +355,18 @@ class AgentsToolFactory:
             preview_limit //= 2
         response["preview"] = ""
         return json.dumps(response, ensure_ascii=False)
+
+    def _artifact_path_from_response(self, output: str) -> str | None:
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        artifact = payload.get("artifact")
+        if isinstance(artifact, dict) and artifact.get("path"):
+            return str(artifact["path"])
+        return None
 
     def _redact(self, value: Any) -> Any:
         sensitive = ("token", "key", "secret", "password", "authorization", "cookie")

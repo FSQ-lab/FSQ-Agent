@@ -36,6 +36,10 @@ openai_agents:
     historical_preview_chars: 1000
     model_response_max_chars: 4000
 
+lifecycle:
+  controller: none
+  options: {}
+
 mcp_servers:
   - name: browser
     transport: stdio

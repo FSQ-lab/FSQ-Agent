@@ -1,6 +1,6 @@
 import pytest
 
-from fsq_agent.models import ExecutionStep, LocalToolOutputSettings, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task
+from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, LifecycleControllerSettings, LocalToolOutputSettings, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task
 
 
 def test_task_defaults() -> None:
@@ -26,6 +26,26 @@ def test_execution_step_requires_positive_id() -> None:
     assert step.step_id == 1
 
 
+def test_agent_final_output_defaults_schema_version() -> None:
+    output = AgentFinalOutput(status="success", summary="Done")
+
+    assert output.schema_version == "task_run_v1"
+    assert output.pre_plan == []
+
+
+def test_agent_task_input_wraps_task_contract() -> None:
+    task = Task(id="task-1", description="Do a thing", acceptance_criteria=["Done."])
+    task_input = AgentTaskInput(
+        task=task,
+        acceptance_criteria=task.acceptance_criteria,
+        acceptance_policy="Use provided criteria.",
+    )
+
+    assert task_input.schema_version == "task_input_v1"
+    assert task_input.output_contract == "task_run_v1"
+    assert task_input.task.id == "task-1"
+
+
 def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:
     settings = OpenAIAgentsSettings()
 
@@ -40,6 +60,13 @@ def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:
     assert settings.context_trimming.max_tool_output_chars == 8000
     assert settings.local_tool_output.always_write_artifact is True
     assert settings.local_tool_output.full_output_max_chars == 30000
+
+
+def test_lifecycle_controller_settings_default_to_noop() -> None:
+    settings = LifecycleControllerSettings()
+
+    assert settings.controller == "none"
+    assert settings.options == {}
 
 
 def test_skill_config_defaults_to_markdown() -> None:

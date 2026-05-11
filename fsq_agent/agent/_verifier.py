@@ -1,8 +1,6 @@
-from typing import Any
+from fsq_agent.models import AgentFinalOutput, StepResult, Task, VerificationResult
 
-from fsq_agent.models import StepResult, Task, VerificationResult
-
-from fsq_agent.agent._structured_output import coerce_string_list, parse_structured_output
+from fsq_agent.agent._structured_output import coerce_agent_final_output
 
 
 class Verifier:
@@ -48,14 +46,13 @@ class Verifier:
                 diagnostics=[step.actual_outcome],
             )
 
-        raw_status = str(payload.get("status", "inconclusive")).lower()
-        status = raw_status if raw_status in {"success", "failed", "inconclusive"} else "inconclusive"
-        satisfied_criteria = coerce_string_list(payload.get("satisfied_criteria"))
-        unmet_criteria = coerce_string_list(payload.get("unmet_criteria"))
-        evidence = coerce_string_list(payload.get("evidence"))
-        errors = coerce_string_list(payload.get("errors"))
-        plan_updates = coerce_string_list(payload.get("plan_updates"))
-        summary = str(payload.get("summary") or "Task verification completed.")
+        status = payload.status
+        satisfied_criteria = list(payload.satisfied_criteria)
+        unmet_criteria = list(payload.unmet_criteria)
+        evidence = list(payload.evidence)
+        errors = list(payload.errors)
+        plan_updates = list(payload.plan_updates)
+        summary = payload.summary or "Task verification completed."
         expected_criteria = self._expected_criteria(task, satisfied_criteria, unmet_criteria)
 
         if status == "success" and not expected_criteria:
@@ -85,8 +82,8 @@ class Verifier:
             diagnostics=diagnostics,
         )
 
-    def _parse_final_output(self, output: str) -> dict[str, Any] | None:
-        return parse_structured_output(output)
+    def _parse_final_output(self, output: object) -> AgentFinalOutput | None:
+        return coerce_agent_final_output(output)
 
     def _expected_criteria(
         self,
