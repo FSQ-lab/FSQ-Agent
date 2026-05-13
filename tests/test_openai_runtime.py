@@ -10,6 +10,7 @@ from fsq_agent.config import Settings
 from fsq_agent.models import (
     KnowledgeBundle,
     LocalToolOutputSettings,
+    MCPToolValidationSettings,
     MCPToolValidationIssue,
     OpenAIAgentsSettings,
     OutputSettings,
@@ -174,6 +175,8 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
 
     assert "Custom operator instructions:" in renderer.render_agent_prompt(agent_model)
     assert "- Custom." in renderer.render_agent_prompt(agent_model)
+    assert "Preserve the semantic fidelity of ordered key actions." in renderer.render_agent_prompt(agent_model)
+    assert "tool usage error" in renderer.render_agent_prompt(agent_model)
     rendered_task = renderer.render_task_prompt(task_model)
     assert "Structured task input:" in rendered_task
     assert '"id": "task-1"' in rendered_task
@@ -214,6 +217,28 @@ def test_runtime_builds_mcp_validation_diagnostic_steps() -> None:
     assert steps[0].tool_name == "mcp_tool_validation"
     assert "appium-mcp.appium_driver_settings" in steps[0].actual_outcome
     assert steps[0].tool_output["schema_path"] == "$.propertyNames"
+
+
+def test_runtime_mcp_strict_schema_conversion_follows_config() -> None:
+    strict_runtime = OpenAIAgentsRuntime(
+        Settings(
+            openai_agents=OpenAIAgentsSettings(enabled=True),
+            mcp_tool_validation=MCPToolValidationSettings(strict_schema=True),
+        ),
+        _EmptyToolFactory(),
+        _FailingMCPFactory(),
+    )
+    relaxed_runtime = OpenAIAgentsRuntime(
+        Settings(
+            openai_agents=OpenAIAgentsSettings(enabled=True),
+            mcp_tool_validation=MCPToolValidationSettings(strict_schema=False),
+        ),
+        _EmptyToolFactory(),
+        _FailingMCPFactory(),
+    )
+
+    assert strict_runtime._build_mcp_config() == {"convert_schemas_to_strict": True}
+    assert relaxed_runtime._build_mcp_config() == {"convert_schemas_to_strict": False}
 
 
 def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:

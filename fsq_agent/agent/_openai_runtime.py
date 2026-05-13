@@ -172,7 +172,7 @@ class OpenAIAgentsRuntime:
                             instructions=self._build_instructions(knowledge, skills),
                             tools=[*self.tool_factory.build_tools(skills, run_id=run_id, task_id=task.id, event_sink=event_sink), *hosted_tools],
                             mcp_servers=mcp_servers,
-                            mcp_config={"convert_schemas_to_strict": True},
+                            mcp_config=self._build_mcp_config(),
                             output_type=AgentFinalOutput,
                         )
                         await self._emit(
@@ -278,6 +278,9 @@ class OpenAIAgentsRuntime:
                 artifact_store,
             )
         return run_config_cls(model_provider=provider, call_model_input_filter=input_filter)
+
+    def _build_mcp_config(self) -> dict[str, Any]:
+        return {"convert_schemas_to_strict": self.settings.mcp_tool_validation.strict_schema}
 
     def _map_stream_event(self, event: Any, run_id: str, task_id: str) -> RunEvent | None:
         event_type = getattr(event, "type", "")

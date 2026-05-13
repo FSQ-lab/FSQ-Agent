@@ -94,7 +94,8 @@ class FsqAgent:
                 )
             )
             results = await self.runtime.run_task(task, knowledge, skills, run_id, emitter.emit)
-            verification = await self.verifier.verify(task, results)
+            events_path = self.event_logger.log_root / run_id / "events.jsonl" if self.event_logger else None
+            verification = await self.verifier.verify(task, results, events_path=events_path)
             report = self.reporter.generate(run_id, task, results, verification)
             duration_ms = int((time.perf_counter() - started) * 1000)
             result = TaskResult(
@@ -117,16 +118,18 @@ class FsqAgent:
                 )
             )
             return result
-        except Exception as exc:
+        except BaseException as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
+            message = str(exc) or exc.__class__.__name__
             await emitter.emit(
                 RunEvent(
                     run_id=run_id,
                     task_id=task.id,
                     type="run_failed",
                     title="Run failed",
-                    message=str(exc),
+                    message=message,
                     duration_ms=duration_ms,
+                    payload={"exception_type": exc.__class__.__name__},
                 )
             )
             raise

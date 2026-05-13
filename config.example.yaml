@@ -40,6 +40,13 @@ lifecycle:
   controller: none
   options: {}
 
+mcp_tool_validation:
+  enabled: true
+  invalid_tool_policy: auto_ignore
+  # Also controls OpenAI Agents SDK MCP schema conversion via convert_schemas_to_strict.
+  strict_schema: true
+  fail_when_all_tools_filtered: true
+
 mcp_servers:
   - name: browser
     transport: stdio
@@ -54,7 +61,7 @@ skills:
     description: Describes how the agent should use configured CLI and MCP tools for automation tasks.
     kind: markdown
     path: automation-basics.md
-    required: false
+    required: true
 
 shell:
   enabled: false

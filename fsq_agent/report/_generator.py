@@ -40,13 +40,14 @@ class ReportGenerator:
         steps: list[StepResult],
         verification: VerificationResult,
     ) -> None:
+        tool_calls = self._load_tool_calls(report_dir)
         report_path.write_text(
-            self._render_markdown(task, steps, verification),
+            self._render_markdown(task, steps, verification, tool_calls),
             encoding="utf-8",
         )
         json_path = report_dir / "report.json"
         json_path.write_text(
-            json.dumps(self._build_json_report(report_dir, task, steps, verification), indent=2, ensure_ascii=False),
+            json.dumps(self._build_json_report(report_dir, task, steps, verification, tool_calls), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 
@@ -56,17 +57,19 @@ class ReportGenerator:
         task: Task,
         steps: list[StepResult],
         verification: VerificationResult,
+        tool_calls: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         agent_output = self._parse_runner_output(steps)
+        tool_calls = tool_calls if tool_calls is not None else self._load_tool_calls(report_dir)
         return {
             "task": task.model_dump(mode="json"),
             "agent_output": agent_output.model_dump(mode="json") if agent_output else None,
             "execution": {
                 "runtime_steps": [self._step_record(step) for step in steps],
-                "tool_calls": self._load_tool_calls(report_dir),
+                "tool_calls": tool_calls,
             },
             "verification": verification.model_dump(mode="json"),
-            "failure_classification": self.failure_analyzer.classify(steps, verification),
+            "failure_classification": self.failure_analyzer.classify(steps, verification, tool_calls),
         }
 
     def _parse_runner_output(self, steps: list[StepResult]) -> AgentFinalOutput | None:
@@ -200,13 +203,21 @@ class ReportGenerator:
             evidence_manifest_path=manifest_path,
         )
 
-    def _render_markdown(self, task: Task, steps: list[StepResult], verification: VerificationResult) -> str:
+    def _render_markdown(
+        self,
+        task: Task,
+        steps: list[StepResult],
+        verification: VerificationResult,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> str:
         agent_output = self._parse_runner_output(steps)
+        failure_classification = self.failure_analyzer.classify(steps, verification, tool_calls or [])
         lines = [
             f"# Test Report: {task.name}",
             "",
             f"Task ID: `{task.id}`",
             f"Status: `{verification.status}`",
+            f"Failure Classification: `{failure_classification}`",
             "",
             "## Summary",
             "",

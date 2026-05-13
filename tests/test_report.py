@@ -124,6 +124,67 @@ def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> N
     ]
 
 
+def test_report_generator_classifies_tool_usage_error_with_unmet_semantic_action(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-tool-usage-error"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "tool_call_started",
+                        "sequence": 89,
+                        "timestamp": "2026-05-09T00:00:00Z",
+                        "tool_call_id": "call-1",
+                        "tool_name": "appium_perform_actions",
+                        "tool_arguments": {"actions": [{"type": "key", "parameters": {"pointerType": "touch"}}]},
+                        "payload": {"tool_origin": "mcp"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "tool_call_completed",
+                        "sequence": 90,
+                        "timestamp": "2026-05-09T00:00:01Z",
+                        "tool_call_id": "call-1",
+                        "tool_output_preview": "Failed to perform actions. pointerType parameter is only supported for action type 'pointer' in 'backKey' action",
+                        "payload": {"artifact_path": None},
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    verification = VerificationResult(
+        status="failed",
+        summary="Could not prove required ordered key action pressKey: Back.",
+        unmet_criteria=["Key action 11: pressKey: Back"],
+    )
+
+    artifact = ReportGenerator(tmp_path).generate("run-tool-usage-error", _task(), [], verification)
+
+    payload = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    assert payload["failure_classification"] == "tool_usage_error + semantic_action_unmet"
+    assert "Failure Classification: `tool_usage_error + semantic_action_unmet`" in artifact.path.read_text(encoding="utf-8")
+
+
+def test_report_generator_classifies_conflicting_key_identity_diagnostic(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-conflicting-key"
+    run_dir.mkdir(parents=True)
+    verification = VerificationResult(
+        status="failed",
+        summary="Required ordered key action pressKey: Enter was unmet.",
+        unmet_criteria=["Key action 9: pressKey: Enter"],
+        diagnostics=["Tool usage issue: appium_mobile_press_key was called with conflicting key identities."],
+    )
+
+    artifact = ReportGenerator(tmp_path).generate("run-conflicting-key", _task(), [], verification)
+
+    payload = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    assert payload["failure_classification"] == "tool_usage_error + semantic_action_unmet"
+    assert "Failure Classification: `tool_usage_error + semantic_action_unmet`" in artifact.path.read_text(encoding="utf-8")
+
+
 def test_report_generator_summarizes_local_tool_calls_without_call_id(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-local-events"
     run_dir.mkdir(parents=True)

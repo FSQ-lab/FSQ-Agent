@@ -22,3 +22,23 @@ def test_skill_loader_returns_warning_for_missing_optional_skill(tmp_path: Path)
 
     assert bundles[0].instructions == ""
     assert bundles[0].warnings
+
+
+def test_repository_appium_android_skill_documents_tool_usage_recovery() -> None:
+    skill_path = Path(__file__).resolve().parents[1] / "knowledge" / "skills" / "appium-android.md"
+
+    bundles = SkillLoader(skill_path.parent).load([SkillConfig(name="appium-android", path=Path("appium-android.md"), required=True)])
+
+    assert "Tool Selection" in bundles[0].instructions
+    assert "Tool Usage Error Recovery" in bundles[0].instructions
+    assert "Correct Key Examples" in bundles[0].instructions
+    assert "appium_mobile_press_key" in bundles[0].instructions
+    assert '"key": "BACK"' in bundles[0].instructions
+    assert '"keyCode": 4' in bundles[0].instructions
+    assert '"keyCode": 66' in bundles[0].instructions
+    assert '"key": "ENTER"' not in bundles[0].instructions
+    assert "keyCode-only" not in bundles[0].instructions
+    assert "It only hides or queries the software keyboard" in bundles[0].instructions
+    assert "required `pressKey` action succeeded" in bundles[0].instructions
+    assert "appium_perform_actions" not in bundles[0].instructions
+    assert "pointerType" not in bundles[0].instructions

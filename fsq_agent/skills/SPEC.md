@@ -29,5 +29,6 @@ Missing optional skill references are returned as skill warnings. Invalid or mis
 
 - Skills are advisory context, not executable authority.
 - Local Markdown skills are rendered into instructions/context.
+- MCP-specific skills should describe scope, tool selection, argument rules, tool usage error recovery, semantic fidelity rules, and evidence rules. They guide the generic agent for the configured runtime without turning the agent runtime into an MCP-specific implementation.
 - When shell execution is enabled, file-backed skills can be attached to the SDK `ShellTool` local environment as descriptive skill metadata; commands still execute only through configured CLI tools or shell policy.
 - Skill models remain centralized in `models` so runtime, tools, and configuration share the same serializable contracts.

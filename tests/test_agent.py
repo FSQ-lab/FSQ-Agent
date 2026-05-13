@@ -1,3 +1,4 @@
+import asyncio
 import re
 from pathlib import Path
 
@@ -72,6 +73,18 @@ class _Runtime:
         ]
 
 
+class _CancelledRuntime:
+    async def run_task(
+        self,
+        task: Task,
+        knowledge: KnowledgeBundle,
+        skills: list[object],
+        run_id: str,
+        event_sink: object | None = None,
+    ) -> list[StepResult]:
+        raise asyncio.CancelledError()
+
+
 class _Reporter:
     def __init__(self) -> None:
         self.run_ids: list[str] = []
@@ -134,3 +147,31 @@ async def test_agent_run_emits_and_persists_live_events(tmp_path: Path) -> None:
     timeline_path = tmp_path / result.report.run_id / "events.jsonl"
     assert timeline_path.exists()
     assert "run_completed" in timeline_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_agent_run_persists_run_failed_for_cancellation(tmp_path: Path) -> None:
+    events: list[RunEvent] = []
+    agent = FsqAgent(
+        Settings(),
+        verifier=Verifier(),
+        reporter=_Reporter(),  # type: ignore[arg-type]
+        knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
+        flow_manager=_FlowManager(),  # type: ignore[arg-type]
+        skill_loader=_SkillLoader(),  # type: ignore[arg-type]
+        runtime=_CancelledRuntime(),  # type: ignore[arg-type]
+        event_logger=ExecutionLogger(tmp_path),
+    )
+    task = Task(id="smoke", name="Smoke", description="Record a smoke test task.")
+
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run(task, event_sink=events.append)
+
+    assert [event.type for event in events] == ["run_started", "agent_started", "run_failed"]
+    assert events[-1].message == "CancelledError"
+    assert events[-1].payload["exception_type"] == "CancelledError"
+    timeline_paths = list(tmp_path.glob("smoke-*/events.jsonl"))
+    assert len(timeline_paths) == 1
+    timeline = timeline_paths[0].read_text(encoding="utf-8")
+    assert "run_failed" in timeline
+    assert "CancelledError" in timeline

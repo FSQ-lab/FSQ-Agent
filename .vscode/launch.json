@@ -13,7 +13,7 @@
         "--config",
         "config.local.yaml",
         "--task",
-        "fsq-testcases\\android\\search_bottom_mode\\complete_search_process_with_bottom_omnibox.codex.yaml"
+        "fsq-testcases/android/overflow_menu/complete_all_menu_workflow_through_overflow_menu_on_ntp.codex.yaml"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
