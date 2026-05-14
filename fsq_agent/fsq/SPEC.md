@@ -34,6 +34,7 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Missing comm
 - Markdown conversion reports are intentionally ignored and are not loaded as task inputs.
 - FSQ commands are reference flow hints rather than a mandatory deterministic script.
 - Required executable and assertion commands are extracted as ordered key actions. Key actions represent the goal's necessary path and must be satisfied in the same relative order, but transient dialogs, waits, screenshots, diagnostics, and recovery steps may be inserted between them.
+- `assertWithAI` commands are preserved as required ordered visual assertions when not optional. FSQ does not evaluate the image itself; it carries the assertion prompt into the task so the agent can collect screenshot evidence and the verification layer can judge the visual claim.
 - `launchApp` and `killApp` are treated as setup and teardown intent, not as core goal key actions.
 - Commands marked `optional: true` are preserved in the reference flow but are not required acceptance criteria.
 - If a case has no required key actions, the case name is used as the goal-level acceptance criterion.

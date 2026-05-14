@@ -144,6 +144,47 @@ async def test_agents_tool_factory_publish_progress_emits_event(tmp_path: Path) 
     assert events[0].message == "Checking current screen. Next: Open menu."
 
 
+@pytest.mark.asyncio
+async def test_agents_tool_factory_submit_visual_assertion_returns_semantic_request_without_duplicate_events(tmp_path: Path) -> None:
+    events: list[RunEvent] = []
+    factory = AgentsToolFactory(CLIRunner([]), FileOps(tmp_path))
+    tools = factory.build_tools(run_id="run-1", task_id="task-1", event_sink=events.append)
+
+    output = await factory._submit_visual_assertion(
+        None,
+        json.dumps(
+            {
+                "assertion_id": "key-action-7",
+                "prompt": "Verify the page layout.",
+                "screenshot_path": "C:/tmp/screenshot.png",
+            }
+        ),
+    )
+
+    assert any(getattr(tool, "name", None) == "submit_visual_assertion" for tool in tools)
+    payload = json.loads(output)
+    assert payload["type"] == "visual_assertion_submission"
+    assert payload["assertion_id"] == "key-action-7"
+    assert payload["prompt"] == "Verify the page layout."
+    assert payload["screenshot_path"] == "C:/tmp/screenshot.png"
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_agents_tool_factory_wait_ms_returns_pure_wait_result(tmp_path: Path) -> None:
+    factory = AgentsToolFactory(CLIRunner([]), FileOps(tmp_path))
+    tools = factory.build_tools(run_id="run-1", task_id="task-1")
+
+    output = await factory._wait_ms(None, json.dumps({"duration_ms": 1, "reason": "page-load pause"}))
+
+    assert any(getattr(tool, "name", None) == "wait_ms" for tool in tools)
+    payload = json.loads(output)
+    assert payload["type"] == "wait_completed"
+    assert payload["duration_ms"] == 1
+    assert payload["elapsed_ms"] >= 0
+    assert payload["reason"] == "page-load pause"
+
+
 def test_agents_tool_factory_writes_full_output_artifact_and_returns_inline(tmp_path: Path) -> None:
     runs_dir = tmp_path / "runs"
     factory = AgentsToolFactory(

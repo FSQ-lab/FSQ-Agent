@@ -13,7 +13,7 @@
         "--config",
         "config.local.yaml",
         "--task",
-        "fsq-testcases/android/overflow_menu/complete_all_menu_workflow_through_overflow_menu_on_ntp.codex.yaml"
+        "fsq-testcases/android/rendering/fundamental_test_bing_com_website.codex.yaml"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,

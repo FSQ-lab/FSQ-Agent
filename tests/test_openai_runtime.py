@@ -1,4 +1,5 @@
 from contextlib import AsyncExitStack
+import json
 from pathlib import Path
 from typing import Any
 
@@ -6,6 +7,7 @@ import pytest
 
 from fsq_agent.agent import OpenAIAgentsRuntime
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
+from fsq_agent.agent._verification_task import VerificationEvidenceBuilder
 from fsq_agent.config import Settings
 from fsq_agent.models import (
     KnowledgeBundle,
@@ -14,6 +16,7 @@ from fsq_agent.models import (
     MCPToolValidationIssue,
     OpenAIAgentsSettings,
     OutputSettings,
+    StepResult,
     Task,
 )
 
@@ -241,6 +244,71 @@ def test_runtime_mcp_strict_schema_conversion_follows_config() -> None:
     assert relaxed_runtime._build_mcp_config() == {"convert_schemas_to_strict": False}
 
 
+def test_verification_evidence_builder_uses_text_only_after_runner_visual_assertion(tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    screenshots_dir = output_root / "appium-screenshots"
+    screenshots_dir.mkdir(parents=True)
+    screenshot_path = screenshots_dir / "screenshot.png"
+    screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
+    task = Task(
+        id="visual",
+        description="Verify the page visually.",
+        acceptance_criteria=["Key action 1: assertWithAI Verify the logo is visible."],
+    )
+    results = [
+        StepResult(
+            step_id=1,
+            status="success",
+            actual_outcome=json.dumps(
+                {
+                    "schema_version": "task_run_v1",
+                    "status": "success",
+                    "summary": "Visual assertion passed.",
+                    "pre_plan": [],
+                    "plan_updates": [],
+                    "satisfied_criteria": ["Key action 1: assertWithAI Verify the logo is visible."],
+                    "unmet_criteria": [],
+                    "evidence": [f"Runner inspected submitted screenshot {screenshot_path} and verified the logo."],
+                    "errors": [],
+                }
+            ),
+            tool_name="openai_agents.runner",
+        )
+    ]
+
+    model_input = VerificationEvidenceBuilder().build_model_input(task, results, image_root=output_root)
+
+    assert isinstance(model_input, str)
+    evidence = json.loads(model_input)
+    assert "visual_artifacts" not in evidence
+    assert evidence["agent_claims"]["status"] == "success"
+    assert "Runner inspected submitted screenshot" in evidence["agent_claims"]["evidence"][0]
+    assert "input_image" not in model_input
+
+
+def test_verification_evidence_builder_does_not_attach_images_from_paths(tmp_path: Path) -> None:
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    outside_root = tmp_path / "outside"
+    outside_root.mkdir()
+    screenshot_path = outside_root / "screenshot.png"
+    screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
+    task = Task(id="visual", description="Verify the page visually.")
+    results = [
+        StepResult(
+            step_id=1,
+            status="success",
+            actual_outcome=f"Screenshot outside output root: {screenshot_path}",
+        )
+    ]
+
+    model_input = VerificationEvidenceBuilder().build_model_input(task, results, image_root=output_root)
+
+    assert isinstance(model_input, str)
+    assert "input_image" not in model_input
+    assert "visual_artifacts" not in model_input
+
+
 def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
     class _RunConfig:
         def __init__(self, **kwargs: Any) -> None:
@@ -350,3 +418,167 @@ def test_runtime_tool_count_filter_writes_artifact_for_trimmed_history(tmp_path:
 
     assert "Artifact path:" in filtered.input[1]["output"]
     assert list((tmp_path / "runs" / "run-1" / "artifacts" / "tools").glob("*.json"))
+
+
+def test_runtime_input_filter_leaves_plain_screenshot_outputs_text_only(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from agents.run_config import ModelInputData
+
+    class _RunConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _ToolOutputTrimmer:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def __call__(self, data: Any) -> Any:
+            return data.model_data
+
+    output_root = tmp_path / "output"
+    screenshots_dir = output_root / "appium-screenshots"
+    screenshots_dir.mkdir(parents=True)
+    screenshot_path = screenshots_dir / "screenshot.png"
+    screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
+    settings = Settings(
+        openai_agents=OpenAIAgentsSettings(enabled=True),
+        output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
+    )
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
+        "call_model_input_filter"
+    ]
+    data = SimpleNamespace(
+        model_data=ModelInputData(
+            input=[
+                {"type": "function_call", "call_id": "img", "name": "appium_screenshot"},
+                {
+                    "type": "function_call_output",
+                    "call_id": "img",
+                    "output": f"Screenshot saved successfully to: {screenshot_path}",
+                },
+            ],
+            instructions="instructions",
+        )
+    )
+
+    filtered = input_filter(data)
+
+    assert filtered.input == data.model_data.input
+
+
+def test_runtime_input_filter_attaches_submitted_visual_assertion_image(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from agents.run_config import ModelInputData
+
+    class _RunConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _ToolOutputTrimmer:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def __call__(self, data: Any) -> Any:
+            return data.model_data
+
+    output_root = tmp_path / "output"
+    screenshots_dir = output_root / "appium-screenshots"
+    screenshots_dir.mkdir(parents=True)
+    screenshot_path = screenshots_dir / "screenshot.png"
+    screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
+    settings = Settings(
+        openai_agents=OpenAIAgentsSettings(enabled=True),
+        output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
+    )
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
+        "call_model_input_filter"
+    ]
+    output = json.dumps(
+        {
+            "type": "visual_assertion_submission",
+            "assertion_id": "key-action-7",
+            "prompt": "Verify the logo is visible.",
+            "screenshot_path": str(screenshot_path),
+        }
+    )
+    data = SimpleNamespace(
+        model_data=ModelInputData(
+            input=[
+                {"type": "function_call", "call_id": "visual", "name": "submit_visual_assertion"},
+                {"type": "function_call_output", "call_id": "visual", "output": output},
+            ],
+            instructions="instructions",
+        )
+    )
+
+    filtered = input_filter(data)
+
+    assert filtered.input[1]["output"] == output
+    image_message = filtered.input[2]
+    assert image_message["role"] == "user"
+    assert image_message["content"][0]["type"] == "input_text"
+    assert "key-action-7" in image_message["content"][0]["text"]
+    assert "Verify the logo is visible." in image_message["content"][0]["text"]
+    assert str(screenshot_path.resolve()) in image_message["content"][0]["text"]
+    assert image_message["content"][1]["type"] == "input_image"
+    assert image_message["content"][1]["image_url"].startswith("data:image/png;base64,")
+
+
+def test_runtime_input_filter_rejects_screenshot_images_outside_output_root(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from agents.run_config import ModelInputData
+
+    class _RunConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _ToolOutputTrimmer:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def __call__(self, data: Any) -> Any:
+            return data.model_data
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    outside_root = tmp_path / "outside"
+    outside_root.mkdir()
+    screenshot_path = outside_root / "screenshot.png"
+    screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
+    settings = Settings(
+        openai_agents=OpenAIAgentsSettings(enabled=True),
+        output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
+    )
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
+        "call_model_input_filter"
+    ]
+    data = SimpleNamespace(
+        model_data=ModelInputData(
+            input=[
+                {"type": "function_call", "call_id": "visual", "name": "submit_visual_assertion"},
+                {
+                    "type": "function_call_output",
+                    "call_id": "visual",
+                    "output": json.dumps(
+                        {
+                            "type": "visual_assertion_submission",
+                            "assertion_id": "key-action-7",
+                            "prompt": "Verify the logo is visible.",
+                            "screenshot_path": str(screenshot_path),
+                        }
+                    ),
+                },
+            ],
+            instructions="instructions",
+        )
+    )
+
+    filtered = input_filter(data)
+
+    assert filtered.input == data.model_data.input

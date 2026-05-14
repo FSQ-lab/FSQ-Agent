@@ -139,7 +139,8 @@ async def test_verifier_marks_non_json_output_inconclusive() -> None:
     )
 
     assert result.status == "inconclusive"
-    assert result.unmet_criteria == ["Criterion A", "Criterion B"]
+    assert result.unmet_criteria == []
+    assert result.diagnostics == ["I think it worked."]
 
 
 @pytest.mark.asyncio
@@ -227,64 +228,53 @@ def _write_tool_call(events_path: Path, call_id: str, tool_name: str, arguments:
 
 
 @pytest.mark.asyncio
-async def test_verifier_independently_verifies_appium_events_after_invalid_runner_output(tmp_path: Path) -> None:
-    events_path = tmp_path / "events.jsonl"
-    task = Task(
-        id="appium",
-        name="Appium",
-        description="Run appium case.",
-        acceptance_criteria=[
-            "Key action 1: assertVisible New Tab Page account menu (locator: accessibilityId=Account menu)",
-            "Key action 2: tapOn Search box (locator: resourceId=com.microsoft.emmx:id/search_box_text)",
-            "Key action 3: inputText https://www.google.com into Search box (locator: resourceId=com.microsoft.emmx:id/url_bar)",
-            "Key action 4: pressKey: Enter",
-            "Key action 5: assert {'contains': '1'} (element: resourceId=android:id/text1; text: {\"contains\": \"1\"})",
+async def test_verifier_prefers_verification_agent_output_over_runner_claims() -> None:
+    result = await Verifier().verify(
+        _task(),
+        [
+            StepResult(
+                step_id=1,
+                status="success",
+                actual_outcome='{"status":"inconclusive","summary":"Runner was unsure","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Criterion A"],"unmet_criteria":["Criterion B"],"evidence":["Runner evidence"],"errors":[]}',
+                tool_name="openai_agents.runner",
+            ),
+            StepResult(
+                step_id=2,
+                status="success",
+                actual_outcome='{"status":"success","summary":"Verifier proved both criteria","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Criterion A","Criterion B"],"unmet_criteria":[],"evidence":["Evidence bundle proved A and B"],"errors":[]}',
+                tool_name="openai_agents.verifier",
+            ),
         ],
     )
 
-    _write_tool_call(events_path, "find-account", "appium_find_element", {"strategy": "accessibility id", "selector": "Account menu"}, "elementId:account\nSuccessfully found element Account menu with strategy accessibility id.")
-    _write_tool_call(events_path, "find-search", "appium_find_element", {"strategy": "id", "selector": "com.microsoft.emmx:id/search_box_text"}, "elementId:search\nSuccessfully found element com.microsoft.emmx:id/search_box_text with strategy id.")
-    _write_tool_call(events_path, "tap-search", "appium_gesture", {"action": "tap", "elementUUID": "search"}, "elementId:search\nSuccessfully tapped element search.")
-    _write_tool_call(events_path, "find-url", "appium_find_element", {"strategy": "id", "selector": "com.microsoft.emmx:id/url_bar"}, "elementId:url\nSuccessfully found element com.microsoft.emmx:id/url_bar with strategy id.")
-    _write_tool_call(events_path, "set-url", "appium_set_value", {"elementUUID": "url", "text": "https://www.google.com"}, "elementId:url\nSuccessfully set value https://www.google.com into element url.")
-    _write_tool_call(events_path, "press-enter", "appium_mobile_press_key", {"key": "ENTER"}, "Successfully pressed key \"ENTER\" on Android.")
-    _write_tool_call(events_path, "find-count", "appium_find_element", {"strategy": "id", "selector": "android:id/text1"}, "elementId:count\nSuccessfully found element android:id/text1 with strategy id.")
-    _write_tool_call(events_path, "read-count", "appium_get_text", {"elementUUID": "count"}, "elementId:count\nSuccessfully got text 1 from element count.")
-
-    result = await Verifier().verify(
-        task,
-        [StepResult(step_id=1, status="failed", actual_outcome="content filter", tool_name="openai_agents.runner")],
-        events_path=events_path,
-    )
-
     assert result.status == "success"
+    assert result.satisfied_criteria == ["Criterion A", "Criterion B"]
     assert result.unmet_criteria == []
-    assert result.satisfied_criteria == task.acceptance_criteria
+    assert result.diagnostics == ["Evidence bundle proved A and B"]
 
 
 @pytest.mark.asyncio
-async def test_verifier_flags_conflicting_appium_key_identity(tmp_path: Path) -> None:
-    events_path = tmp_path / "events.jsonl"
-    task = Task(
-        id="appium",
-        name="Appium",
-        description="Run appium case.",
-        acceptance_criteria=["Key action 1: pressKey: Enter"],
-    )
-    _write_tool_call(
-        events_path,
-        "press-enter",
-        "appium_mobile_press_key",
-        {"key": "BACK", "keyCode": 66},
-        "Successfully pressed key \"BACK\" on Android.",
-    )
-
+async def test_verifier_marks_invalid_verification_agent_output_inconclusive() -> None:
     result = await Verifier().verify(
-        task,
-        [StepResult(step_id=1, status="failed", actual_outcome="content filter", tool_name="openai_agents.runner")],
-        events_path=events_path,
+        _task(),
+        [
+            StepResult(
+                step_id=1,
+                status="success",
+                actual_outcome='{"status":"success","summary":"Runner proved both criteria","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Criterion A","Criterion B"],"unmet_criteria":[],"evidence":["Runner evidence"],"errors":[]}',
+                tool_name="openai_agents.runner",
+            ),
+            StepResult(
+                step_id=2,
+                status="failed",
+                actual_outcome="Verifier crashed before structured output.",
+                error="boom",
+                tool_name="openai_agents.verifier",
+            ),
+        ],
     )
 
     assert result.status == "inconclusive"
-    assert result.unmet_criteria == task.acceptance_criteria
-    assert any("conflicting key identities" in diagnostic for diagnostic in result.diagnostics)
+    assert result.satisfied_criteria == []
+    assert result.unmet_criteria == []
+    assert "boom" in result.diagnostics

@@ -17,7 +17,7 @@ Current `__init__.py` exports via `__all__`:
 - `MCPToolValidator`: Validates local MCP tool schemas against the project's configured strict OpenAI tool schema compatibility policy.
 - `CLIRunner`: Executes configured CLI commands asynchronously with timeout, output capture, and a configured workspace current working directory.
 - `FileOps`: Performs scoped file reads and writes. Read roots include configured case, knowledge, and output directories; writes are restricted to the configured output root.
-- `AgentsToolFactory`: Builds OpenAI Agents SDK `FunctionTool` objects for CLI and file operations, artifact search/slice operations, a progress publication tool for user-visible planning updates, plus optional SDK `ShellTool` when configured.
+- `AgentsToolFactory`: Builds OpenAI Agents SDK `FunctionTool` objects for CLI and file operations, artifact search/slice operations, a progress publication tool for user-visible planning updates, a pure wait tool, an explicit visual assertion submission tool, plus optional SDK `ShellTool` when configured.
 - `LifecycleController`: Abstract setup/teardown interface with batch and case lifecycle methods.
 - `LifecycleControllerFactory`: Resolves the configured lifecycle controller name to a concrete implementation.
 - `MCPToolCaller`: Controlled direct MCP caller used only by lifecycle controllers after servers have been entered and validated.
@@ -53,6 +53,8 @@ Tool failures are surfaced according to the tool mode. During SDK-managed runs, 
 - SDK-managed local tools write complete model-facing raw results to per-run artifacts when artifact output is enabled. Small and moderate current outputs are still returned inline to reduce extra model/tool turns; oversized outputs return an artifact reference, preview, and instructions to use `search_artifact` or `read_artifact_slice` only when more detail is needed.
 - Artifact read tools only resolve paths inside the current run directory and enforce bounded search/slice results so artifact recovery cannot reintroduce unbounded context growth.
 - A `publish_progress` SDK function tool lets the agent report planning, reasoning summaries, and plan updates in a user-visible way without exposing hidden chain-of-thought.
+- A `wait_ms` SDK function tool provides pure elapsed-time waits for FSQ pause semantics and page-load delays. It must be preferred over Appium gestures when the intended action is waiting, because gestures can alter scroll position or UI state.
+- A `submit_visual_assertion` SDK function tool lets the agent bind one screenshot path to one visual assertion prompt, such as FSQ `assertWithAI`. The tool itself records the semantic assertion request; the agent runtime is responsible for attaching the image to the next model call when the path is readable under the configured output root.
 - CLI execution is allowlisted through configuration to avoid arbitrary command execution by default. Configured CLI tools run from the fsq-agent workspace so relative side effects do not land in the user's current directory.
 - File operation tools treat `cases.dir` as read-only input and write generated files only under the output root.
 - Skills remain descriptive instruction files. If shell is enabled, file-backed skills are attached to the SDK `ShellTool` local environment as skill metadata, while command execution is governed by `ShellSettings`.

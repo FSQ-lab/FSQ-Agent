@@ -1,3 +1,4 @@
+import asyncio
 import json
 import inspect
 import time
@@ -31,6 +32,17 @@ class _ProgressArgs(BaseModel):
     kind: str = Field(default="planning_update", description="Progress kind: planning, planning_update, or reasoning.")
     message: str = Field(description="Short user-visible progress summary. Do not include hidden chain-of-thought.")
     next_action: str | None = Field(default=None, description="Optional next action summary.")
+
+
+class _SubmitVisualAssertionArgs(BaseModel):
+    assertion_id: str = Field(description="Stable identifier or ordered key action label for this visual assertion.")
+    prompt: str = Field(description="Natural-language visual assertion prompt to evaluate against the screenshot.")
+    screenshot_path: str = Field(description="Fresh screenshot path produced by a screenshot tool for this assertion.")
+
+
+class _WaitArgs(BaseModel):
+    duration_ms: int = Field(ge=1, le=60000, description="Pure wait duration in milliseconds. Use this for FSQ pause actions instead of gestures.")
+    reason: str | None = Field(default=None, description="Optional short reason for the wait.")
 
 
 class _SearchArtifactArgs(BaseModel):
@@ -94,6 +106,28 @@ class AgentsToolFactory:
                 description="Publish a short user-visible planning or reasoning summary. Do not include hidden chain-of-thought.",
                 params_json_schema=_ProgressArgs.model_json_schema(),
                 on_invoke_tool=self._publish_progress,
+            )
+        )
+        tools.append(
+            FunctionTool(
+                name="submit_visual_assertion",
+                description=(
+                    "Bind a fresh screenshot path to a visual assertion prompt, such as FSQ assertWithAI. "
+                    "Call this after taking the screenshot and before marking the visual assertion satisfied."
+                ),
+                params_json_schema=_SubmitVisualAssertionArgs.model_json_schema(),
+                on_invoke_tool=self._submit_visual_assertion,
+            )
+        )
+        tools.append(
+            FunctionTool(
+                name="wait_ms",
+                description=(
+                    "Wait without touching or changing the UI. Use this for FSQ performActions pause steps "
+                    "and page-load delays instead of appium gestures such as scroll or long_press."
+                ),
+                params_json_schema=_WaitArgs.model_json_schema(),
+                on_invoke_tool=self._wait_ms,
             )
         )
         if self.cli_runner.list_tools():
@@ -260,6 +294,35 @@ class AgentsToolFactory:
             )
         )
         return json.dumps({"ok": True}, ensure_ascii=False)
+
+    async def _submit_visual_assertion(self, _ctx: Any, args: str) -> str:
+        parsed = _SubmitVisualAssertionArgs.model_validate_json(args)
+        return json.dumps(
+            {
+                "type": "visual_assertion_submission",
+                "assertion_id": parsed.assertion_id,
+                "prompt": parsed.prompt,
+                "screenshot_path": parsed.screenshot_path,
+                "next_step": "Inspect the attached screenshot image in the next model turn before deciding this visual assertion.",
+            },
+            ensure_ascii=False,
+        )
+
+    async def _wait_ms(self, _ctx: Any, args: str) -> str:
+        parsed = _WaitArgs.model_validate_json(args)
+        started = time.perf_counter()
+        await asyncio.sleep(parsed.duration_ms / 1000)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        output = json.dumps(
+            {
+                "type": "wait_completed",
+                "duration_ms": parsed.duration_ms,
+                "elapsed_ms": elapsed_ms,
+                "reason": parsed.reason,
+            },
+            ensure_ascii=False,
+        )
+        return output
 
     async def _emit_tool_started(self, tool_name: str, arguments: dict[str, Any] | str) -> None:
         await self._emit(

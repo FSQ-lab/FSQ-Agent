@@ -163,7 +163,7 @@ class ReportGenerator:
             return str(explicit_origin)
         if tool_name == "shell":
             return "shell"
-        if tool_name in {"publish_progress", "run_cli_tool", "read_file", "write_file", "search_artifact", "read_artifact_slice"}:
+        if tool_name in {"publish_progress", "run_cli_tool", "read_file", "write_file", "search_artifact", "read_artifact_slice", "submit_visual_assertion", "wait_ms"}:
             return "local"
         if tool_name == "unknown":
             return "unknown"

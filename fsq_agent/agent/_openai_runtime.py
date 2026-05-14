@@ -1,5 +1,9 @@
+import base64
 import json
+import mimetypes
 import os
+from pathlib import Path
+import re
 import time
 import inspect
 from contextlib import AsyncExitStack
@@ -12,6 +16,7 @@ from fsq_agent.tools._tool_artifacts import ToolArtifactStore
 
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._structured_output import coerce_agent_final_output, coerce_string_list, serialize_agent_final_output
+from fsq_agent.agent._verification_task import VERIFICATION_AGENT_INSTRUCTIONS, VerificationEvidenceBuilder
 
 
 _LOCAL_TOOL_NAMES = {
@@ -21,10 +26,14 @@ _LOCAL_TOOL_NAMES = {
     "write_file",
     "search_artifact",
     "read_artifact_slice",
+    "submit_visual_assertion",
+    "wait_ms",
 }
 
 
 class _RecentToolOutputInputFilter:
+    _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+
     def __init__(
         self,
         sdk_filter: Any | None,
@@ -33,6 +42,8 @@ class _RecentToolOutputInputFilter:
         preview_chars: int,
         trimmable_tools: set[str] | None,
         artifact_store: ToolArtifactStore | None,
+        visual_image_root: Path | None = None,
+        max_visual_attachments: int = 4,
     ) -> None:
         self.sdk_filter = sdk_filter
         self.recent_tool_outputs = recent_tool_outputs
@@ -40,6 +51,8 @@ class _RecentToolOutputInputFilter:
         self.preview_chars = preview_chars
         self.trimmable_tools = trimmable_tools
         self.artifact_store = artifact_store
+        self.visual_image_root = visual_image_root
+        self.max_visual_attachments = max_visual_attachments
         self.artifact_paths_by_call_id: dict[str, str] = {}
 
     def __call__(self, data: Any) -> Any:
@@ -54,6 +67,7 @@ class _RecentToolOutputInputFilter:
         output_indices = [index for index, item in enumerate(items) if isinstance(item, dict) and item.get("type") == "function_call_output"]
         protected = set(output_indices[-self.recent_tool_outputs :]) if self.recent_tool_outputs else set()
         new_items: list[Any] = []
+        visual_attachment_count = 0
         for index, item in enumerate(items):
             if not isinstance(item, dict) or item.get("type") != "function_call_output":
                 new_items.append(item)
@@ -62,14 +76,19 @@ class _RecentToolOutputInputFilter:
             output = item.get("output", "")
             output_text = output if isinstance(output, str) else str(output)
             artifact_path = self._artifact_path_for(item, tool_names, output_text)
+            visual_items = self._visual_attachment_items(tool_names, output_text, visual_attachment_count)
+            visual_attachment_count += len(visual_items)
             if index in protected:
                 new_items.append(item)
+                new_items.extend(visual_items)
                 continue
             if self.trimmable_tools and not tool_names.intersection(self.trimmable_tools):
                 new_items.append(item)
+                new_items.extend(visual_items)
                 continue
             if len(output_text) <= self.max_output_chars:
                 new_items.append(item)
+                new_items.extend(visual_items)
                 continue
             trimmed_item = dict(item)
             preview = output_text[: self.preview_chars]
@@ -77,6 +96,7 @@ class _RecentToolOutputInputFilter:
             artifact_line = f" Artifact path: {artifact_path}." if artifact_path else ""
             trimmed_item["output"] = f"[Trimmed historical {display_name} output: {len(output_text)} chars, preview follows].{artifact_line}\n{preview}..."
             new_items.append(trimmed_item)
+            new_items.extend(visual_items)
         return ModelInputData(input=new_items, instructions=model_data.instructions)
 
     def _call_id_to_names(self, items: list[Any]) -> dict[str, set[str]]:
@@ -105,6 +125,70 @@ class _RecentToolOutputInputFilter:
         if call_id:
             self.artifact_paths_by_call_id[call_id] = artifact_path
         return artifact_path
+
+    def _visual_attachment_items(self, tool_names: set[str], output_text: str, current_count: int) -> list[dict[str, Any]]:
+        if current_count >= self.max_visual_attachments:
+            return []
+        if "submit_visual_assertion" not in tool_names:
+            return []
+        try:
+            payload = json.loads(output_text)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(payload, dict) or payload.get("type") != "visual_assertion_submission":
+            return []
+        prompt = str(payload.get("prompt") or "")
+        assertion_id = str(payload.get("assertion_id") or "visual assertion")
+        attachments: list[dict[str, Any]] = []
+        for image_path in self._image_paths_from_text(str(payload.get("screenshot_path") or "")):
+            if current_count + len(attachments) >= self.max_visual_attachments:
+                break
+            resolved = self._safe_image_path(image_path)
+            if not resolved:
+                continue
+            try:
+                data = resolved.read_bytes()
+            except OSError:
+                continue
+            mime_type = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
+            data_url = f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"
+            attachments.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"Attached screenshot image for {assertion_id}: {resolved}. "
+                                f"Visual assertion prompt: {prompt}. "
+                                "Use the image pixels, not only the file path, when deciding this visual assertion."
+                            ),
+                        },
+                        {"type": "input_image", "image_url": data_url},
+                    ],
+                }
+            )
+        return attachments
+
+    def _image_paths_from_text(self, text: str) -> list[Path]:
+        pattern = r"(?:[A-Za-z]:)?[\\/][^\s\"'<>|]+?\.(?:png|jpe?g|webp)"
+        return [Path(match.group(0)) for match in re.finditer(pattern, text, flags=re.IGNORECASE)]
+
+    def _safe_image_path(self, path: Path) -> Path | None:
+        if path.suffix.lower() not in self._IMAGE_EXTENSIONS:
+            return None
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return None
+        if self.visual_image_root is not None:
+            try:
+                resolved.relative_to(self.visual_image_root.resolve())
+            except ValueError:
+                return None
+        if not resolved.is_file():
+            return None
+        return resolved
 
 
 class OpenAIAgentsRuntime:
@@ -245,6 +329,92 @@ class OpenAIAgentsRuntime:
             )
         ]
 
+    async def _run_verification_task(
+        self,
+        task: Task,
+        execution_results: list[StepResult],
+        run_id: str,
+        events_path: Any = None,
+        event_sink: RunEventSink | None = None,
+    ) -> list[StepResult]:
+        validate_runtime_settings(self.settings)
+        started = time.perf_counter()
+        try:
+            from agents import Agent, OpenAIProvider, RunConfig, Runner, set_tracing_disabled
+            from agents.extensions import ToolOutputTrimmer
+            from openai import AsyncOpenAI
+        except ImportError as exc:
+            raise ConfigurationError("openai-agents and openai packages are required when SDK runtime is enabled.") from exc
+
+        await self._emit(
+            event_sink,
+            RunEvent(
+                run_id=run_id,
+                task_id=task.id,
+                type="planning_update",
+                title="Verification started",
+                message="Running evidence-based verifier agent over execution records and artifacts.",
+            ),
+        )
+        evidence_input = VerificationEvidenceBuilder().build_model_input(
+            task,
+            execution_results,
+            events_path,
+        )
+        set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+        client = AsyncOpenAI(
+            api_key=os.environ[self.settings.openai_agents.api_key_env],
+            base_url=self.settings.openai_agents.base_url,
+        )
+        provider = OpenAIProvider(openai_client=client, use_responses=self.settings.openai_agents.use_responses)
+        try:
+            agent = Agent(
+                name=f"{self.settings.agent.name} verifier",
+                model=self.settings.openai_agents.model,
+                instructions=VERIFICATION_AGENT_INSTRUCTIONS,
+                tools=[],
+                mcp_servers=[],
+                output_type=AgentFinalOutput,
+            )
+            result = Runner.run_streamed(
+                agent,
+                input=evidence_input,
+                max_turns=self.settings.openai_agents.max_turns,
+                run_config=self._build_run_config(RunConfig, ToolOutputTrimmer, provider, run_id),
+            )
+            async for event in result.stream_events():
+                run_event = self._map_stream_event(event, run_id, task.id)
+                if run_event:
+                    await self._emit(event_sink, run_event)
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return [
+                StepResult(
+                    step_id=len(execution_results) + 1,
+                    status="failed",
+                    actual_outcome="Evidence-based verifier agent failed before producing structured output.",
+                    duration_ms=duration_ms,
+                    error=str(exc),
+                    tool_name="openai_agents.verifier",
+                )
+            ]
+        finally:
+            await client.close()
+
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        final_output = coerce_agent_final_output(result.final_output) or str(result.final_output)
+        serialized_final_output = serialize_agent_final_output(final_output)
+        return [
+            StepResult(
+                step_id=len(execution_results) + 1,
+                status="success",
+                actual_outcome=serialized_final_output,
+                duration_ms=duration_ms,
+                tool_name="openai_agents.verifier",
+                tool_output=final_output.model_dump(mode="json") if isinstance(final_output, AgentFinalOutput) else serialized_final_output,
+            )
+        ]
+
     async def _emit(self, event_sink: RunEventSink | None, event: RunEvent) -> None:
         if not event_sink:
             return
@@ -276,6 +446,7 @@ class OpenAIAgentsRuntime:
                 trimming.preview_chars,
                 trimmable_tools,
                 artifact_store,
+                self.settings.output.root_dir,
             )
         return run_config_cls(model_provider=provider, call_model_input_filter=input_filter)
 

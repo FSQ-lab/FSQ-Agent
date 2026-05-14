@@ -20,7 +20,7 @@ Current `__init__.py` exports via `__all__`:
 
 - `FsqAgent`: Main orchestration class.
 - `OpenAIAgentsRuntime`: Builds and runs an OpenAI Agents SDK `Agent` with Azure OpenAI configuration, tools, MCP servers, skills, turn limits, and tracing policy.
-- `Verifier`: Parses SDK structured final output and converts task status, satisfied criteria, unmet criteria, evidence, and diagnostics into a `VerificationResult`.
+- `Verifier`: Parses structured verifier-agent or runner final output and converts task status, satisfied criteria, unmet criteria, evidence, and diagnostics into a `VerificationResult`.
 
 Planned signatures:
 
@@ -38,6 +38,7 @@ Planned signatures:
 - `_openai_runtime.py`: OpenAI Agents SDK client/provider setup, lifecycle setup/teardown invocation, agent construction, MCP context management, MCP validation diagnostic step injection, `Runner.run_streamed` invocation, and SDK stream event mapping.
 - `_prompt.py`: Prompt model construction and template rendering for agent instructions and task input.
 - `_structured_output.py`: Shared coercion helpers for SDK final output values and compatibility parsing of legacy/raw final JSON strings.
+- `_verification_task.py`: Builds an evidence bundle from task context, execution records, event logs, and persisted tool artifacts for a separate evidence-based verification agent task.
 - `_verifier.py`: Acceptance criteria verification and failure diagnostics.
 - `SPEC.md`: Module design.
 
@@ -62,6 +63,7 @@ Configuration errors are raised before task execution when OpenAI Agents SDK is 
 - The runtime passes `mcp_tool_validation.strict_schema` to the OpenAI Agents SDK MCP `convert_schemas_to_strict` option so strict MCP schema conversion is controlled by configuration.
 - The runtime configures the OpenAI Agents SDK `call_model_input_filter` with `ToolOutputTrimmer` plus a project filter that preserves the most recent configured number of function tool outputs by tool-call count. This keeps recent outputs at full fidelity while trimming older large tool outputs before each model call.
 - The project filter persists SDK function-call outputs, including MCP/Appium outputs when represented as function-call output items, into the current run's tool artifact directory before replacing historical oversized content with a bounded preview and artifact path.
+- The project filter converts readable screenshots into model-visible image inputs for the main runner only after the agent explicitly calls the local `submit_visual_assertion` tool. Routine screenshots remain text evidence and do not trigger image attachment. This lets the execution agent inspect the exact screenshot it binds to visual assertions such as `assertWithAI`; screenshot paths outside the output root, unreadable files, or unsupported image extensions are ignored.
 - Runtime instructions tell the agent that local tool outputs may include artifact references and that `search_artifact`/`read_artifact_slice` should be used for targeted recovery rather than full artifact rereads. Artifact search is historical context and should not be treated as proof of current UI state without a fresh tool observation.
 - Runtime instructions and task input are assembled by first building prompt models, then rendering Jinja template files configured by `openai_agents.prompt.agent_template_path` and `openai_agents.prompt.task_template_path` or the package defaults. Static behavioral prompt text and section wording belong in template files, while configuration injects only custom instructions, variables, and optional template paths.
 - If the user description is too broad to derive domain-specific checks, the default success standard is that the executable task flow completes without unrecovered errors and with enough evidence to show completion.
@@ -74,4 +76,6 @@ Configuration errors are raised before task execution when OpenAI Agents SDK is 
 - SDK stream events are mapped into `RunEvent` values that preserve real tool names, call IDs, redacted arguments, output previews, errors, timing, and tool origin when known. Reports reconstruct real tool calls from these events rather than treating plan or runner summary records as tools.
 - MCP tool validation diagnostics from startup filtering are prepended as skipped diagnostic `StepResult` records so generated reports explain any automatically ignored tools.
 - Task execution is non-interactive. Any human-in-the-loop SDK feature must be disabled or backed by deterministic programmatic approval.
-- The verifier is independent from the runtime prompt to reduce confirmation bias between intended goal and actual outcome. After task execution, it may run a separate event-based verification pass over recorded tool-call evidence before falling back to the model's structured final output.
+- Final result judgment is performed by a separate evidence-based verification agent task after the main automation run. The verification task has no MCP servers, no lifecycle controller, no external action tools, and no image inputs; it receives the authoritative task/case intent, the main agent's structured claims when available, execution records, normalized event/tool-call records, and persisted artifact excerpts. The verification agent must decide success, failure, or inconclusive from supplied execution evidence only.
+- Visual assertions such as FSQ `assertWithAI` are judged during the main execution loop: the runner captures a screenshot, calls `submit_visual_assertion`, and receives the screenshot as a model-visible image on the next model turn. The verification task does not re-inspect screenshot pixels. It verifies that the execution stage completed the visual assertion submission, that the main agent's structured output reports the corresponding visual assertion result, and that no supplied evidence contradicts that result.
+- The local `Verifier` does not hard-code FSQ key-action formats or Appium command semantics as the final arbiter. It parses the structured verification-agent output, validates conservative status downgrades, and falls back to runner output or inconclusive diagnostics only when the verification task is unavailable or unparsable. Unknown evidence must remain inconclusive instead of being converted into unmet criteria.
