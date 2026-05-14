@@ -11,6 +11,7 @@ from fsq_agent.models import (
     MCPToolValidationSettings,
     OpenAIAgentsSettings,
     OutputSettings,
+    RuntimeSecretSettings,
     ShellSettings,
     SkillConfig,
     WorkspaceSettings,
@@ -25,6 +26,7 @@ class Settings(BaseModel):
     lifecycle: LifecycleControllerSettings = Field(default_factory=LifecycleControllerSettings)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     mcp_tool_validation: MCPToolValidationSettings = Field(default_factory=MCPToolValidationSettings)
+    runtime_secrets: RuntimeSecretSettings = Field(default_factory=RuntimeSecretSettings)
     workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
     cases: CaseSettings = Field(default_factory=CaseSettings)
     cli_tools: list[CLIToolConfig] = Field(default_factory=list)

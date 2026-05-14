@@ -1,19 +1,30 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import yaml
 
 from fsq_agent.models import FsqAgentError, KnowledgeBundle, Task
 
 
-class PrivateKnowledgeLoader:
+class KnowledgeProvider(Protocol):
+    def load_for_task(self, task: Task) -> KnowledgeBundle:
+        pass
+
+
+class DirectoryKnowledgeProvider:
     def __init__(self, knowledge_dir: Path) -> None:
         self.knowledge_dir = knowledge_dir
 
     def load_for_task(self, task: Task) -> KnowledgeBundle:
         items: dict[str, Any] = {}
         warnings: list[str] = []
+        index_path = (self.knowledge_dir / "index.md").resolve()
+        if index_path.exists():
+            try:
+                items["index.md"] = self._load_path(index_path)
+            except OSError as exc:
+                raise FsqAgentError("Unable to load knowledge index.", context={"path": str(index_path)}) from exc
         for reference in task.knowledge_refs:
             path = (self.knowledge_dir / reference).resolve()
             if not path.exists():
@@ -31,3 +42,18 @@ class PrivateKnowledgeLoader:
         if path.suffix.lower() in {".yaml", ".yml"}:
             return yaml.safe_load(path.read_text(encoding="utf-8"))
         return path.read_text(encoding="utf-8")
+
+
+class PrivateKnowledgeLoader:
+    def __init__(self, knowledge_dir: Path, providers: list[KnowledgeProvider] | None = None) -> None:
+        self.knowledge_dir = knowledge_dir
+        self.providers = providers or [DirectoryKnowledgeProvider(knowledge_dir)]
+
+    def load_for_task(self, task: Task) -> KnowledgeBundle:
+        merged = KnowledgeBundle()
+        for provider in self.providers:
+            bundle = provider.load_for_task(task)
+            merged.items.update(bundle.items)
+            merged.flow_templates.update(bundle.flow_templates)
+            merged.warnings.extend(bundle.warnings)
+        return merged

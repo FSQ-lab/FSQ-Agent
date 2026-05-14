@@ -20,7 +20,7 @@ Current `__init__.py` exports via `__all__`:
 
 - `__init__.py`: Public exports only.
 - `_loader.py`: YAML parsing, validation of FSQ document shape, and batch discovery.
-- `_task_adapter.py`: Renders FSQ metadata and commands into an advisory task description for the agent loop, extracts required ordered key actions, and maps them to task acceptance criteria.
+- `_task_adapter.py`: Renders FSQ metadata, inferred preconditions, and commands into an advisory task description for the agent loop, extracts required ordered key actions, and maps them to task acceptance criteria.
 - `SPEC.md`: Module design.
 
 ## Error Handling
@@ -39,3 +39,5 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Missing comm
 - Commands marked `optional: true` are preserved in the reference flow but are not required acceptance criteria.
 - If a case has no required key actions, the case name is used as the goal-level acceptance criterion.
 - Locators and assertions are preserved in the rendered task description so the agent can prefer them while still handling optional dialogs, missing setup, or extra recovery steps.
+- Case metadata, tags, description text, and command targets are scanned for AI-friendly precondition signals such as `requires-*`, `already signed in`, `MSA`, `login`, `account`, or similar setup language. Inferred preconditions are rendered as setup obligations before ordered key actions: the agent must inspect live state first, complete the prerequisite only when it is not already satisfied, and then continue with the case flow.
+- Account-dependent FSQ cases may reference secret environment variable names such as `TEST_ACCOUNT_EMAIL` and `TEST_ACCOUNT_PASSWORD`, but the adapter must never embed credential values in task descriptions or acceptance criteria.

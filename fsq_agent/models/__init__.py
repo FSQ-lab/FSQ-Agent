@@ -26,6 +26,7 @@ from fsq_agent.models._settings import (
     OpenAIAgentPromptConfig,
     OpenAIAgentsSettings,
     OutputSettings,
+    RuntimeSecretSettings,
     ShellSettings,
     WorkspaceSettings,
 )
@@ -79,6 +80,7 @@ __all__ = [
     "ContextTrimmingSettings",
     "LifecycleControllerSettings",
     "LocalToolOutputSettings",
+    "RuntimeSecretSettings",
     "SkillConfig",
     "SkillBundle",
     "AgentSettings",

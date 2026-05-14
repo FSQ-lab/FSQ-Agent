@@ -52,6 +52,12 @@ class LifecycleControllerSettings(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class RuntimeSecretSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_env_names: list[str] = Field(default_factory=list)
+
+
 class OpenAIAgentPromptConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

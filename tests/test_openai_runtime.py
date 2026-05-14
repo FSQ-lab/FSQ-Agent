@@ -168,6 +168,18 @@ def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) ->
     assert task_input == "Task t1: Do it.\nConfigured no criteria text."
 
 
+def test_runtime_instructions_include_knowledge_index_content() -> None:
+    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    knowledge = KnowledgeBundle(items={"index.md": "Use Other ways to sign in, then choose password sign-in."})
+
+    instructions = runtime._build_instructions(knowledge, [])
+
+    assert "Private knowledge:" in instructions
+    assert "index.md" in instructions
+    assert "choose password sign-in" in instructions
+
+
 def test_prompt_model_builder_and_renderer_use_templates() -> None:
     settings = OpenAIAgentsSettings(enabled=True, prompt={"custom_instructions": ["Custom."]}).prompt
     builder = PromptModelBuilder(settings)

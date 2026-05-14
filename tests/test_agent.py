@@ -1,11 +1,13 @@
 import asyncio
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from fsq_agent import FsqAgent, Task
 from fsq_agent.agent import Verifier
+from fsq_agent.agent._openai_runtime import _RecentToolOutputInputFilter
 from fsq_agent.config import Settings
 from fsq_agent.models import ConfigurationError, KnowledgeBundle, ReportArtifact, RunEvent, StepResult
 from fsq_agent.observation import ExecutionLogger
@@ -85,6 +87,15 @@ class _CancelledRuntime:
         raise asyncio.CancelledError()
 
 
+class _FakeArtifactStore:
+    def __init__(self) -> None:
+        self.writes: list[tuple[str, str, dict[str, Any]]] = []
+
+    def write(self, tool_name: str, output_text: str, metadata: dict[str, Any]) -> Path:
+        self.writes.append((tool_name, output_text, metadata))
+        return Path("artifact.json")
+
+
 class _Reporter:
     def __init__(self) -> None:
         self.run_ids: list[str] = []
@@ -117,6 +128,27 @@ async def test_agent_run_id_uses_friendly_timestamp_suffix() -> None:
 
     assert result.report.run_id == reporter.run_ids[0]
     assert re.fullmatch(r"smoke-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}", result.report.run_id)
+
+
+def test_recent_tool_output_filter_does_not_artifact_sensitive_outputs() -> None:
+    artifact_store = _FakeArtifactStore()
+    input_filter = _RecentToolOutputInputFilter(
+        sdk_filter=None,
+        recent_tool_outputs=0,
+        max_output_chars=1,
+        preview_chars=1,
+        trimmable_tools=None,
+        artifact_store=artifact_store,  # type: ignore[arg-type]
+    )
+
+    path = input_filter._artifact_path_for(
+        {"call_id": "call-1"},
+        {"get_runtime_secret"},
+        '{"type":"runtime_secret","name":"TEST_ACCOUNT_PASSWORD","value":"secret","sensitive":true}',
+    )
+
+    assert path is None
+    assert artifact_store.writes == []
 
 
 @pytest.mark.asyncio

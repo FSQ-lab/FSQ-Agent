@@ -13,7 +13,7 @@
         "--config",
         "config.local.yaml",
         "--task",
-        "fsq-testcases/android/rendering/fundamental_test_bing_com_website.codex.yaml"
+        "fsq-testcases/android/db/growth_could_entry_rewards_page_in_new_tab_page.codex.yaml"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,

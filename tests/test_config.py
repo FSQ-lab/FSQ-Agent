@@ -83,6 +83,26 @@ mcp_tool_validation:
     assert settings.mcp_tool_validation.fail_when_all_tools_filtered is False
 
 
+def test_load_settings_accepts_runtime_secret_allowlist(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+runtime_secrets:
+  allowed_env_names:
+    - TEST_ACCOUNT_EMAIL
+    - TEST_ACCOUNT_PASSWORD
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.runtime_secrets.allowed_env_names == ["TEST_ACCOUNT_EMAIL", "TEST_ACCOUNT_PASSWORD"]
+
+
 def test_openai_agents_endpoint_is_normalized(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

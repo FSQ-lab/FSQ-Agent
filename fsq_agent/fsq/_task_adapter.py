@@ -26,6 +26,7 @@ class FsqTaskAdapter:
 
     def render_description(self, case: FsqCase) -> str:
         config = case.config
+        preconditions = self._infer_preconditions(case)
         lines = [
             "Run this FSQ AI Test DSL case as a goal-driven automation task.",
             "",
@@ -43,6 +44,9 @@ class FsqTaskAdapter:
             lines.append(f"- URL: {config.url}")
         if config.tags:
             lines.append(f"- Tags: {', '.join(config.tags)}")
+        if config.env:
+            env_refs = ", ".join(f"{key}={value}" for key, value in config.env.items())
+            lines.append(f"- Environment variable references: {env_refs}")
         lines.extend([
             "",
             "Execution guidance:",
@@ -52,7 +56,17 @@ class FsqTaskAdapter:
             "- Do not edit the source FSQ YAML during execution.",
             "- Treat ordered key actions as the goal's required validation spine, not as a brittle one-for-one script. Preserve their relative order while allowing recovery, wait, evidence, and transient-dialog steps between them.",
             "- Derive success criteria from the ordered key actions when present; otherwise derive them from the case name, description, assertion commands, and final intended app/page state.",
+            "- If this case has preconditions, inspect the live app state before the ordered key actions. Complete only missing preconditions first, then continue the case flow.",
+            "- When a precondition requires credentials, use configured runtime secret tools and environment variable names only. Do not print, store, or report secret values.",
             "- Use success only when the intended scenario is completed with evidence from the live UI or tool outputs.",
+            "",
+            "Inferred preconditions:",
+        ])
+        if preconditions:
+            lines.extend(f"- {precondition}" for precondition in preconditions)
+        else:
+            lines.append("- None detected from case metadata or commands.")
+        lines.extend([
             "",
             "Ordered key actions for success:",
         ])
@@ -118,3 +132,37 @@ class FsqTaskAdapter:
 
     def _format_locator(self, locator: dict[str, Any]) -> str:
         return ", ".join(f"{key}={value}" for key, value in locator.items())
+
+    def _infer_preconditions(self, case: FsqCase) -> list[str]:
+        config = case.config
+        text_parts = [config.name, config.description, *config.tags]
+        text_parts.extend(self._render_command(command) for command in case.commands)
+        text = "\n".join(str(part).lower() for part in text_parts)
+        preconditions: list[str] = []
+
+        for tag in config.tags:
+            lowered = tag.lower()
+            if not lowered.startswith("requires-") or lowered == "requires-msa":
+                continue
+            requirement = lowered[len("requires-") :].replace("-", " ").strip()
+            if requirement:
+                preconditions.append(
+                    f"Case tag `{tag}` indicates required setup: {requirement}. Inspect whether this setup is already satisfied before executing key actions; if not, complete it first."
+                )
+
+        if any(marker in text for marker in ("requires-msa", " msa", "microsoft account", "signed in", "sign in", "login", "account state")):
+            preconditions.append(
+                "Microsoft account sign-in is required. Before executing ordered key actions, inspect whether Edge is already signed in. If it is not signed in, retrieve `TEST_ACCOUNT_EMAIL` and `TEST_ACCOUNT_PASSWORD` with `get_runtime_secret`, complete the sign-in flow, verify the signed-in account marker, and never reveal the credential values in progress, evidence, or final output."
+            )
+
+        return self._dedupe(preconditions)
+
+    def _dedupe(self, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result

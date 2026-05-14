@@ -107,6 +107,40 @@ platform: android
     ]
 
 
+def test_fsq_task_adapter_renders_msa_precondition_without_secret_values(tmp_path: Path) -> None:
+    case_path = tmp_path / "rewards.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Rewards Case
+description: This case assumes the test device is already signed in with MSA.
+platform: android
+tags:
+  - requires-msa
+---
+- launchApp
+- assertVisible:
+    target: Signed-in account entry
+    locator:
+      resourceId: com.microsoft.emmx:id/edge_account_image_view
+    optional: false
+- killApp
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    task = FsqTaskAdapter().to_task(case)
+
+    assert "Inferred preconditions" in task.description
+    assert "Microsoft account sign-in is required" in task.description
+    assert "get_runtime_secret" in task.description
+    assert "TEST_ACCOUNT_EMAIL" in task.description
+    assert "TEST_ACCOUNT_PASSWORD" in task.description
+    assert "mobiletest0002" not in task.description
+    assert "Edge_Mobile_0002@outlook.com" not in task.description
+
+
 def test_fsq_task_adapter_falls_back_to_goal_when_no_key_actions(tmp_path: Path) -> None:
     case_path = tmp_path / "goal_only.codex.yaml"
     case_path.write_text(

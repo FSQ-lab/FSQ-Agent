@@ -27,6 +27,7 @@ _LOCAL_TOOL_NAMES = {
     "search_artifact",
     "read_artifact_slice",
     "submit_visual_assertion",
+    "get_runtime_secret",
     "wait_ms",
 }
 
@@ -112,6 +113,8 @@ class _RecentToolOutputInputFilter:
         return mapping
 
     def _artifact_path_for(self, item: dict[str, Any], tool_names: set[str], output_text: str) -> str | None:
+        if self._is_sensitive_tool_output(output_text):
+            return None
         if not self.artifact_store:
             return None
         call_id = str(item.get("call_id") or item.get("id") or "")
@@ -125,6 +128,13 @@ class _RecentToolOutputInputFilter:
         if call_id:
             self.artifact_paths_by_call_id[call_id] = artifact_path
         return artifact_path
+
+    def _is_sensitive_tool_output(self, output_text: str) -> bool:
+        try:
+            payload = json.loads(output_text)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(payload, dict) and payload.get("sensitive") is True
 
     def _visual_attachment_items(self, tool_names: set[str], output_text: str, current_count: int) -> list[dict[str, Any]]:
         if current_count >= self.max_visual_attachments:
@@ -551,8 +561,21 @@ class OpenAIAgentsRuntime:
 
     def _preview(self, value: Any, limit: int = 1000) -> str:
         text = value if isinstance(value, str) else repr(value)
+        text = self._redact_sensitive_tool_output(text)
         text = text.replace("\r", " ").replace("\n", " ")
         return text if len(text) <= limit else f"{text[:limit]}..."
+
+    def _redact_sensitive_tool_output(self, text: str) -> str:
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        if isinstance(payload, dict) and payload.get("sensitive") is True:
+            redacted = dict(payload)
+            if "value" in redacted:
+                redacted["value"] = "***"
+            return json.dumps(redacted, ensure_ascii=False)
+        return text
 
     def _redact(self, value: Any) -> Any:
         sensitive = ("token", "key", "secret", "password", "authorization", "cookie")

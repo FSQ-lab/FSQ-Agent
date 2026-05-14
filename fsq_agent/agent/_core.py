@@ -54,6 +54,7 @@ class FsqAgent:
             settings.shell,
             settings.openai_agents.local_tool_output,
             settings.output.runs_dir,
+            settings.runtime_secrets,
         )
         mcp_factory = AgentsMCPFactory(settings.mcp_servers, settings.mcp_tool_validation)
         knowledge_loader = PrivateKnowledgeLoader(settings.knowledge_dir)

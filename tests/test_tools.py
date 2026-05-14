@@ -11,6 +11,7 @@ from fsq_agent.models import (
     MCPToolValidationSettings,
     LocalToolOutputSettings,
     RunEvent,
+    RuntimeSecretSettings,
     ShellSettings,
     SkillBundle,
     Task,
@@ -183,6 +184,40 @@ async def test_agents_tool_factory_wait_ms_returns_pure_wait_result(tmp_path: Pa
     assert payload["duration_ms"] == 1
     assert payload["elapsed_ms"] >= 0
     assert payload["reason"] == "page-load pause"
+
+
+@pytest.mark.asyncio
+async def test_agents_tool_factory_runtime_secret_is_allowlisted_and_redacted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_ACCOUNT_PASSWORD", "secret-password")
+    events: list[RunEvent] = []
+    factory = AgentsToolFactory(
+        CLIRunner([]),
+        FileOps(tmp_path),
+        runtime_secret_settings=RuntimeSecretSettings(allowed_env_names=["TEST_ACCOUNT_PASSWORD"]),
+    )
+    tools = factory.build_tools(run_id="run-1", task_id="task-1", event_sink=events.append)
+
+    output = await factory._get_runtime_secret(None, json.dumps({"name": "TEST_ACCOUNT_PASSWORD"}))
+
+    assert any(getattr(tool, "name", None) == "get_runtime_secret" for tool in tools)
+    payload = json.loads(output)
+    assert payload["value"] == "secret-password"
+    assert payload["sensitive"] is True
+    completed_event = events[-1]
+    assert completed_event.type == "tool_call_completed"
+    assert "secret-password" not in completed_event.tool_output_preview
+    assert '"value": "***"' in completed_event.tool_output_preview
+
+
+@pytest.mark.asyncio
+async def test_agents_tool_factory_runtime_secret_rejects_unlisted_name(tmp_path: Path) -> None:
+    factory = AgentsToolFactory(CLIRunner([]), FileOps(tmp_path), runtime_secret_settings=RuntimeSecretSettings())
+
+    with pytest.raises(ToolExecutionError, match="not allowed"):
+        await factory._get_runtime_secret(None, json.dumps({"name": "TEST_ACCOUNT_PASSWORD"}))
 
 
 def test_agents_tool_factory_writes_full_output_artifact_and_returns_inline(tmp_path: Path) -> None:

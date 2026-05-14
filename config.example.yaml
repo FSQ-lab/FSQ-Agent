@@ -47,6 +47,9 @@ mcp_tool_validation:
   strict_schema: true
   fail_when_all_tools_filtered: true
 
+runtime_secrets:
+  allowed_env_names: []
+
 mcp_servers:
   - name: browser
     transport: stdio

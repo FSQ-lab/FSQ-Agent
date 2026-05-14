@@ -1,13 +1,14 @@
 import asyncio
 import json
 import inspect
+import os
 import time
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from fsq_agent.models import LocalToolOutputSettings, RunEvent, RunEventSink, ShellSettings, SkillBundle, ToolExecutionError
+from fsq_agent.models import LocalToolOutputSettings, RunEvent, RunEventSink, RuntimeSecretSettings, ShellSettings, SkillBundle, ToolExecutionError
 from fsq_agent.tools._cli_runner import CLIRunner
 from fsq_agent.tools._file_ops import FileOps
 from fsq_agent.tools._shell_executor import ShellCommandExecutor
@@ -45,6 +46,10 @@ class _WaitArgs(BaseModel):
     reason: str | None = Field(default=None, description="Optional short reason for the wait.")
 
 
+class _RuntimeSecretArgs(BaseModel):
+    name: str = Field(description="Allowed environment variable name to retrieve for the current run.")
+
+
 class _SearchArtifactArgs(BaseModel):
     artifact_path: str = Field(description="Artifact path returned by a previous tool response.")
     query: str = Field(description="Text to search for inside the artifact.")
@@ -67,12 +72,14 @@ class AgentsToolFactory:
         shell_settings: ShellSettings | None = None,
         local_tool_output_settings: LocalToolOutputSettings | None = None,
         runs_dir: Path | None = None,
+        runtime_secret_settings: RuntimeSecretSettings | None = None,
     ) -> None:
         self.cli_runner = cli_runner
         self.file_ops = file_ops
         self.shell_settings = shell_settings or ShellSettings()
         self.local_tool_output_settings = local_tool_output_settings or LocalToolOutputSettings()
         self.runs_dir = runs_dir
+        self.runtime_secret_settings = runtime_secret_settings or RuntimeSecretSettings()
         self.run_id = ""
         self.task_id = ""
         self.event_sink: RunEventSink | None = None
@@ -130,6 +137,19 @@ class AgentsToolFactory:
                 on_invoke_tool=self._wait_ms,
             )
         )
+        if self.runtime_secret_settings.allowed_env_names:
+            tools.append(
+                FunctionTool(
+                    name="get_runtime_secret",
+                    description=(
+                        "Retrieve one configured runtime secret from environment or .env-loaded values. "
+                        "Use only for required setup such as sign-in. Never echo secret values in progress, evidence, or final output. "
+                        f"Allowed names: {', '.join(self.runtime_secret_settings.allowed_env_names)}."
+                    ),
+                    params_json_schema=_RuntimeSecretArgs.model_json_schema(),
+                    on_invoke_tool=self._get_runtime_secret,
+                )
+            )
         if self.cli_runner.list_tools():
             tools.append(
                 FunctionTool(
@@ -324,6 +344,24 @@ class AgentsToolFactory:
         )
         return output
 
+    async def _get_runtime_secret(self, _ctx: Any, args: str) -> str:
+        parsed = _RuntimeSecretArgs.model_validate_json(args)
+        started = time.perf_counter()
+        await self._emit_tool_started("get_runtime_secret", {"name": parsed.name})
+        if parsed.name not in set(self.runtime_secret_settings.allowed_env_names):
+            await self._emit_tool_failed("get_runtime_secret", "Runtime secret name is not allowed.", started)
+            raise ToolExecutionError("Runtime secret name is not allowed.", context={"name": parsed.name})
+        value = os.getenv(parsed.name)
+        if not value:
+            await self._emit_tool_failed("get_runtime_secret", "Runtime secret is not set.", started)
+            raise ToolExecutionError("Runtime secret is not set.", context={"name": parsed.name})
+        output = json.dumps(
+            {"type": "runtime_secret", "name": parsed.name, "value": value, "sensitive": True},
+            ensure_ascii=False,
+        )
+        await self._emit_tool_completed("get_runtime_secret", self._redact_sensitive_tool_output(output), started)
+        return output
+
     async def _emit_tool_started(self, tool_name: str, arguments: dict[str, Any] | str) -> None:
         await self._emit(
             RunEvent(
@@ -376,8 +414,21 @@ class AgentsToolFactory:
 
     def _preview(self, value: Any, limit: int = 1000) -> str:
         text = value if isinstance(value, str) else repr(value)
+        text = self._redact_sensitive_tool_output(text)
         text = text.replace("\r", " ").replace("\n", " ")
         return text if len(text) <= limit else f"{text[:limit]}..."
+
+    def _redact_sensitive_tool_output(self, text: str) -> str:
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        if isinstance(payload, dict) and payload.get("sensitive") is True:
+            redacted = dict(payload)
+            if "value" in redacted:
+                redacted["value"] = "***"
+            return json.dumps(redacted, ensure_ascii=False)
+        return text
 
     def _format_tool_response(self, tool_name: str, payload: dict[str, Any], metadata: dict[str, Any]) -> str:
         full_output = json.dumps(payload, ensure_ascii=False)
