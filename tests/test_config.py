@@ -38,6 +38,7 @@ cli_tools:
     settings = load_settings(config_path)
 
     assert settings.agent.name == "test-agent"
+    assert settings.verification.mode == "normal"
     assert settings.cli_tools[0].name == "echo"
     assert settings.workspace.root_dir == tmp_path / "workspace"
     assert (settings.workspace.root_dir / ".fsq-agent-workspace").exists()
@@ -101,6 +102,41 @@ runtime_secrets:
     settings = load_settings(config_path)
 
     assert settings.runtime_secrets.allowed_env_names == ["TEST_ACCOUNT_EMAIL", "TEST_ACCOUNT_PASSWORD"]
+
+
+def test_load_settings_accepts_verification_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+verification:
+  mode: strict
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.verification.mode == "strict"
+
+
+def test_load_settings_rejects_invalid_verification_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+verification:
+  mode: loose
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
 
 def test_openai_agents_endpoint_is_normalized(tmp_path: Path) -> None:

@@ -12,9 +12,11 @@ No project module dependencies. May depend on external libraries such as `pydant
 
 Current `__init__.py` exports via `__all__`:
 
-- `Task`: Pydantic model describing a natural-language test task, optional metadata, optional user-provided acceptance criteria, retry limits, timeout, and knowledge references. Only `description` is required. When no acceptance criteria are supplied, the OpenAI Agents SDK runtime must derive them from the task description, knowledge, skills, and flow templates.
+- `VerificationCriterion`: Pydantic model for one structured final-verification requirement. It includes criterion text, kind (`goal`, `assertion`, or `operation`), required flag, and source metadata.
+- `Task`: Pydantic model describing a natural-language test task, optional metadata, complete execution key actions, structured final-verification criteria, retry limits, timeout, and knowledge references. Only `description` is required. Execution key actions are always available to the runner as planning context; final verification decides which criteria are blocking according to configured verification mode.
+- `VerificationMode`: Literal policy value for final verification strictness: `strict`, `normal`, or `goal`.
 - `AGENT_FINAL_OUTPUT_SCHEMA_VERSION`: Constant containing the current supported final-output schema version. The runtime supports only the current schema; future compatible schema evolution may add fields, while breaking changes replace the current schema rather than exposing a user-selectable schema configuration.
-- `AgentTaskInput`: Pydantic model describing the structured task envelope rendered into the model input. It includes a schema version, the task, acceptance criteria, optional runtime policy text, and the final output contract name expected for the run.
+- `AgentTaskInput`: Pydantic model describing the structured task envelope rendered into the model input. It includes a schema version, the task, complete key actions for execution planning, structured verification criteria, optional runtime policy text, and the final output contract name expected for the run.
 - `AgentPlanItem`: Pydantic model for one planned or adjusted agent step in final output.
 - `AgentFinalOutput`: Pydantic model for the OpenAI Agents SDK structured final output contract. It contains schema version, task status, summary, pre-plan, plan updates, satisfied/unmet criteria, evidence, and errors.
 - `ToolCallRecord`: Pydantic model for a normalized real tool invocation reconstructed from run events, including true tool name, origin, arguments, output preview, artifact reference, status, timing, and error fields.
@@ -35,6 +37,7 @@ Current `__init__.py` exports via `__all__`:
 - `ToolCall`: Pydantic model describing a tool invocation request.
 - `ToolResult`: Pydantic model describing a normalized tool invocation response.
 - `OpenAIAgentsSettings`: Pydantic model for OpenAI Agents SDK provider configuration, including Azure OpenAI base URL, API key environment variable, model deployment name, tracing policy, turn limits, Responses API options, file-based prompt template customization, context trimming policy, and local tool output artifact policy.
+- `VerificationSettings`: Pydantic model for the final verification policy. The default mode is `normal`.
 - `OpenAIAgentPromptConfig`: Pydantic model containing optional Jinja template file paths, custom operator instructions, and scalar prompt variables.
 - `ContextTrimmingSettings`: Pydantic model controlling SDK model-input trimming for older large tool outputs, including recent turn retention, maximum inline tool output size, preview size, and optional trimmable tool names.
 - `LocalToolOutputSettings`: Pydantic model controlling how local SDK function tools write full outputs to per-run artifacts and decide whether model-facing responses contain full output or artifact references.
@@ -80,6 +83,8 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Centralizing types prevents circular imports and inconsistent result schemas.
 - Pydantic is used at boundaries where external inputs, config files, agent output, and tool output enter the system.
 - The agent final output contract is model-owned. The runtime always uses the current `AgentFinalOutput` schema through OpenAI Agents SDK structured output. The schema version is emitted in the final output for traceability, but schema selection is not a user-facing configuration.
+- Task verification data is split from execution planning data as a breaking change. `key_actions` preserves every required ordered FSQ action for the execution agent, while `verification_criteria` records structured final-verification requirements. `acceptance_criteria` is no longer the primary contract for FSQ verification.
+- Final verification strictness is model-owned through `VerificationSettings.mode`. `strict` requires every required `goal`, `assertion`, and `operation` criterion. `normal` requires required `goal` and `assertion` criteria while treating operation-only criteria as non-blocking execution evidence. `goal` requires only required `goal` criteria. A proven unmet goal criterion prevents success in every mode.
 - Agent output schema evolution follows one of two policies: compatible evolution may only add fields without removing or changing existing field meaning; breaking evolution replaces the current schema and does not preserve a runtime switch for old formats.
 - Tool-call reporting uses `ToolCallRecord` for real local/MCP/hosted/shell tool invocations. Runtime/provenance records such as pre-plan reconstruction and SDK runner summaries are not represented as real tool calls.
 - Result models store evidence paths rather than binary evidence to keep logs and reports lightweight.

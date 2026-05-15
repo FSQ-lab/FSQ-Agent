@@ -1,6 +1,6 @@
 import pytest
 
-from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, LifecycleControllerSettings, LocalToolOutputSettings, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task
+from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, LifecycleControllerSettings, LocalToolOutputSettings, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task, VerificationCriterion, VerificationSettings
 
 
 def test_task_defaults() -> None:
@@ -9,6 +9,9 @@ def test_task_defaults() -> None:
     assert task.id == "task"
     assert task.name == "Task"
     assert task.acceptance_criteria == []
+    assert task.key_actions == []
+    assert task.verification_goal is None
+    assert task.verification_criteria == []
     assert task.timeout_seconds == 300
     assert task.max_retries == 3
     assert task.knowledge_refs == []
@@ -34,16 +37,31 @@ def test_agent_final_output_defaults_schema_version() -> None:
 
 
 def test_agent_task_input_wraps_task_contract() -> None:
-    task = Task(id="task-1", description="Do a thing", acceptance_criteria=["Done."])
+    task = Task(
+        id="task-1",
+        description="Do a thing",
+        key_actions=["Key action 1: tap button"],
+        verification_criteria=[VerificationCriterion(text="Goal completed: Do a thing", kind="goal")],
+    )
     task_input = AgentTaskInput(
         task=task,
         acceptance_criteria=task.acceptance_criteria,
+        key_actions=task.key_actions,
+        verification_criteria=task.verification_criteria,
         acceptance_policy="Use provided criteria.",
     )
 
     assert task_input.schema_version == "task_input_v1"
     assert task_input.output_contract == "task_run_v1"
     assert task_input.task.id == "task-1"
+    assert task_input.key_actions == ["Key action 1: tap button"]
+    assert task_input.verification_criteria[0].kind == "goal"
+
+
+def test_verification_settings_default_to_normal() -> None:
+    settings = VerificationSettings()
+
+    assert settings.mode == "normal"
 
 
 def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:

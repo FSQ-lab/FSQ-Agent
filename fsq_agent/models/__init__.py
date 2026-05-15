@@ -28,6 +28,7 @@ from fsq_agent.models._settings import (
     OutputSettings,
     RuntimeSecretSettings,
     ShellSettings,
+    VerificationSettings,
     WorkspaceSettings,
 )
 from fsq_agent.models._skills import SkillBundle, SkillConfig
@@ -37,7 +38,11 @@ from fsq_agent.models._task import (
     StepResult,
     Task,
     TaskResult,
+    VerificationCriterion,
+    VerificationCriterionKind,
+    VerificationMode,
     VerificationResult,
+    VerificationStatus,
 )
 from fsq_agent.models._tools import (
     CLIToolConfig,
@@ -56,6 +61,10 @@ __all__ = [
     "AgentFinalOutput",
     "ToolCallRecord",
     "Task",
+    "VerificationCriterion",
+    "VerificationCriterionKind",
+    "VerificationMode",
+    "VerificationStatus",
     "ExecutionPlan",
     "ExecutionStep",
     "StepResult",
@@ -81,6 +90,7 @@ __all__ = [
     "LifecycleControllerSettings",
     "LocalToolOutputSettings",
     "RuntimeSecretSettings",
+    "VerificationSettings",
     "SkillConfig",
     "SkillBundle",
     "AgentSettings",

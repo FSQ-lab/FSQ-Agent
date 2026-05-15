@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from fsq_agent.agent import Verifier
-from fsq_agent.models import StepResult, Task
+from fsq_agent.models import StepResult, Task, VerificationCriterion
 
 
 def _task() -> Task:
@@ -12,6 +12,23 @@ def _task() -> Task:
         name="Verify structured result",
         description="Complete a task.",
         acceptance_criteria=["Criterion A", "Criterion B"],
+    )
+
+
+def _mode_task() -> Task:
+    return Task(
+        id="verify-mode",
+        name="Verify mode",
+        description="Complete a mode-sensitive task.",
+        key_actions=[
+            "Key action 1: tapOn Downloads menu item",
+            "Key action 2: assertVisible Downloads page",
+        ],
+        verification_criteria=[
+            VerificationCriterion(text="Goal completed: Access downloads", kind="goal"),
+            VerificationCriterion(text="Key action 1: tapOn Downloads menu item", kind="operation", source="fsq_key_action", key_action_index=1),
+            VerificationCriterion(text="Key action 2: assertVisible Downloads page", kind="assertion", source="fsq_key_action", key_action_index=2),
+        ],
     )
 
 
@@ -36,7 +53,7 @@ async def test_verifier_accepts_structured_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_verifier_uses_agent_status_with_unmet_criteria() -> None:
+async def test_verifier_fails_when_blocking_criterion_is_unmet() -> None:
     result = await Verifier().verify(
         _task(),
         [
@@ -49,12 +66,12 @@ async def test_verifier_uses_agent_status_with_unmet_criteria() -> None:
         ],
     )
 
-    assert result.status == "success"
+    assert result.status == "failed"
     assert result.unmet_criteria == ["Criterion B"]
 
 
 @pytest.mark.asyncio
-async def test_verifier_uses_agent_status_when_acceptance_criterion_is_not_reported() -> None:
+async def test_verifier_marks_missing_blocking_criterion_inconclusive() -> None:
     result = await Verifier().verify(
         _task(),
         [
@@ -67,8 +84,8 @@ async def test_verifier_uses_agent_status_when_acceptance_criterion_is_not_repor
         ],
     )
 
-    assert result.status == "success"
-    assert result.unmet_criteria == []
+    assert result.status == "inconclusive"
+    assert result.unmet_criteria == ["Criterion B"]
 
 
 @pytest.mark.asyncio
@@ -180,6 +197,85 @@ async def test_verifier_uses_agent_status_without_provided_or_derived_criteria()
 
     assert result.status == "success"
     assert result.unmet_criteria == []
+
+
+@pytest.mark.asyncio
+async def test_verifier_normal_mode_ignores_unmet_operation_criteria() -> None:
+    result = await Verifier().verify(
+        _mode_task(),
+        [
+            StepResult(
+                step_id=1,
+                status="success",
+                actual_outcome='{"status":"failed","summary":"Operation claim failed","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Goal completed: Access downloads","Key action 2: assertVisible Downloads page"],"unmet_criteria":["Key action 1: tapOn Downloads menu item"],"evidence":["Downloads page is visible"],"errors":[]}',
+                tool_name="openai_agents.verifier",
+            )
+        ],
+        mode="normal",
+    )
+
+    assert result.status == "success"
+    assert result.satisfied_criteria == ["Goal completed: Access downloads", "Key action 2: assertVisible Downloads page"]
+    assert result.unmet_criteria == []
+    assert any("Non-blocking criteria" in diagnostic for diagnostic in result.diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_verifier_strict_mode_requires_operation_criteria() -> None:
+    result = await Verifier().verify(
+        _mode_task(),
+        [
+            StepResult(
+                step_id=1,
+                status="success",
+                actual_outcome='{"status":"failed","summary":"Operation failed","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Goal completed: Access downloads","Key action 2: assertVisible Downloads page"],"unmet_criteria":["Key action 1: tapOn Downloads menu item"],"evidence":[],"errors":[]}',
+                tool_name="openai_agents.verifier",
+            )
+        ],
+        mode="strict",
+    )
+
+    assert result.status == "failed"
+    assert result.unmet_criteria == ["Key action 1: tapOn Downloads menu item"]
+
+
+@pytest.mark.asyncio
+async def test_verifier_goal_mode_requires_only_goal_criteria() -> None:
+    result = await Verifier().verify(
+        _mode_task(),
+        [
+            StepResult(
+                step_id=1,
+                status="success",
+                actual_outcome='{"status":"failed","summary":"Assertions failed but goal completed","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Goal completed: Access downloads"],"unmet_criteria":["Key action 1: tapOn Downloads menu item","Key action 2: assertVisible Downloads page"],"evidence":[],"errors":[]}',
+                tool_name="openai_agents.verifier",
+            )
+        ],
+        mode="goal",
+    )
+
+    assert result.status == "success"
+    assert result.satisfied_criteria == ["Goal completed: Access downloads"]
+    assert result.unmet_criteria == []
+
+
+@pytest.mark.asyncio
+async def test_verifier_goal_mode_fails_when_goal_is_unmet() -> None:
+    result = await Verifier().verify(
+        _mode_task(),
+        [
+            StepResult(
+                step_id=1,
+                status="success",
+                actual_outcome='{"status":"failed","summary":"Goal not complete","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Key action 2: assertVisible Downloads page"],"unmet_criteria":["Goal completed: Access downloads"],"evidence":[],"errors":[]}',
+                tool_name="openai_agents.verifier",
+            )
+        ],
+        mode="goal",
+    )
+
+    assert result.status == "failed"
+    assert result.unmet_criteria == ["Goal completed: Access downloads"]
 
 
 def _write_event(events_path: Path, **event: object) -> None:

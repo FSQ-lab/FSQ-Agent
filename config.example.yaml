@@ -40,6 +40,10 @@ lifecycle:
   controller: none
   options: {}
 
+verification:
+  # strict: goal + all key actions; normal: goal + assertion key actions; goal: goal only.
+  mode: normal
+
 mcp_tool_validation:
   enabled: true
   invalid_tool_policy: auto_ignore

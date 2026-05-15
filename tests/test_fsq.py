@@ -62,15 +62,25 @@ def test_fsq_task_adapter_renders_case_as_advisory_description(tmp_path: Path) -
 
     assert task.id == "fundamental_test_bing_com_website"
     assert task.name == "Fundamental Test bing.com website"
-    assert task.acceptance_criteria == [
+    assert task.key_actions == [
         "Key action 1: assertVisible New Tab Page account menu (locator: accessibilityId=Account menu)",
         "Key action 2: tapOn Search box in NTP page (locator: resourceId=com.microsoft.emmx:id/search_box_text)",
         "Key action 3: inputText bing.com into Search box (locator: resourceId=com.microsoft.emmx:id/url_bar)",
         "Key action 4: pressKey: Enter",
         "Key action 5: assertWithAI Analyze the screenshot to verify bing webpage displayed normally.",
     ]
+    assert [criterion.kind for criterion in task.verification_criteria] == [
+        "goal",
+        "assertion",
+        "operation",
+        "operation",
+        "operation",
+        "assertion",
+    ]
+    assert task.verification_goal == "Goal completed: Fundamental Test bing.com website"
     assert "advisory for execution details" in task.description
-    assert "Ordered key actions for success" in task.description
+    assert "Ordered key actions for execution" in task.description
+    assert "Final verification criteria" in task.description
     assert "App ID: com.microsoft.emmx" in task.description
     assert "assertWithAI" in task.description
     assert "resourceId" in task.description
@@ -102,9 +112,14 @@ platform: android
 
     task = FsqTaskAdapter().to_task(case)
 
-    assert task.acceptance_criteria == [
+    assert task.key_actions == [
         "Key action 1: tapOn Required button (locator: accessibilityId=Required)",
     ]
+    assert [criterion.text for criterion in task.verification_criteria] == [
+        "Goal completed: Optional Case",
+        "Key action 1: tapOn Required button (locator: accessibilityId=Required)",
+    ]
+    assert [criterion.kind for criterion in task.verification_criteria] == ["goal", "operation"]
 
 
 def test_fsq_task_adapter_renders_msa_precondition_without_secret_values(tmp_path: Path) -> None:
@@ -158,7 +173,9 @@ platform: android
 
     task = FsqTaskAdapter().to_task(case)
 
+    assert task.key_actions == []
     assert task.acceptance_criteria == ["Goal completed: Goal Only Case"]
+    assert [criterion.kind for criterion in task.verification_criteria] == ["goal"]
 
 
 def test_load_task_detects_fsq_codex_yaml(tmp_path: Path) -> None:
@@ -168,7 +185,7 @@ def test_load_task_detects_fsq_codex_yaml(tmp_path: Path) -> None:
     task = load_task(case_path)
 
     assert task.name == "Fundamental Test bing.com website"
-    assert task.acceptance_criteria[0].startswith("Key action 1:")
+    assert task.key_actions[0].startswith("Key action 1:")
     assert "Reference FSQ command flow" in task.description
 
 

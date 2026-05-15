@@ -292,6 +292,8 @@ def test_verification_evidence_builder_uses_text_only_after_runner_visual_assert
 
     assert isinstance(model_input, str)
     evidence = json.loads(model_input)
+    assert evidence["verification_mode"] == "normal"
+    assert evidence["blocking_criteria"][0]["text"] == "Key action 1: assertWithAI Verify the logo is visible."
     assert "visual_artifacts" not in evidence
     assert evidence["agent_claims"]["status"] == "success"
     assert "Runner inspected submitted screenshot" in evidence["agent_claims"]["evidence"][0]

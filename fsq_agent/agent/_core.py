@@ -99,7 +99,7 @@ class FsqAgent:
             run_verification_task = getattr(self.runtime, "_run_verification_task", None)
             if callable(run_verification_task):
                 results.extend(await run_verification_task(task, results, run_id, events_path, emitter.emit))
-            verification = await self.verifier.verify(task, results, events_path=events_path)
+            verification = await self.verifier.verify(task, results, events_path=events_path, mode=self.settings.verification.mode)
             report = self.reporter.generate(run_id, task, results, verification)
             duration_ms = int((time.perf_counter() - started) * 1000)
             result = TaskResult(

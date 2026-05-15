@@ -19,6 +19,8 @@ fsq-agent run --config config.example.yaml --task examples/tasks/add-bookmark.co
 
 Set `AZURE_OPENAI_API_KEY` in `.env` before enabling the OpenAI Agents SDK runtime. The Azure OpenAI base URL should use the `/openai/v1/` form and the model value is the deployment name, for example `gpt-5.4`. Existing process environment variables take precedence over `.env` values.
 
+Final verification strictness is configured with `verification.mode`. The default `normal` verifies the case goal and assertion key actions, `strict` verifies the goal plus every key action including operations, and `goal` verifies only the case goal. Execution still receives the full key-action flow in every mode.
+
 ## Current Scope
 
 This implementation provides validated models, configuration loading, OpenAI Agents SDK runtime wiring, MCP configuration, allowlisted CLI execution, optional SDK ShellTool execution, descriptive skill loading, evidence manifests, and report generation. Task execution requires OpenAI Agents SDK to be enabled and `AZURE_OPENAI_API_KEY` to be present.

@@ -1,7 +1,22 @@
 Structured task input:
 {{ task.input_json }}
 
-{% if task.acceptance_criteria %}
+{% if task.key_actions %}
+Execution key actions:
+{% for action in task.key_actions %}
+- {{ action }}
+{% endfor %}
+{% else %}
+Execution key actions: none provided. Derive the execution path from the description, knowledge, and matched flows.
+{% endif %}
+
+{% if task.verification_criteria %}
+Final verification criteria:
+{% for criterion in task.verification_criteria %}
+- [{{ criterion.kind }}] {{ criterion.text }}{% if not criterion.required %} (optional){% endif %}
+{% endfor %}
+Verification mode is applied only during the final verifier stage. Execute the full key-action flow above even when some operation criteria may be non-blocking later.
+{% elif task.acceptance_criteria %}
 Task acceptance criteria:
 {% for criterion in task.acceptance_criteria %}
 - {{ criterion }}

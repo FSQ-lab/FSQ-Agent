@@ -1,17 +1,25 @@
 import json
 from typing import Any
 
-from fsq_agent.models import FsqCase, Task
+from fsq_agent.models import FsqCase, Task, VerificationCriterion, VerificationCriterionKind
+
+
+_SETUP_TEARDOWN_COMMANDS = {"launchApp", "killApp"}
 
 
 class FsqTaskAdapter:
     def to_task(self, case: FsqCase) -> Task:
-        acceptance_criteria = self.extract_ordered_key_actions(case)
+        key_actions = self.extract_ordered_key_actions(case)
+        verification_goal = f"Goal completed: {case.config.name}"
+        verification_criteria = self.extract_verification_criteria(case, key_actions, verification_goal)
         return Task(
             id=case.id,
             name=case.config.name,
             description=self.render_description(case),
-            acceptance_criteria=acceptance_criteria,
+            acceptance_criteria=[criterion.text for criterion in verification_criteria],
+            key_actions=key_actions,
+            verification_goal=verification_goal,
+            verification_criteria=verification_criteria,
         )
 
     def extract_ordered_key_actions(self, case: FsqCase) -> list[str]:
@@ -22,7 +30,39 @@ class FsqTaskAdapter:
         ]
         if key_actions:
             return [f"Key action {index}: {action}" for index, action in enumerate(key_actions, start=1)]
-        return [f"Goal completed: {case.config.name}"]
+        return []
+
+    def extract_verification_criteria(
+        self,
+        case: FsqCase,
+        key_actions: list[str] | None = None,
+        verification_goal: str | None = None,
+    ) -> list[VerificationCriterion]:
+        key_actions = key_actions if key_actions is not None else self.extract_ordered_key_actions(case)
+        verification_goal = verification_goal or f"Goal completed: {case.config.name}"
+        criteria = [
+            VerificationCriterion(
+                text=verification_goal,
+                kind="goal",
+                source="fsq_case_goal",
+            )
+        ]
+        key_action_index = 0
+        for command in case.commands:
+            command_name = self._command_name(command)
+            if self._render_key_action(command) is None:
+                continue
+            key_action_index += 1
+            text = key_actions[key_action_index - 1] if key_action_index <= len(key_actions) else self._render_command(command)
+            criteria.append(
+                VerificationCriterion(
+                    text=text,
+                    kind=self._criterion_kind(command_name),
+                    source="fsq_key_action",
+                    key_action_index=key_action_index,
+                )
+            )
+        return criteria
 
     def render_description(self, case: FsqCase) -> str:
         config = case.config
@@ -54,8 +94,8 @@ class FsqTaskAdapter:
             "- For Android cases, use the configured Appium MCP tools for device, session, app lifecycle, element lookup, taps, text input, key presses, page source, and screenshots. Do not use CLI tools unless the task explicitly exposes one.",
             "- Treat optional or transient UI such as dialogs, permissions, and sign-in state as runtime conditions to handle safely.",
             "- Do not edit the source FSQ YAML during execution.",
-            "- Treat ordered key actions as the goal's required validation spine, not as a brittle one-for-one script. Preserve their relative order while allowing recovery, wait, evidence, and transient-dialog steps between them.",
-            "- Derive success criteria from the ordered key actions when present; otherwise derive them from the case name, description, assertion commands, and final intended app/page state.",
+            "- Treat ordered key actions as the goal's required execution spine, not as a brittle one-for-one script. Preserve their relative order while allowing recovery, wait, evidence, and transient-dialog steps between them.",
+            "- Execute with all ordered key actions visible. Final verification mode may later decide which action categories are blocking, but do not skip operation steps because of that.",
             "- If this case has preconditions, inspect the live app state before the ordered key actions. Complete only missing preconditions first, then continue the case flow.",
             "- When a precondition requires credentials, use configured runtime secret tools and environment variable names only. Do not print, store, or report secret values.",
             "- Use success only when the intended scenario is completed with evidence from the live UI or tool outputs.",
@@ -68,9 +108,19 @@ class FsqTaskAdapter:
             lines.append("- None detected from case metadata or commands.")
         lines.extend([
             "",
-            "Ordered key actions for success:",
+            "Ordered key actions for execution:",
         ])
-        lines.extend(f"{index}. {action}" for index, action in enumerate(self.extract_ordered_key_actions(case), start=1))
+        key_actions = self.extract_ordered_key_actions(case)
+        if key_actions:
+            lines.extend(f"{index}. {action}" for index, action in enumerate(key_actions, start=1))
+        else:
+            lines.append("- No required ordered key actions; execute toward the case goal.")
+        lines.extend([
+            "",
+            "Final verification criteria:",
+        ])
+        for criterion in self.extract_verification_criteria(case, key_actions):
+            lines.append(f"- [{criterion.kind}] {criterion.text}")
         lines.extend([
             "",
             "Reference FSQ command flow:",
@@ -91,18 +141,28 @@ class FsqTaskAdapter:
 
     def _render_key_action(self, command: Any) -> str | None:
         if isinstance(command, str):
-            if command in {"launchApp", "killApp"}:
+            if command in _SETUP_TEARDOWN_COMMANDS:
                 return None
             return command
         if not isinstance(command, dict) or len(command) != 1:
             return self._render_command(command)
 
         name, value = next(iter(command.items()))
-        if name in {"launchApp", "killApp"}:
+        if name in _SETUP_TEARDOWN_COMMANDS:
             return None
         if isinstance(value, dict) and value.get("optional") is True:
             return None
         return self._format_key_action(name, value)
+
+    def _command_name(self, command: Any) -> str:
+        if isinstance(command, str):
+            return command
+        if isinstance(command, dict) and len(command) == 1:
+            return str(next(iter(command.keys())))
+        return "command"
+
+    def _criterion_kind(self, command_name: str) -> VerificationCriterionKind:
+        return "assertion" if command_name.lower().startswith("assert") else "operation"
 
     def _format_key_action(self, name: str, value: Any) -> str:
         if not isinstance(value, dict):

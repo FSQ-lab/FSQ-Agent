@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from fsq_agent.models._task import VerificationMode
+
 
 class AgentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -50,6 +52,12 @@ class LifecycleControllerSettings(BaseModel):
 
     controller: str = "none"
     options: dict[str, Any] = Field(default_factory=dict)
+
+
+class VerificationSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: VerificationMode = "normal"
 
 
 class RuntimeSecretSettings(BaseModel):

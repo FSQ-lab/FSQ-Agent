@@ -370,6 +370,7 @@ class OpenAIAgentsRuntime:
             task,
             execution_results,
             events_path,
+            mode=self.settings.verification.mode,
         )
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
         client = AsyncOpenAI(

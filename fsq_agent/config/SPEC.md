@@ -2,17 +2,17 @@
 
 ## Purpose
 
-Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, Azure OpenAI model deployment, MCP servers, lifecycle setup/teardown controller selection, MCP tool validation policy, CLI tools, automation skills, runtime secret allowlists, case input directories, the fsq-agent workspace, and output directories.
+Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, Azure OpenAI model deployment, final verification policy, MCP servers, lifecycle setup/teardown controller selection, MCP tool validation policy, CLI tools, automation skills, runtime secret allowlists, case input directories, the fsq-agent workspace, and output directories.
 
 ## Dependencies
 
-- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `LifecycleControllerSettings`, `MCPServerConfig`, `MCPToolValidationSettings`, `WorkspaceSettings`, `CaseSettings`, `CLIToolConfig`, `ShellSettings`, `SkillConfig`, `OutputSettings`, and `ConfigurationError`.
+- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `LifecycleControllerSettings`, `VerificationSettings`, `MCPServerConfig`, `MCPToolValidationSettings`, `WorkspaceSettings`, `CaseSettings`, `CLIToolConfig`, `ShellSettings`, `SkillConfig`, `OutputSettings`, and `ConfigurationError`.
 
 ## Public Interface
 
 Current `__init__.py` exports via `__all__`:
 
-- `Settings`: Runtime settings aggregate model that combines agent, OpenAI Agents SDK provider, configurable prompt text, context trimming, local tool output artifact policy, lifecycle setup/teardown controller selection, MCP, MCP tool validation, runtime secret allowlists, workspace, case directory, CLI, shell, skills, and output configuration.
+- `Settings`: Runtime settings aggregate model that combines agent, OpenAI Agents SDK provider, configurable prompt text, context trimming, local tool output artifact policy, lifecycle setup/teardown controller selection, final verification policy, MCP, MCP tool validation, runtime secret allowlists, workspace, case directory, CLI, shell, skills, and output configuration.
 - `load_settings(path: str | Path | None = None, workspace: str | Path | None = None) -> Settings`: Loads `.env` values without overriding existing environment variables, then loads YAML configuration from the provided path or default search locations. The optional workspace argument overrides `workspace.root_dir`.
 - `resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> None`: Ensures the fsq-agent workspace is initialized and marked, resolves case and knowledge directories, and creates output directories under the workspace.
 - `validate_runtime_settings(settings: Settings) -> None`: Validates that OpenAI Agents SDK is enabled, secrets are present, Azure OpenAI base URL shape is valid, model deployment name is configured, optional shell policy is valid, and local path constraints pass before a run starts.
@@ -41,6 +41,7 @@ Invalid or missing configuration raises `ConfigurationError` from `models`. Low-
 - GPT-5.4 is treated as the default sizing target for tool-output context policy. The default keeps recent moderate local outputs inline, writes every local tool output to a per-run artifact, and trims older large SDK tool outputs before model calls.
 - `openai_agents.prompt` owns prompt customization. `prompt.agent_template_path` and `prompt.task_template_path` may point to Jinja template files resolved relative to the configuration file directory; when omitted, package default templates are used. Static prompt text, headings, loops, and task formatting live in those templates. `prompt.custom_instructions` and `prompt.variables` provide operator-controlled model data injected into the templates.
 - `lifecycle.controller` selects a named setup/teardown implementation such as `appium_android`; `lifecycle.options` is passed to that implementation. The default `none` preserves existing behavior.
+- `verification.mode` selects final verification strictness. The default `normal` verifies the goal and assertion-style criteria. `strict` verifies the goal plus all required ordered key actions, including operation-style criteria. `goal` verifies only the goal-level criteria. The setting affects final verification only; the execution agent still receives all key actions as task context.
 - Non-interactive execution is the default: trusted MCP servers use `require_approval: never`; any approval callback must be programmatic.
 - Local shell execution is disabled by default. When enabled, `shell.mode: allowlist` requires `command_allowlist`; `shell.mode: allow_all` intentionally permits unrestricted local shell commands inside the fsq-agent workspace.
 - Output directory creation is part of config resolution so later modules can assume directories are writable. Reports, run event timelines, tool artifacts, and generated files must be placed under `output.root_dir`; completed run reports are stored under `output.runs_dir`.
