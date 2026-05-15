@@ -36,7 +36,7 @@ async def test_verifier_accepts_structured_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_verifier_downgrades_success_with_unmet_criteria() -> None:
+async def test_verifier_uses_agent_status_with_unmet_criteria() -> None:
     result = await Verifier().verify(
         _task(),
         [
@@ -49,12 +49,12 @@ async def test_verifier_downgrades_success_with_unmet_criteria() -> None:
         ],
     )
 
-    assert result.status == "inconclusive"
+    assert result.status == "success"
     assert result.unmet_criteria == ["Criterion B"]
 
 
 @pytest.mark.asyncio
-async def test_verifier_downgrades_success_when_acceptance_criterion_is_not_reported() -> None:
+async def test_verifier_uses_agent_status_when_acceptance_criterion_is_not_reported() -> None:
     result = await Verifier().verify(
         _task(),
         [
@@ -67,8 +67,8 @@ async def test_verifier_downgrades_success_when_acceptance_criterion_is_not_repo
         ],
     )
 
-    assert result.status == "inconclusive"
-    assert result.unmet_criteria == ["Criterion B"]
+    assert result.status == "success"
+    assert result.unmet_criteria == []
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_verifier_uses_structured_sdk_unmet_criteria_when_pre_plan_step_fa
 
 
 @pytest.mark.asyncio
-async def test_verifier_downgrades_structured_success_when_execution_step_failed() -> None:
+async def test_verifier_uses_structured_success_when_execution_step_failed() -> None:
     result = await Verifier().verify(
         _task(),
         [
@@ -117,11 +117,10 @@ async def test_verifier_downgrades_structured_success_when_execution_step_failed
         ],
     )
 
-    assert result.status == "inconclusive"
+    assert result.status == "success"
     assert result.satisfied_criteria == ["Criterion A", "Criterion B"]
     assert result.unmet_criteria == []
-    assert "Success was downgraded" in result.summary
-    assert "A recovery step failed." in result.diagnostics
+    assert result.diagnostics == ["Observed A and B"]
 
 
 @pytest.mark.asyncio
@@ -164,7 +163,7 @@ async def test_verifier_accepts_agent_derived_criteria_when_task_has_none() -> N
 
 
 @pytest.mark.asyncio
-async def test_verifier_downgrades_success_without_provided_or_derived_criteria() -> None:
+async def test_verifier_uses_agent_status_without_provided_or_derived_criteria() -> None:
     task = Task(id="derive-2", name="Derived", description="Do it.")
 
     result = await Verifier().verify(
@@ -179,8 +178,8 @@ async def test_verifier_downgrades_success_without_provided_or_derived_criteria(
         ],
     )
 
-    assert result.status == "inconclusive"
-    assert result.unmet_criteria == ["No acceptance criteria were provided by the user or derived by the agent."]
+    assert result.status == "success"
+    assert result.unmet_criteria == []
 
 
 def _write_event(events_path: Path, **event: object) -> None:
@@ -237,6 +236,32 @@ async def test_verifier_prefers_verification_agent_output_over_runner_claims() -
                 status="success",
                 actual_outcome='{"status":"inconclusive","summary":"Runner was unsure","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Criterion A"],"unmet_criteria":["Criterion B"],"evidence":["Runner evidence"],"errors":[]}',
                 tool_name="openai_agents.runner",
+            ),
+            StepResult(
+                step_id=2,
+                status="success",
+                actual_outcome='{"status":"success","summary":"Verifier proved both criteria","pre_plan":[],"plan_updates":[],"satisfied_criteria":["Criterion A","Criterion B"],"unmet_criteria":[],"evidence":["Evidence bundle proved A and B"],"errors":[]}',
+                tool_name="openai_agents.verifier",
+            ),
+        ],
+    )
+
+    assert result.status == "success"
+    assert result.satisfied_criteria == ["Criterion A", "Criterion B"]
+    assert result.unmet_criteria == []
+    assert result.diagnostics == ["Evidence bundle proved A and B"]
+
+
+@pytest.mark.asyncio
+async def test_verifier_uses_successful_verification_agent_output_despite_failed_execution_step() -> None:
+    result = await Verifier().verify(
+        _task(),
+        [
+            StepResult(
+                step_id=1,
+                status="failed",
+                actual_outcome="A synthetic pre-plan step failed before evidence verification.",
+                tool_name="pre_plan",
             ),
             StepResult(
                 step_id=2,

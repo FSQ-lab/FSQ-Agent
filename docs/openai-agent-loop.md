@@ -108,8 +108,8 @@ OpenAI Agents SDK already provides the loop runner. Rebuilding the loop in this 
 
 If SDK setup, MCP startup, tool execution, or the runner fails before final JSON, the runtime returns a failed `StepResult` so reporting can still complete.
 
-If the SDK returns non-JSON output, `Verifier` marks the result `inconclusive`.
+If the evidence-based verifier agent returns parseable final JSON, `Verifier` preserves that `success`, `failed`, or `inconclusive` status as the final conclusion.
 
-If the SDK returns `success` without any user-provided or derived criteria, `Verifier` downgrades it to `inconclusive`.
+If the verifier task is unavailable, `Verifier` uses parseable runner final JSON as the fallback conclusion.
 
-If the SDK returns `success` with unmet criteria, `Verifier` downgrades it to `inconclusive`.
+If no agent final JSON is parseable, `Verifier` falls back to failed-step diagnostics or marks the result `inconclusive`.
