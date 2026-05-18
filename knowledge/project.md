@@ -1,6 +1,8 @@
-# FSQ Agent Knowledge Index
+# FSQ Agent Project Knowledge
 
-This file is loaded for every task as concise project and app knowledge.
+This file is loaded for every normal goal-driven task as concise project and app knowledge.
+
+`knowledge/index.md` is reserved for the public page-knowledge graph index used by standalone goal pre-planning.
 
 ## Edge Android MSA Sign-In
 

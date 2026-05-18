@@ -2,17 +2,17 @@
 
 ## Purpose
 
-Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, Azure OpenAI model deployment, final verification policy, MCP servers, lifecycle setup/teardown controller selection, MCP tool validation policy, CLI tools, automation skills, runtime secret allowlists, case input directories, the fsq-agent workspace, and output directories.
+Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, Azure OpenAI model deployment, final verification policy, MCP servers, lifecycle setup/teardown controller selection, MCP tool validation policy, CLI tools, automation skills, runtime secret allowlists, case input directories, pre-plan page knowledge, the fsq-agent workspace, and output directories.
 
 ## Dependencies
 
-- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `LifecycleControllerSettings`, `VerificationSettings`, `MCPServerConfig`, `MCPToolValidationSettings`, `WorkspaceSettings`, `CaseSettings`, `CLIToolConfig`, `ShellSettings`, `SkillConfig`, `OutputSettings`, and `ConfigurationError`.
+- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `LifecycleControllerSettings`, `VerificationSettings`, `MCPServerConfig`, `MCPToolValidationSettings`, `WorkspaceSettings`, `CaseSettings`, `CLIToolConfig`, `ShellSettings`, `SkillConfig`, `OutputSettings`, `PrePlanSettings`, and `ConfigurationError`.
 
 ## Public Interface
 
 Current `__init__.py` exports via `__all__`:
 
-- `Settings`: Runtime settings aggregate model that combines agent, OpenAI Agents SDK provider, configurable prompt text, context trimming, local tool output artifact policy, lifecycle setup/teardown controller selection, final verification policy, MCP, MCP tool validation, runtime secret allowlists, workspace, case directory, CLI, shell, skills, and output configuration.
+- `Settings`: Runtime settings aggregate model that combines agent, OpenAI Agents SDK provider, configurable prompt text, context trimming, local tool output artifact policy, lifecycle setup/teardown controller selection, final verification policy, MCP, MCP tool validation, runtime secret allowlists, workspace, case directory, CLI, shell, skills, output, normal task knowledge, and pre-plan page knowledge configuration.
 - `load_settings(path: str | Path | None = None, workspace: str | Path | None = None) -> Settings`: Loads `.env` values without overriding existing environment variables, then loads YAML configuration from the provided path or default search locations. The optional workspace argument overrides `workspace.root_dir`.
 - `resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> None`: Ensures the fsq-agent workspace is initialized and marked, resolves case and knowledge directories, and creates output directories under the workspace.
 - `validate_runtime_settings(settings: Settings) -> None`: Validates that OpenAI Agents SDK is enabled, secrets are present, Azure OpenAI base URL shape is valid, model deployment name is configured, optional shell policy is valid, and local path constraints pass before a run starts.
@@ -33,7 +33,8 @@ Invalid or missing configuration raises `ConfigurationError` from `models`. Low-
 
 - Configuration is read once during application startup and passed into modules explicitly.
 - fsq-agent never writes runtime artifacts relative to the caller's current directory. A configured or default workspace is initialized with `.fsq-agent-workspace`; non-empty unmarked directories are rejected to avoid treating a public user directory as a managed workspace.
-- Relative `cases.dir` and `knowledge_dir` values resolve relative to the configuration file directory. Relative `output.root_dir` and `shell.working_dir` values resolve inside the fsq-agent workspace.
+- Relative `cases.dir`, `knowledge_dir`, and `pre_plan.knowledge_dir` values resolve relative to the configuration file directory. Relative `output.root_dir` and `shell.working_dir` values resolve inside the fsq-agent workspace.
+- `knowledge_dir` is the normal task private knowledge root. `pre_plan.knowledge_dir` optionally points standalone goal pre-planning at a reusable page-knowledge graph; when omitted, pre-planning falls back to `knowledge_dir` for backward compatibility.
 - The API key is never stored in config files. `openai_agents.api_key_env` names an environment variable such as `AZURE_OPENAI_API_KEY`, which can be provided by a local `.env` file ignored by git.
 - Test credentials and other runtime-only secret values are never stored in FSQ case YAML or code. The `runtime_secrets.allowed_env_names` allowlist names the environment variables that the local `get_runtime_secret` tool may return to the model, with values loaded from the process environment or `.env` using the normal loader.
 - Azure OpenAI endpoints are normalized to the OpenAI-compatible Responses base URL form, for example `https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/`.

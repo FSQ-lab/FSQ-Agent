@@ -98,3 +98,6 @@ output:
   runs_dir: runs
 
 knowledge_dir: ./knowledge
+
+pre_plan:
+  knowledge_dir: ./knowledge/project_android_v1

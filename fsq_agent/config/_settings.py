@@ -11,6 +11,7 @@ from fsq_agent.models import (
     MCPToolValidationSettings,
     OpenAIAgentsSettings,
     OutputSettings,
+    PrePlanSettings,
     RuntimeSecretSettings,
     ShellSettings,
     SkillConfig,
@@ -35,4 +36,5 @@ class Settings(BaseModel):
     shell: ShellSettings = Field(default_factory=ShellSettings)
     skills: list[SkillConfig] = Field(default_factory=list)
     output: OutputSettings = Field(default_factory=OutputSettings)
+    pre_plan: PrePlanSettings = Field(default_factory=PrePlanSettings)
     knowledge_dir: Path = Path("./knowledge")

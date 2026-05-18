@@ -171,12 +171,12 @@ def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) ->
 def test_runtime_instructions_include_knowledge_index_content() -> None:
     settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
-    knowledge = KnowledgeBundle(items={"index.md": "Use Other ways to sign in, then choose password sign-in."})
+    knowledge = KnowledgeBundle(items={"project.md": "Use Other ways to sign in, then choose password sign-in."})
 
     instructions = runtime._build_instructions(knowledge, [])
 
     assert "Private knowledge:" in instructions
-    assert "index.md" in instructions
+    assert "project.md" in instructions
     assert "choose password sign-in" in instructions
 
 

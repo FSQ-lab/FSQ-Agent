@@ -104,6 +104,26 @@ runtime_secrets:
     assert settings.runtime_secrets.allowed_env_names == ["TEST_ACCOUNT_EMAIL", "TEST_ACCOUNT_PASSWORD"]
 
 
+def test_load_settings_accepts_pre_plan_knowledge_dir(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+knowledge_dir: ./knowledge
+pre_plan:
+  knowledge_dir: ./knowledge/project_android_v1
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.knowledge_dir == tmp_path / "knowledge"
+    assert settings.pre_plan.knowledge_dir == tmp_path / "knowledge" / "project_android_v1"
+
+
 def test_load_settings_accepts_verification_mode(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

@@ -19,12 +19,12 @@ class DirectoryKnowledgeProvider:
     def load_for_task(self, task: Task) -> KnowledgeBundle:
         items: dict[str, Any] = {}
         warnings: list[str] = []
-        index_path = (self.knowledge_dir / "index.md").resolve()
-        if index_path.exists():
+        project_path = (self.knowledge_dir / "project.md").resolve()
+        if project_path.exists():
             try:
-                items["index.md"] = self._load_path(index_path)
+                items["project.md"] = self._load_path(project_path)
             except OSError as exc:
-                raise FsqAgentError("Unable to load knowledge index.", context={"path": str(index_path)}) from exc
+                raise FsqAgentError("Unable to load project knowledge.", context={"path": str(project_path)}) from exc
         for reference in task.knowledge_refs:
             path = (self.knowledge_dir / reference).resolve()
             if not path.exists():

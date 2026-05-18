@@ -4,12 +4,12 @@ from fsq_agent.knowledge import DirectoryKnowledgeProvider, PrivateKnowledgeLoad
 from fsq_agent.models import KnowledgeBundle, Task
 
 
-def test_directory_knowledge_provider_loads_index_for_every_task(tmp_path: Path) -> None:
-    (tmp_path / "index.md").write_text("Global Edge login knowledge.", encoding="utf-8")
+def test_directory_knowledge_provider_loads_project_knowledge_for_every_task(tmp_path: Path) -> None:
+    (tmp_path / "project.md").write_text("Global Edge login knowledge.", encoding="utf-8")
 
     bundle = DirectoryKnowledgeProvider(tmp_path).load_for_task(Task(description="Run a case."))
 
-    assert bundle.items["index.md"] == "Global Edge login knowledge."
+    assert bundle.items["project.md"] == "Global Edge login knowledge."
 
 
 def test_private_knowledge_loader_aggregates_provider_bundles(tmp_path: Path) -> None:
@@ -24,10 +24,10 @@ def test_private_knowledge_loader_aggregates_provider_bundles(tmp_path: Path) ->
 
 
 def test_directory_knowledge_provider_keeps_task_references(tmp_path: Path) -> None:
-    (tmp_path / "index.md").write_text("Global knowledge.", encoding="utf-8")
+    (tmp_path / "project.md").write_text("Global knowledge.", encoding="utf-8")
     (tmp_path / "case.md").write_text("Case-specific knowledge.", encoding="utf-8")
 
     bundle = DirectoryKnowledgeProvider(tmp_path).load_for_task(Task(description="Run.", knowledge_refs=["case.md"]))
 
-    assert bundle.items["index.md"] == "Global knowledge."
+    assert bundle.items["project.md"] == "Global knowledge."
     assert bundle.items["case.md"] == "Case-specific knowledge."

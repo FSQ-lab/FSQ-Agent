@@ -20,6 +20,7 @@ Current `__init__.py` exports via `__all__`:
 
 - `FsqAgent`: Main orchestration class.
 - `OpenAIAgentsRuntime`: Builds and runs an OpenAI Agents SDK `Agent` with Azure OpenAI configuration, tools, MCP servers, skills, turn limits, and tracing policy.
+- `GoalPrePlanner`: Uses the OpenAI Agents SDK with read-only knowledge lookup tools to convert a natural-language goal plus page knowledge into an ordered key-action pre-plan.
 - `Verifier`: Parses structured verifier-agent or runner final output and converts task status, satisfied criteria, unmet criteria, evidence, diagnostics, and configured verification mode into a `VerificationResult`.
 
 Planned signatures:
@@ -27,7 +28,9 @@ Planned signatures:
 - `FsqAgent.from_config(path: str | Path | None = None, workspace: str | Path | None = None) -> FsqAgent`
 - `FsqAgent.from_settings(settings: Settings) -> FsqAgent`
 - `FsqAgent.run(task: Task, event_sink: RunEventSink | None = None) -> TaskResult`
+- `FsqAgent.pre_plan_goal(goal: str, event_sink: RunEventSink | None = None) -> GoalPrePlan`
 - `OpenAIAgentsRuntime.run_task(task: Task, knowledge: KnowledgeBundle, skills: list[SkillBundle], run_id: str, event_sink: RunEventSink | None = None) -> list[StepResult]`
+- `OpenAIAgentsRuntime.run_pre_plan(goal: str, knowledge: KnowledgeBundle, skills: list[SkillBundle], run_id: str, event_sink: RunEventSink | None = None) -> GoalPrePlan`
 - `Verifier.verify(task: Task, results: list[StepResult], events_path: Path | None = None, mode: VerificationMode = "normal") -> VerificationResult`
 
 ## Internal Structure
@@ -36,6 +39,7 @@ Planned signatures:
 - `_core.py`: `FsqAgent` orchestration and lifecycle.
 - `_events.py`: Run event emission, sequencing, persistence fan-out, and user-sink dispatch.
 - `_openai_runtime.py`: OpenAI Agents SDK client/provider setup, lifecycle setup/teardown invocation, agent construction, MCP context management, MCP validation diagnostic step injection, `Runner.run_streamed` invocation, and SDK stream event mapping.
+- `_pre_plan.py`: Prompt instructions and helpers for goal-only pre-planning from page knowledge.
 - `_prompt.py`: Prompt model construction and template rendering for agent instructions and task input.
 - `_structured_output.py`: Shared coercion helpers for SDK final output values and compatibility parsing of legacy/raw final JSON strings.
 - `_verification_task.py`: Builds an evidence bundle from task context, execution records, event logs, and persisted tool artifacts for a separate evidence-based verification agent task.
@@ -46,6 +50,8 @@ Planned signatures:
 
 Configuration errors are raised before task execution when OpenAI Agents SDK is disabled or required Azure OpenAI credentials are absent. SDK/MCP/tool runtime exceptions are converted into failed `StepResult` values so report generation can still complete. Recoverable tool failures should be surfaced through structured final JSON. Verification treats invalid final JSON as inconclusive instead of claiming task success.
 
+Goal pre-planning raises configuration errors when OpenAI Agents SDK configuration is unavailable and planning errors when the SDK does not return a valid `GoalPrePlan`. Pre-planning does not open MCP servers, run lifecycle setup, call UI/external action tools, or generate reports. Read-only knowledge lookup tool failures are surfaced to the planner as warnings so it can continue when possible.
+
 ## Design Decisions
 
 - The orchestration module depends on all leaf modules, but leaf modules never depend on `agent`.
@@ -55,6 +61,9 @@ Configuration errors are raised before task execution when OpenAI Agents SDK is 
 - The SDK runner owns tool dispatch and turn continuation. The project should not reimplement the Responses function-call loop.
 - Configured lifecycle controllers may make deterministic setup/teardown MCP calls before and after the model tool loop. Those calls are not agent reasoning steps; they are runtime preparation/cleanup and are emitted as lifecycle-tagged tool-call events.
 - The agent must create a pre-plan before external actions, derive task success criteria from the description, private knowledge, flow templates, and skills when the user did not provide criteria, include those criteria in the pre-plan, execute through MCP/tools/skills, and adapt the plan when tool feedback changes the best path.
+- Goal pre-planning is an explicit standalone capability used before execution integration. It receives only a goal string, loads the concise page index from `pre_plan.knowledge_dir` when configured or from `knowledge_dir` as a fallback, and returns ordered key actions plus relevant page ids. It is intentionally side-effect-free for the application under test: no UI automation, no lifecycle calls, no verification agent, and no report generation.
+- Pre-planning is an iterative knowledge loop. The initial model input contains `index.md` only. The pre-plan agent can call read-only local knowledge tools to reload the index or load specific page files from `knowledge/pages/` by page id or relative path. Page-to-page transitions may cause additional page reads until the action chain is complete or no useful next page is available.
+- If page knowledge is incomplete, the planner should still produce the best available contiguous key-action chain. It may skip at most one consecutive missing action by recording a warning. If it cannot produce a useful plan from the available graph, it must return a valid `GoalPrePlan` with an empty `key_actions` list.
 - When FSQ task input provides ordered key actions, the pre-plan must use the complete list as the execution spine regardless of final verification mode: preserve their relative order, allow recovery/setup/dialog-handling steps between them, and collect live evidence for the resulting state before reporting success.
 - Ordered key actions must preserve semantic fidelity. Recovery or fallback actions may restore UI state, but they do not satisfy the original ordered key action unless they perform the same accepted semantic action. Tool usage errors should be corrected for the same semantic action before switching to non-equivalent fallback routes.
 - Run identifiers are generated by the orchestration layer as `<task-id>-YYYY-MM-DD_HH-MM-SS` using local time so directories under `output.runs_dir` are easy to read while remaining path-safe on Windows.

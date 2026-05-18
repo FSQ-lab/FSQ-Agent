@@ -10,11 +10,19 @@ from contextlib import AsyncExitStack
 from typing import Any
 
 from fsq_agent.config import Settings, validate_runtime_settings
-from fsq_agent.models import AgentFinalOutput, ConfigurationError, KnowledgeBundle, RunEvent, RunEventSink, SkillBundle, StepResult, Task
+from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, KnowledgeBundle, PlanningError, RunEvent, RunEventSink, SkillBundle, StepResult, Task
 from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory, LifecycleControllerFactory, MCPToolCaller
 from fsq_agent.tools._tool_artifacts import ToolArtifactStore
 
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
+from fsq_agent.agent._pre_plan import (
+    PRE_PLAN_AGENT_INSTRUCTIONS,
+    ReadKnowledgeIndexArgs,
+    ReadKnowledgePageArgs,
+    build_pre_plan_input,
+    page_file_from_index,
+    safe_page_relative_path,
+)
 from fsq_agent.agent._structured_output import coerce_agent_final_output, coerce_string_list, serialize_agent_final_output
 from fsq_agent.agent._verification_task import VERIFICATION_AGENT_INSTRUCTIONS, VerificationEvidenceBuilder
 
@@ -29,6 +37,8 @@ _LOCAL_TOOL_NAMES = {
     "submit_visual_assertion",
     "get_runtime_secret",
     "wait_ms",
+    "read_knowledge_index",
+    "read_knowledge_page",
 }
 
 
@@ -223,7 +233,7 @@ class OpenAIAgentsRuntime:
         validate_runtime_settings(self.settings)
         started = time.perf_counter()
         try:
-            from agents import Agent, OpenAIProvider, RunConfig, Runner, set_tracing_disabled
+            from agents import Agent, FunctionTool, OpenAIProvider, RunConfig, Runner, set_tracing_disabled
             from agents.extensions import ToolOutputTrimmer
             from openai import AsyncOpenAI
         except ImportError as exc:
@@ -338,6 +348,153 @@ class OpenAIAgentsRuntime:
                 tool_output=final_output.model_dump(mode="json") if isinstance(final_output, AgentFinalOutput) else serialized_final_output,
             )
         ]
+
+    async def run_pre_plan(
+        self,
+        goal: str,
+        knowledge: KnowledgeBundle,
+        skills: list[SkillBundle],
+        run_id: str,
+        event_sink: RunEventSink | None = None,
+    ) -> GoalPrePlan:
+        validate_runtime_settings(self.settings)
+        task_id = "pre-plan"
+        started = time.perf_counter()
+        try:
+            from agents import Agent, FunctionTool, OpenAIProvider, RunConfig, Runner, set_tracing_disabled
+            from agents.extensions import ToolOutputTrimmer
+            from openai import AsyncOpenAI
+        except ImportError as exc:
+            raise ConfigurationError("openai-agents and openai packages are required when SDK runtime is enabled.") from exc
+
+        await self._emit(
+            event_sink,
+            RunEvent(
+                run_id=run_id,
+                task_id=task_id,
+                type="planning_started",
+                title="Pre-plan started",
+                message="Generating key actions from the goal and page knowledge.",
+            ),
+        )
+        set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+        client = AsyncOpenAI(
+            api_key=os.environ[self.settings.openai_agents.api_key_env],
+            base_url=self.settings.openai_agents.base_url,
+        )
+        provider = OpenAIProvider(openai_client=client, use_responses=self.settings.openai_agents.use_responses)
+        try:
+            agent = Agent(
+                name=f"{self.settings.agent.name} pre-planner",
+                model=self.settings.openai_agents.model,
+                instructions=PRE_PLAN_AGENT_INSTRUCTIONS,
+                tools=self._build_pre_plan_tools(FunctionTool),
+                mcp_servers=[],
+                output_type=GoalPrePlan,
+            )
+            result = Runner.run_streamed(
+                agent,
+                input=build_pre_plan_input(goal, knowledge, skills),
+                max_turns=self.settings.openai_agents.max_turns,
+                run_config=self._build_run_config(RunConfig, ToolOutputTrimmer, provider, run_id),
+            )
+            async for event in result.stream_events():
+                run_event = self._map_stream_event(event, run_id, task_id)
+                if run_event:
+                    await self._emit(event_sink, run_event)
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            await self._emit(
+                event_sink,
+                RunEvent(
+                    run_id=run_id,
+                    task_id=task_id,
+                    type="run_failed",
+                    title="Pre-plan failed",
+                    message=str(exc),
+                    duration_ms=duration_ms,
+                ),
+            )
+            raise PlanningError("Goal pre-plan failed before producing structured output.", context={"error": str(exc)}) from exc
+        finally:
+            await client.close()
+
+        pre_plan = result.final_output
+        if isinstance(pre_plan, GoalPrePlan):
+            return pre_plan
+        try:
+            if isinstance(pre_plan, str):
+                return GoalPrePlan.model_validate_json(pre_plan)
+            return GoalPrePlan.model_validate(pre_plan)
+        except Exception as exc:
+            raise PlanningError("Goal pre-plan output did not match the expected schema.") from exc
+
+    def _build_pre_plan_tools(self, function_tool_cls: Any) -> list[Any]:
+        return [
+            function_tool_cls(
+                name="read_knowledge_index",
+                description="Read the concise page knowledge index. Use this to select or resolve page ids before loading page details.",
+                params_json_schema=ReadKnowledgeIndexArgs.model_json_schema(),
+                on_invoke_tool=self._read_knowledge_index_tool,
+            ),
+            function_tool_cls(
+                name="read_knowledge_page",
+                description=(
+                    "Read one page knowledge node from knowledge/pages by page_id or relative file path. "
+                    "Use this only for pages needed to continue the goal action chain."
+                ),
+                params_json_schema=ReadKnowledgePageArgs.model_json_schema(),
+                on_invoke_tool=self._read_knowledge_page_tool,
+            ),
+        ]
+
+    async def _read_knowledge_index_tool(self, _ctx: Any, args: str) -> str:
+        ReadKnowledgeIndexArgs.model_validate_json(args or "{}")
+        knowledge_dir = self.settings.pre_plan.knowledge_dir or self.settings.knowledge_dir
+        path = knowledge_dir / "index.md"
+        if not path.exists():
+            return json.dumps({"ok": False, "error": "Knowledge index not found.", "path": "index.md"}, ensure_ascii=False)
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return json.dumps({"ok": False, "error": str(exc), "path": "index.md"}, ensure_ascii=False)
+        return json.dumps({"ok": True, "path": "index.md", "content": content}, ensure_ascii=False)
+
+    async def _read_knowledge_page_tool(self, _ctx: Any, args: str) -> str:
+        parsed = ReadKnowledgePageArgs.model_validate_json(args or "{}")
+        relative_path = None
+        if parsed.file:
+            relative_path = safe_page_relative_path(parsed.file)
+        elif parsed.page_id:
+            knowledge_dir = self.settings.pre_plan.knowledge_dir or self.settings.knowledge_dir
+            index_path = knowledge_dir / "index.md"
+            index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+            indexed_file = page_file_from_index(index_text, parsed.page_id)
+            relative_path = safe_page_relative_path(indexed_file or f"{parsed.page_id}.md")
+        knowledge_dir = self.settings.pre_plan.knowledge_dir or self.settings.knowledge_dir
+        if relative_path is None:
+            return json.dumps(
+                {"ok": False, "error": "A safe page_id or relative page file is required.", "page_id": parsed.page_id, "file": parsed.file},
+                ensure_ascii=False,
+            )
+        path = (knowledge_dir / relative_path).resolve()
+        try:
+            path.relative_to(knowledge_dir.resolve())
+        except ValueError:
+            return json.dumps({"ok": False, "error": "Resolved page path escaped the knowledge directory."}, ensure_ascii=False)
+        if not path.exists() or not path.is_file():
+            return json.dumps(
+                {"ok": False, "error": "Knowledge page not found.", "page_id": parsed.page_id, "path": str(relative_path).replace("\\", "/")},
+                ensure_ascii=False,
+            )
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return json.dumps({"ok": False, "error": str(exc), "path": str(relative_path).replace("\\", "/")}, ensure_ascii=False)
+        return json.dumps(
+            {"ok": True, "page_id": parsed.page_id, "path": str(relative_path).replace("\\", "/"), "content": content},
+            ensure_ascii=False,
+        )
 
     async def _run_verification_task(
         self,

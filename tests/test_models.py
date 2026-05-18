@@ -1,6 +1,6 @@
 import pytest
 
-from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, LifecycleControllerSettings, LocalToolOutputSettings, OpenAIAgentsSettings, ShellSettings, SkillConfig, Task, VerificationCriterion, VerificationSettings
+from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, LifecycleControllerSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, ShellSettings, SkillConfig, Task, VerificationCriterion, VerificationSettings
 
 
 def test_task_defaults() -> None:
@@ -105,3 +105,67 @@ def test_shell_settings_defaults_to_disabled_allowlist() -> None:
 def test_local_tool_output_rejects_artifact_subdir_escape() -> None:
     with pytest.raises(ValueError, match="artifact_subdir"):
         LocalToolOutputSettings(artifact_subdir="../outside")
+
+
+def test_page_knowledge_page_uses_semantic_identifiers_and_reference_locators() -> None:
+    page = PageKnowledgePage.model_validate(
+        {
+            "page_id": "edge_android_new_tab_page",
+            "name": "New Tab Page",
+            "identifiers": [{"name": "Account menu visible", "description": "Account entry is visible."}],
+            "images": [{"path": "../assets/pages/ntp.png", "description": "Typical NTP."}],
+            "elements": [
+                {
+                    "name": "Browser menu",
+                    "role": "button",
+                    "reference_locators": [
+                        {
+                            "strategy": "id",
+                            "selector": "com.microsoft.emmx:id/overflow_button_bottom",
+                            "confidence": "high",
+                            "notes": "Observed in bottom toolbar mode.",
+                        }
+                    ],
+                    "operations": [
+                        {
+                            "operation": "tap",
+                            "result": {
+                                "type": "navigate",
+                                "to_page_id": "edge_android_overflow_menu",
+                                "description": "Opens the overflow menu.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert page.schema_version == "page_knowledge_page_v1"
+    assert page.identifiers[0].model_dump() == {"name": "Account menu visible", "description": "Account entry is visible."}
+    assert page.elements[0].reference_locators[0].confidence == "high"
+    assert page.elements[0].operations[0].result.to_page_id == "edge_android_overflow_menu"
+
+
+def test_page_knowledge_index_and_goal_pre_plan_defaults() -> None:
+    index = PageKnowledgeIndex(
+        product="Microsoft Edge",
+        platform="Android",
+        pages=[
+            {
+                "page_id": "edge_android_new_tab_page",
+                "file": "pages/edge_android_new_tab_page.md",
+                "name": "New Tab Page",
+                "intents": ["new tab", "search"],
+            }
+        ],
+    )
+    plan = GoalPrePlan(
+        goal="Open downloads",
+        key_actions=[{"step_id": 1, "action": "Open browser menu", "source_page_ids": ["edge_android_new_tab_page"]}],
+    )
+
+    assert index.schema_version == "page_knowledge_index_v1"
+    assert index.pages[0].page_id == "edge_android_new_tab_page"
+    assert plan.schema_version == "goal_pre_plan_v1"
+    assert plan.key_actions[0].step_id == 1

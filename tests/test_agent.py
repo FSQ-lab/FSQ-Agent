@@ -7,9 +7,9 @@ import pytest
 
 from fsq_agent import FsqAgent, Task
 from fsq_agent.agent import Verifier
-from fsq_agent.agent._openai_runtime import _RecentToolOutputInputFilter
+from fsq_agent.agent._openai_runtime import OpenAIAgentsRuntime, _RecentToolOutputInputFilter
 from fsq_agent.config import Settings
-from fsq_agent.models import ConfigurationError, KnowledgeBundle, ReportArtifact, RunEvent, StepResult
+from fsq_agent.models import ConfigurationError, GoalPrePlan, KnowledgeBundle, ReportArtifact, RunEvent, StepResult
 from fsq_agent.observation import ExecutionLogger
 
 
@@ -85,6 +85,34 @@ class _CancelledRuntime:
         event_sink: object | None = None,
     ) -> list[StepResult]:
         raise asyncio.CancelledError()
+
+
+class _PrePlanRuntime:
+    def __init__(self) -> None:
+        self.loaded_knowledge: KnowledgeBundle | None = None
+
+    async def run_pre_plan(
+        self,
+        goal: str,
+        knowledge: KnowledgeBundle,
+        skills: list[object],
+        run_id: str,
+        event_sink: object | None = None,
+    ) -> GoalPrePlan:
+        self.loaded_knowledge = knowledge
+        return GoalPrePlan(
+            goal=goal,
+            summary="Generated a plan.",
+            relevant_page_ids=["edge_android_new_tab_page"],
+            key_actions=[
+                {
+                    "step_id": 1,
+                    "action": "Verify the New Tab Page.",
+                    "source_page_ids": ["edge_android_new_tab_page"],
+                    "notes": "Use page identifiers.",
+                }
+            ],
+        )
 
 
 class _FakeArtifactStore:
@@ -207,3 +235,115 @@ async def test_agent_run_persists_run_failed_for_cancellation(tmp_path: Path) ->
     timeline = timeline_paths[0].read_text(encoding="utf-8")
     assert "run_failed" in timeline
     assert "CancelledError" in timeline
+
+
+@pytest.mark.asyncio
+async def test_agent_pre_plan_goal_loads_index_only_before_runtime_loop(tmp_path: Path) -> None:
+    knowledge_dir = tmp_path / "knowledge"
+    pages_dir = knowledge_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    (knowledge_dir / "index.md").write_text("# Knowledge Index", encoding="utf-8")
+    (pages_dir / "edge_android_new_tab_page.md").write_text("# New Tab Page", encoding="utf-8")
+    runtime = _PrePlanRuntime()
+    events: list[RunEvent] = []
+    agent = FsqAgent(
+        Settings(knowledge_dir=knowledge_dir),
+        verifier=Verifier(),
+        reporter=_Reporter(),  # type: ignore[arg-type]
+        knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
+        flow_manager=_FlowManager(),  # type: ignore[arg-type]
+        skill_loader=_SkillLoader(),  # type: ignore[arg-type]
+        runtime=runtime,  # type: ignore[arg-type]
+    )
+
+    plan = await agent.pre_plan_goal("Open downloads", event_sink=events.append)
+
+    assert plan.goal == "Open downloads"
+    assert plan.key_actions[0].action == "Verify the New Tab Page."
+    assert runtime.loaded_knowledge is not None
+    assert sorted(runtime.loaded_knowledge.items) == ["index.md"]
+    assert [event.type for event in events] == ["run_started", "agent_started", "run_completed"]
+
+
+@pytest.mark.asyncio
+async def test_agent_pre_plan_goal_uses_pre_plan_knowledge_dir(tmp_path: Path) -> None:
+    private_knowledge_dir = tmp_path / "knowledge"
+    page_knowledge_dir = tmp_path / "knowledge" / "project_android_v1"
+    private_knowledge_dir.mkdir(parents=True)
+    page_knowledge_dir.mkdir(parents=True)
+    (private_knowledge_dir / "index.md").write_text("# Private Index", encoding="utf-8")
+    (page_knowledge_dir / "index.md").write_text("# Page Graph Index", encoding="utf-8")
+    runtime = _PrePlanRuntime()
+    agent = FsqAgent(
+        Settings(knowledge_dir=private_knowledge_dir, pre_plan={"knowledge_dir": page_knowledge_dir}),
+        verifier=Verifier(),
+        reporter=_Reporter(),  # type: ignore[arg-type]
+        knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
+        flow_manager=_FlowManager(),  # type: ignore[arg-type]
+        skill_loader=_SkillLoader(),  # type: ignore[arg-type]
+        runtime=runtime,  # type: ignore[arg-type]
+    )
+
+    await agent.pre_plan_goal("Open downloads")
+
+    assert runtime.loaded_knowledge is not None
+    assert runtime.loaded_knowledge.items["index.md"] == "# Page Graph Index"
+
+
+@pytest.mark.asyncio
+async def test_pre_plan_runtime_reads_page_by_index_page_id(tmp_path: Path) -> None:
+    knowledge_dir = tmp_path / "knowledge"
+    pages_dir = knowledge_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    (knowledge_dir / "index.md").write_text(
+    """
+# Knowledge Index
+
+```json
+{
+    "schema_version": "page_knowledge_index_v1",
+    "product": "Microsoft Edge",
+    "platform": "Android",
+    "pages": [
+        {
+            "page_id": "edge_android_new_tab_page",
+            "file": "pages/edge_android_new_tab_page.md",
+            "name": "New Tab Page",
+            "intents": ["new tab"]
+        }
+    ]
+}
+```
+""",
+        encoding="utf-8",
+    )
+    (pages_dir / "edge_android_new_tab_page.md").write_text("# New Tab Page", encoding="utf-8")
+    runtime = OpenAIAgentsRuntime(Settings(knowledge_dir=knowledge_dir), object(), object())  # type: ignore[arg-type]
+
+    output = await runtime._read_knowledge_page_tool(None, '{"page_id":"edge_android_new_tab_page"}')
+
+    assert '"ok": true' in output
+    assert "# New Tab Page" in output
+    assert "pages/edge_android_new_tab_page.md" in output
+
+
+@pytest.mark.asyncio
+async def test_pre_plan_runtime_reads_from_pre_plan_knowledge_dir(tmp_path: Path) -> None:
+    private_knowledge_dir = tmp_path / "knowledge"
+    page_knowledge_dir = tmp_path / "knowledge" / "project_android_v1"
+    private_knowledge_dir.mkdir(parents=True)
+    pages_dir = page_knowledge_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    (page_knowledge_dir / "index.md").write_text("# Page Graph Index", encoding="utf-8")
+    (pages_dir / "edge_android_new_tab_page.md").write_text("# New Tab Page", encoding="utf-8")
+    runtime = OpenAIAgentsRuntime(
+        Settings(knowledge_dir=private_knowledge_dir, pre_plan={"knowledge_dir": page_knowledge_dir}),
+        object(),
+        object(),
+    )  # type: ignore[arg-type]
+
+    index_output = await runtime._read_knowledge_index_tool(None, "{}")
+    page_output = await runtime._read_knowledge_page_tool(None, '{"file":"pages/edge_android_new_tab_page.md"}')
+
+    assert "# Page Graph Index" in index_output
+    assert "# New Tab Page" in page_output

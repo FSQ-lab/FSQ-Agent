@@ -7,6 +7,7 @@ import click
 from fsq_agent.agent import FsqAgent
 from fsq_agent.cli._formatting import log_capabilities, log_result, log_run_event
 from fsq_agent.cli._logging import configure_cli_logging
+from fsq_agent.cli._pre_plan_formatting import log_pre_plan
 from fsq_agent.cli._task_loader import load_task, load_tasks
 from fsq_agent.config import load_settings, validate_runtime_settings
 from fsq_agent.models import FsqAgentError
@@ -80,6 +81,33 @@ def run_batch(
         asyncio.run(_run_all())
     except FsqAgentError as exc:
         logger.error("Error: %s", exc)
+        raise click.Abort() from exc
+
+
+@main.command("pre-plan")
+@click.option("--config", "config_path", type=click.Path(exists=False, dir_okay=False), default=None)
+@click.option("--workspace", "workspace_path", type=click.Path(file_okay=False), default=None)
+@click.option("--goal", required=True)
+@click.option("--format", "output_format", type=click.Choice(["text", "json"]), default="text", show_default=True)
+@click.option("--stream/--no-stream", "stream", default=True, show_default=True)
+@click.option("--stream-format", type=click.Choice(["rich", "jsonl"]), default="rich", show_default=True)
+def pre_plan(
+    config_path: str | None,
+    workspace_path: str | None,
+    goal: str,
+    output_format: str,
+    stream: bool,
+    stream_format: str,
+) -> None:
+    try:
+        settings = load_settings(config_path, workspace_path)
+        sink = (lambda event: log_run_event(event, stream_format)) if stream else None
+        plan = asyncio.run(FsqAgent.from_settings(settings).pre_plan_goal(goal, event_sink=sink))
+        log_pre_plan(plan, output_format)
+    except FsqAgentError as exc:
+        logger.error("Error: %s", exc)
+        if exc.context:
+            logger.error("Details: %s", exc.context)
         raise click.Abort() from exc
 
 

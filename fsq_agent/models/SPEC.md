@@ -31,12 +31,27 @@ Current `__init__.py` exports via `__all__`:
 - `RunEventSink`: Callable type accepted by orchestration/runtime/tool code to receive `RunEvent` values synchronously or asynchronously.
 - `ReportArtifact`: Pydantic model describing generated report paths and evidence bundle paths.
 - `KnowledgeBundle`: Pydantic model containing loaded private knowledge, matched flow templates, and warnings for agent context.
+- `PAGE_KNOWLEDGE_INDEX_SCHEMA_VERSION`: Constant containing the supported page-knowledge index schema version.
+- `PAGE_KNOWLEDGE_PAGE_SCHEMA_VERSION`: Constant containing the supported page-knowledge page-node schema version.
+- `GOAL_PRE_PLAN_SCHEMA_VERSION`: Constant containing the supported goal pre-plan schema version.
+- `PageKnowledgeIndex`: Pydantic model for the public page-knowledge `index.md` JSON payload. It contains schema version, product, platform, page root, and concise page records used for fast goal-to-page lookup.
+- `PageKnowledgeIndexEntry`: Pydantic model for one indexed page, including page id, relative file path, display name, and intent keywords.
+- `PageKnowledgePage`: Pydantic model for one page graph node stored in `knowledge/pages/*.md`. It contains page id, name, semantic identifiers, optional images, and page elements.
+- `PageIdentifier`: Pydantic model for one semantic page-recognition signal. It intentionally does not contain locators.
+- `PageImage`: Pydantic model for an optional page image reference and description.
+- `PageElement`: Pydantic model for one page element, including name, role, reference locators, and supported operations.
+- `ReferenceLocator`: Pydantic model for a non-authoritative locator candidate observed for a page element, including confidence and notes.
+- `ElementOperation`: Pydantic model for one supported operation on a page element and its result.
+- `OperationResult`: Pydantic model for the operation result, optionally linking to a destination `page_id` when the operation is a graph transition.
+- `GoalPrePlan`: Pydantic model returned by goal pre-planning. It contains the input goal, ordered key actions, relevant page ids, summary, and warnings.
+- `GoalKeyAction`: Pydantic model for one ordered key action generated from a goal and page knowledge.
 - `MCPToolValidationSettings`: Pydantic model controlling startup-time MCP tool compatibility checks, including enabled state, invalid tool policy, strict schema conversion, unsupported schema keyword checks, and all-tools-filtered behavior.
 - `MCPToolValidationIssue`: Pydantic model describing one MCP tool that was ignored or failed validation, including server name, tool name, reason, policy, and schema path.
 - `ToolDefinition`: Pydantic model describing a discovered MCP, CLI, or file operation capability.
 - `ToolCall`: Pydantic model describing a tool invocation request.
 - `ToolResult`: Pydantic model describing a normalized tool invocation response.
 - `OpenAIAgentsSettings`: Pydantic model for OpenAI Agents SDK provider configuration, including Azure OpenAI base URL, API key environment variable, model deployment name, tracing policy, turn limits, Responses API options, file-based prompt template customization, context trimming policy, and local tool output artifact policy.
+- `PrePlanSettings`: Pydantic model for standalone goal pre-planning configuration, including the optional page-knowledge graph directory used instead of the normal task knowledge root.
 - `VerificationSettings`: Pydantic model for the final verification policy. The default mode is `normal`.
 - `OpenAIAgentPromptConfig`: Pydantic model containing optional Jinja template file paths, custom operator instructions, and scalar prompt variables.
 - `ContextTrimmingSettings`: Pydantic model controlling SDK model-input trimming for older large tool outputs, including recent turn retention, maximum inline tool output size, preview size, and optional trimmable tool names.
@@ -71,6 +86,7 @@ Current `__init__.py` exports via `__all__`:
 - `_skills.py`: Skill configuration and loaded skill bundle models.
 - `_report.py`: Report artifact and evidence models.
 - `_knowledge.py`: Knowledge bundle model.
+- `_page_knowledge.py`: Public page-knowledge graph schema models and goal pre-plan output models.
 - `_exceptions.py`: Shared exception hierarchy.
 - `SPEC.md`: Module design.
 
@@ -94,6 +110,8 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Runtime secrets are model-owned as an allowlist of environment variable names. This keeps credential values out of cases and config YAML while allowing the tools module to expose only explicitly approved values to the SDK runner. Secret values must be redacted from user-visible events, artifact output, and final reports.
 - Setup and teardown lifecycle selection is model-owned through `LifecycleControllerSettings`. The setting stores a controller name and opaque options; concrete behavior is implemented by the tools module so platform/MCP-specific logic does not leak into config parsing.
 - fsq-agent does not own native screenshot or UI tree capture settings. Those observations are used only when supplied by configured MCP servers or tools.
+- Page knowledge is represented as a compact graph-like Markdown/JSON format owned by shared models so external generators can produce compatible files. `index.md` is a concise JSON index for page lookup; each `pages/*.md` file contains one JSON page node. Page identifiers are semantic descriptions without locators. Element locators are explicitly reference locators, not authoritative runtime truth.
+- Goal pre-planning is represented separately from execution results. It produces ordered key actions from a natural-language goal and loaded page knowledge, but it does not execute UI actions or verify runtime state.
 - OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration that `agent` and `tools` adapt into SDK `Agent`, `FunctionTool`, `MCPServer*`, and hosted tool objects.
 - Skills are descriptive instruction bundles. CLI/shell execution is controlled separately by configured CLI tools or `ShellSettings`.
 - FSQ `.codex.yaml` cases are converted into `Task` descriptions for the agent loop. The parsed FSQ models preserve source metadata and command flow before rendering.
