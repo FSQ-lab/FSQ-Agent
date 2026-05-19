@@ -41,7 +41,6 @@ def build_pre_plan_input(goal: str, knowledge: KnowledgeBundle, skills: list[Ski
     payload = {
         "goal": goal,
         "knowledge_items": knowledge.items,
-        "flow_templates": knowledge.flow_templates,
         "knowledge_warnings": knowledge.warnings,
         "skills": [
             {

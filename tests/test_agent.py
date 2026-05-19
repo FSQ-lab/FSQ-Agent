@@ -46,11 +46,6 @@ class _KnowledgeLoader:
         return KnowledgeBundle()
 
 
-class _FlowManager:
-    def match(self, description: str) -> dict[str, object]:
-        return {}
-
-
 class _SkillLoader:
     def load(self, skills: list[object]) -> list[object]:
         return []
@@ -141,7 +136,6 @@ async def test_agent_run_id_uses_friendly_timestamp_suffix() -> None:
         verifier=Verifier(),
         reporter=reporter,  # type: ignore[arg-type]
         knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
-        flow_manager=_FlowManager(),  # type: ignore[arg-type]
         skill_loader=_SkillLoader(),  # type: ignore[arg-type]
         runtime=_Runtime(),  # type: ignore[arg-type]
     )
@@ -188,7 +182,6 @@ async def test_agent_run_emits_and_persists_live_events(tmp_path: Path) -> None:
         verifier=Verifier(),
         reporter=reporter,  # type: ignore[arg-type]
         knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
-        flow_manager=_FlowManager(),  # type: ignore[arg-type]
         skill_loader=_SkillLoader(),  # type: ignore[arg-type]
         runtime=_Runtime(),  # type: ignore[arg-type]
         event_logger=ExecutionLogger(tmp_path),
@@ -217,7 +210,6 @@ async def test_agent_run_persists_run_failed_for_cancellation(tmp_path: Path) ->
         verifier=Verifier(),
         reporter=_Reporter(),  # type: ignore[arg-type]
         knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
-        flow_manager=_FlowManager(),  # type: ignore[arg-type]
         skill_loader=_SkillLoader(),  # type: ignore[arg-type]
         runtime=_CancelledRuntime(),  # type: ignore[arg-type]
         event_logger=ExecutionLogger(tmp_path),
@@ -251,7 +243,6 @@ async def test_agent_pre_plan_goal_loads_index_only_before_runtime_loop(tmp_path
         verifier=Verifier(),
         reporter=_Reporter(),  # type: ignore[arg-type]
         knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
-        flow_manager=_FlowManager(),  # type: ignore[arg-type]
         skill_loader=_SkillLoader(),  # type: ignore[arg-type]
         runtime=runtime,  # type: ignore[arg-type]
     )
@@ -279,7 +270,6 @@ async def test_agent_pre_plan_goal_uses_pre_plan_knowledge_dir(tmp_path: Path) -
         verifier=Verifier(),
         reporter=_Reporter(),  # type: ignore[arg-type]
         knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
-        flow_manager=_FlowManager(),  # type: ignore[arg-type]
         skill_loader=_SkillLoader(),  # type: ignore[arg-type]
         runtime=runtime,  # type: ignore[arg-type]
     )

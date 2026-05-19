@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fsq_agent.config import Settings, load_settings
-from fsq_agent.knowledge import FlowTemplateManager, PrivateKnowledgeLoader
+from fsq_agent.knowledge import PrivateKnowledgeLoader
 from fsq_agent.models import GoalPrePlan, KnowledgeBundle, RunEvent, RunEventSink, Task, TaskResult
 from fsq_agent.observation import ExecutionLogger
 from fsq_agent.report import ReportGenerator
@@ -22,7 +22,6 @@ class FsqAgent:
         verifier: Verifier,
         reporter: ReportGenerator,
         knowledge_loader: PrivateKnowledgeLoader,
-        flow_manager: FlowTemplateManager,
         skill_loader: SkillLoader,
         runtime: OpenAIAgentsRuntime,
         event_logger: ExecutionLogger | None = None,
@@ -31,7 +30,6 @@ class FsqAgent:
         self.verifier = verifier
         self.reporter = reporter
         self.knowledge_loader = knowledge_loader
-        self.flow_manager = flow_manager
         self.skill_loader = skill_loader
         self.runtime = runtime
         self.event_logger = event_logger
@@ -59,7 +57,6 @@ class FsqAgent:
         )
         mcp_factory = AgentsMCPFactory(settings.mcp_servers, settings.mcp_tool_validation)
         knowledge_loader = PrivateKnowledgeLoader(settings.knowledge_dir)
-        flow_manager = FlowTemplateManager(settings.knowledge_dir / "flows")
         skill_loader = SkillLoader(settings.knowledge_dir / "skills")
         reporter = ReportGenerator(settings.output.runs_dir)
         event_logger = ExecutionLogger(settings.output.runs_dir)
@@ -68,7 +65,6 @@ class FsqAgent:
             Verifier(),
             reporter,
             knowledge_loader,
-            flow_manager,
             skill_loader,
             OpenAIAgentsRuntime(settings, tool_factory, mcp_factory),
             event_logger,
@@ -83,7 +79,6 @@ class FsqAgent:
         )
         try:
             knowledge = self.knowledge_loader.load_for_task(task)
-            knowledge.flow_templates = self.flow_manager.match(task.description)
             skills = self.skill_loader.load(self.settings.skills)
             await emitter.emit(
                 RunEvent(
@@ -91,8 +86,8 @@ class FsqAgent:
                     task_id=task.id,
                     type="agent_started",
                     title="Agent context loaded",
-                    message=f"Loaded {len(skills)} skills and {len(knowledge.flow_templates)} flow templates.",
-                    payload={"skill_count": len(skills), "flow_template_count": len(knowledge.flow_templates)},
+                    message=f"Loaded {len(skills)} skills and {len(knowledge.items)} knowledge items.",
+                    payload={"skill_count": len(skills), "knowledge_item_count": len(knowledge.items)},
                 )
             )
             results = await self.runtime.run_task(task, knowledge, skills, run_id, emitter.emit)

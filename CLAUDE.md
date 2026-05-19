@@ -10,7 +10,7 @@ This repository uses spec-driven development. Implementation must not start unti
 | config | fsq_agent/config/SPEC.md | Loads and validates runtime configuration. |
 | tools | fsq_agent/tools/SPEC.md | Provides MCP, CLI, and file operation adapters behind a common capability interface. |
 | observation | fsq_agent/observation/SPEC.md | Persists run event timelines; screenshots and UI trees come only from configured MCP/tools. |
-| knowledge | fsq_agent/knowledge/SPEC.md | Loads private element history, application knowledge, and flow templates. |
+| knowledge | fsq_agent/knowledge/SPEC.md | Loads private element history and application knowledge. |
 | fsq | fsq_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases and converts them into agent tasks. |
 | skills | fsq_agent/skills/SPEC.md | Loads automation skill instruction bundles and skill file metadata. |
 | report | fsq_agent/report/SPEC.md | Generates task reports and evidence manifests. |

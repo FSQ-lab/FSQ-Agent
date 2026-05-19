@@ -20,12 +20,6 @@ class PromptKeyValue:
 
 
 @dataclass(frozen=True)
-class PromptFlowTemplate:
-    name: str
-    template: str
-
-
-@dataclass(frozen=True)
 class PromptSkill:
     name: str
     instructions: str
@@ -36,7 +30,6 @@ class PromptSkill:
 class AgentPromptModel:
     custom_instructions: list[str] = field(default_factory=list)
     private_knowledge: list[PromptKeyValue] = field(default_factory=list)
-    flow_templates: list[PromptFlowTemplate] = field(default_factory=list)
     knowledge_warnings: list[str] = field(default_factory=list)
     skills: list[PromptSkill] = field(default_factory=list)
     final_output_schema_json: str = ""
@@ -63,7 +56,6 @@ class PromptModelBuilder:
         return AgentPromptModel(
             custom_instructions=list(self.settings.custom_instructions),
             private_knowledge=[PromptKeyValue(key=key, value=str(value)) for key, value in knowledge.items.items()],
-            flow_templates=[PromptFlowTemplate(name=name, template=str(template)) for name, template in knowledge.flow_templates.items()],
             knowledge_warnings=list(knowledge.warnings),
             skills=[
                 PromptSkill(
@@ -84,7 +76,7 @@ class PromptModelBuilder:
             else (
                 "Use the provided task acceptance criteria as required success criteria."
                 if task.acceptance_criteria
-                else "Derive acceptance criteria from the task description, knowledge, matched flows, and loaded skills. If the task is too broad, use successful flow completion with enough evidence as the success standard."
+                else "Derive acceptance criteria from the task description, private knowledge, and loaded skills. If the task is too broad, use successful flow completion with enough evidence as the success standard."
             )
         )
         task_input = AgentTaskInput(

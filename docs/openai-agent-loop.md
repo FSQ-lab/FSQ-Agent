@@ -5,7 +5,7 @@ This project delegates the model/tool loop to OpenAI Agents SDK. fsq-agent does 
 ## High-Level Flow
 
 1. The CLI loads a task file into `Task`. Only `description` is required.
-2. `FsqAgent.run` loads private knowledge, matched flow templates, and configured skills.
+2. `FsqAgent.run` loads private knowledge and configured skills.
 3. `OpenAIAgentsRuntime.run_task` validates Azure OpenAI and SDK settings.
 4. The runtime creates an `AsyncOpenAI` client and wraps it in `OpenAIProvider`.
 5. The runtime enters configured MCP servers and builds local SDK tools.
@@ -55,7 +55,7 @@ Structured final JSON
 fsq-agent owns these parts around the SDK loop:
 
 - Build the task input from `Task.description` and optional metadata.
-- Load relevant knowledge and flow templates before the run.
+- Load relevant knowledge before the run.
 - Load skills as descriptive instructions.
 - Adapt configured MCP servers into SDK MCP server objects.
 - Adapt configured CLI/file/shell capabilities into SDK tools.
@@ -68,7 +68,7 @@ fsq-agent owns these parts around the SDK loop:
 
 The SDK agent is instructed to do this inside `Runner.run`:
 
-- Derive acceptance criteria from the task description, knowledge, flow templates, and skills.
+- Derive acceptance criteria from the task description, knowledge, and skills.
 - If the task is broad, use successful flow completion as the success standard.
 - Create a pre-plan before external actions.
 - Execute each step with MCP/tools/skills.

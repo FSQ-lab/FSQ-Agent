@@ -7,7 +7,7 @@ Execution key actions:
 - {{ action }}
 {% endfor %}
 {% else %}
-Execution key actions: none provided. Derive the execution path from the description, knowledge, and matched flows.
+Execution key actions: none provided. Derive the execution path from the description and knowledge.
 {% endif %}
 
 {% if task.verification_criteria %}
@@ -22,5 +22,5 @@ Task acceptance criteria:
 - {{ criterion }}
 {% endfor %}
 {% else %}
-Task acceptance criteria: none. Derive acceptance criteria from the description, knowledge, and matched flows. If the description is too broad, use successful flow completion as the success standard.
+Task acceptance criteria: none. Derive acceptance criteria from the description and knowledge. If the description is too broad, use successful flow completion as the success standard.
 {% endif %}

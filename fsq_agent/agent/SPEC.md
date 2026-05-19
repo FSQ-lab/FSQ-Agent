@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Coordinate the goal-driven testing workflow using OpenAI Agents SDK: load runtime settings, build the Azure OpenAI-backed agent, attach configured tools and MCP servers, load relevant knowledge, flow templates, and skills, derive execution and verification context when the user only provides a task description, generate a task pre-plan with success criteria, execute and dynamically adjust that pre-plan through SDK-managed tool calls, derive verification status from structured final output according to configured verification mode, and trigger report generation.
+Coordinate the goal-driven testing workflow using OpenAI Agents SDK: load runtime settings, build the Azure OpenAI-backed agent, attach configured tools and MCP servers, load relevant knowledge and skills, derive execution and verification context when the user only provides a task description, generate a task pre-plan with success criteria, execute and dynamically adjust that pre-plan through SDK-managed tool calls, derive verification status from structured final output according to configured verification mode, and trigger report generation.
 
 ## Dependencies
 
@@ -10,7 +10,7 @@ Coordinate the goal-driven testing workflow using OpenAI Agents SDK: load runtim
 - `config`: Uses runtime settings.
 - `tools`: Builds OpenAI Agents SDK tools/MCP servers, lifecycle controllers, and exposes diagnostic capabilities.
 - `observation`: Captures evidence after steps.
-- `knowledge`: Loads private knowledge and flow templates.
+- `knowledge`: Loads private knowledge.
 - `skills`: Loads configured automation skill instruction bundles.
 - `report`: Generates reports and evidence bundles.
 
@@ -60,7 +60,7 @@ Goal pre-planning raises configuration errors when OpenAI Agents SDK configurati
 - Task execution requires OpenAI Agents SDK to be enabled and the configured Azure OpenAI API key environment variable to be present. There is no offline fallback execution path.
 - The SDK runner owns tool dispatch and turn continuation. The project should not reimplement the Responses function-call loop.
 - Configured lifecycle controllers may make deterministic setup/teardown MCP calls before and after the model tool loop. Those calls are not agent reasoning steps; they are runtime preparation/cleanup and are emitted as lifecycle-tagged tool-call events.
-- The agent must create a pre-plan before external actions, derive task success criteria from the description, private knowledge, flow templates, and skills when the user did not provide criteria, include those criteria in the pre-plan, execute through MCP/tools/skills, and adapt the plan when tool feedback changes the best path.
+- The agent must create a pre-plan before external actions, derive task success criteria from the description, private knowledge, and skills when the user did not provide criteria, include those criteria in the pre-plan, execute through MCP/tools/skills, and adapt the plan when tool feedback changes the best path.
 - Goal pre-planning is an explicit standalone capability used before execution integration. It receives only a goal string, loads the concise page index from `pre_plan.knowledge_dir` when configured or from `knowledge_dir` as a fallback, and returns ordered key actions plus relevant page ids. It is intentionally side-effect-free for the application under test: no UI automation, no lifecycle calls, no verification agent, and no report generation.
 - Pre-planning is an iterative knowledge loop. The initial model input contains `index.md` only. The pre-plan agent can call read-only local knowledge tools to reload the index or load specific page files from `knowledge/pages/` by page id or relative path. Page-to-page transitions may cause additional page reads until the action chain is complete or no useful next page is available.
 - If page knowledge is incomplete, the planner should still produce the best available contiguous key-action chain. It may skip at most one consecutive missing action by recording a warning. If it cannot produce a useful plan from the available graph, it must return a valid `GoalPrePlan` with an empty `key_actions` list.

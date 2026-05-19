@@ -54,6 +54,5 @@ class PrivateKnowledgeLoader:
         for provider in self.providers:
             bundle = provider.load_for_task(task)
             merged.items.update(bundle.items)
-            merged.flow_templates.update(bundle.flow_templates)
             merged.warnings.extend(bundle.warnings)
         return merged

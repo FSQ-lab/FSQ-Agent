@@ -137,9 +137,7 @@ def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) ->
     agent_template.write_text(
         "Configured base instruction.\n"
         "Configured knowledge:\n"
-        "{% for item in private_knowledge %}- {{ item.key }}={{ item.value }}\n{% endfor %}"
-        "Configured flows:\n"
-        "{% for flow in flow_templates %}- {{ flow.name }}={{ flow.template }}\n{% endfor %}",
+        "{% for item in private_knowledge %}- {{ item.key }}={{ item.value }}\n{% endfor %}",
         encoding="utf-8",
     )
     task_template.write_text(
@@ -157,14 +155,13 @@ def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) ->
         )
     )
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
-    knowledge = KnowledgeBundle(items={"k": "v"}, flow_templates={"flow": "steps"})
+    knowledge = KnowledgeBundle(items={"k": "v"})
 
     instructions = runtime._build_instructions(knowledge, [])
     task_input = runtime._build_task_input(Task(id="t1", description="Do it."))
 
     assert instructions.startswith("Configured base instruction.")
     assert "Configured knowledge:" in instructions
-    assert "Configured flows:" in instructions
     assert task_input == "Task t1: Do it.\nConfigured no criteria text."
 
 
