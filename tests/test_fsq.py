@@ -178,6 +178,43 @@ platform: android
     assert [criterion.kind for criterion in task.verification_criteria] == ["goal"]
 
 
+def test_fsq_case_loader_accepts_single_document_goal_only_case(tmp_path: Path) -> None:
+    case_path = tmp_path / "single_doc_goal.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Single Document Goal
+platform: android
+""",
+        encoding="utf-8",
+    )
+
+    case = FsqCaseLoader().load_case(case_path)
+    task = FsqTaskAdapter().to_task(case)
+
+    assert case.commands == []
+    assert task.key_actions == []
+    assert task.verification_goal == "Goal completed: Single Document Goal"
+
+
+def test_fsq_case_loader_accepts_empty_command_document_goal_only_case(tmp_path: Path) -> None:
+    case_path = tmp_path / "empty_commands_goal.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Empty Commands Goal
+platform: android
+---
+[]
+""",
+        encoding="utf-8",
+    )
+
+    case = FsqCaseLoader().load_case(case_path)
+
+    assert case.commands == []
+
+
 def test_load_task_detects_fsq_codex_yaml(tmp_path: Path) -> None:
     case_path = tmp_path / "case.codex.yaml"
     case_path.write_text(FSQ_CASE, encoding="utf-8")
@@ -208,9 +245,12 @@ def test_load_task_rejects_non_fsq_task_file(tmp_path: Path) -> None:
         load_task(task_path)
 
 
-def test_fsq_case_loader_rejects_single_document_yaml(tmp_path: Path) -> None:
+def test_fsq_case_loader_rejects_too_many_documents(tmp_path: Path) -> None:
     case_path = tmp_path / "bad.codex.yaml"
-    case_path.write_text("schemaVersion: fsq.ai-test/v1\nname: Bad\nplatform: android\n", encoding="utf-8")
+    case_path.write_text(
+        "schemaVersion: fsq.ai-test/v1\nname: Bad\nplatform: android\n---\n[]\n---\nextra: true\n",
+        encoding="utf-8",
+    )
 
     with pytest.raises(ConfigurationError, match="Invalid FSQ case file"):
         FsqCaseLoader().load_case(case_path)

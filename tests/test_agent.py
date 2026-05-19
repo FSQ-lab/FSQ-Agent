@@ -9,7 +9,7 @@ from fsq_agent import FsqAgent, Task
 from fsq_agent.agent import Verifier
 from fsq_agent.agent._openai_runtime import OpenAIAgentsRuntime, _RecentToolOutputInputFilter
 from fsq_agent.config import Settings
-from fsq_agent.models import ConfigurationError, GoalPrePlan, KnowledgeBundle, ReportArtifact, RunEvent, StepResult
+from fsq_agent.models import ConfigurationError, GoalPrePlan, KnowledgeBundle, ReportArtifact, RunEvent, StepResult, VerificationCriterion
 from fsq_agent.observation import ExecutionLogger
 
 
@@ -52,6 +52,9 @@ class _SkillLoader:
 
 
 class _Runtime:
+    def __init__(self) -> None:
+        self.last_task: Task | None = None
+
     async def run_task(
         self,
         task: Task,
@@ -60,11 +63,59 @@ class _Runtime:
         run_id: str,
         event_sink: object | None = None,
     ) -> list[StepResult]:
+        self.last_task = task
         return [
             StepResult(
                 step_id=1,
                 status="success",
                 actual_outcome='{"status":"success","summary":"Done","pre_plan":[],"plan_updates":[],"satisfied_criteria":["A report exists."],"unmet_criteria":[],"evidence":["Report generated"],"errors":[]}',
+                tool_name="openai_agents.runner",
+            )
+        ]
+
+
+class _GoalRunRuntime(_Runtime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.pre_plan_goal: str | None = None
+
+    async def run_pre_plan(
+        self,
+        goal: str,
+        knowledge: KnowledgeBundle,
+        skills: list[object],
+        run_id: str,
+        event_sink: object | None = None,
+    ) -> GoalPrePlan:
+        self.pre_plan_goal = goal
+        return GoalPrePlan(
+            goal=goal,
+            summary="Generated execution actions.",
+            relevant_page_ids=["edge_android_new_tab_page"],
+            key_actions=[
+                {"step_id": 1, "action": "Open the overflow menu."},
+                {"step_id": 2, "action": "Tap Downloads."},
+            ],
+        )
+
+    async def run_task(
+        self,
+        task: Task,
+        knowledge: KnowledgeBundle,
+        skills: list[object],
+        run_id: str,
+        event_sink: object | None = None,
+    ) -> list[StepResult]:
+        self.last_task = task
+        satisfied = task.blocking_verification_criteria("goal")[0].text
+        return [
+            StepResult(
+                step_id=1,
+                status="success",
+                actual_outcome=(
+                    '{"status":"success","summary":"Goal done","pre_plan":[],"plan_updates":[],'
+                    f'"satisfied_criteria":["{satisfied}"],"unmet_criteria":[],"evidence":["Goal observed"],"errors":[]}}'
+                ),
                 tool_name="openai_agents.runner",
             )
         ]
@@ -144,6 +195,7 @@ async def test_agent_run_id_uses_friendly_timestamp_suffix() -> None:
         name="Smoke",
         description="Record a smoke test task.",
         acceptance_criteria=["A report exists."],
+        key_actions=["Key action 1: Record report existence."],
     )
 
     result = await agent.run(task)
@@ -191,6 +243,7 @@ async def test_agent_run_emits_and_persists_live_events(tmp_path: Path) -> None:
         name="Smoke",
         description="Record a smoke test task.",
         acceptance_criteria=["A report exists."],
+        key_actions=["Key action 1: Record report existence."],
     )
 
     result = await agent.run(task, event_sink=events.append)
@@ -214,7 +267,7 @@ async def test_agent_run_persists_run_failed_for_cancellation(tmp_path: Path) ->
         runtime=_CancelledRuntime(),  # type: ignore[arg-type]
         event_logger=ExecutionLogger(tmp_path),
     )
-    task = Task(id="smoke", name="Smoke", description="Record a smoke test task.")
+    task = Task(id="smoke", name="Smoke", description="Record a smoke test task.", key_actions=["Key action 1: Start smoke task."])
 
     with pytest.raises(asyncio.CancelledError):
         await agent.run(task, event_sink=events.append)
@@ -227,6 +280,43 @@ async def test_agent_run_persists_run_failed_for_cancellation(tmp_path: Path) ->
     timeline = timeline_paths[0].read_text(encoding="utf-8")
     assert "run_failed" in timeline
     assert "CancelledError" in timeline
+
+
+@pytest.mark.asyncio
+async def test_agent_run_preplans_goal_only_task_before_execution(tmp_path: Path) -> None:
+    knowledge_dir = tmp_path / "knowledge"
+    knowledge_dir.mkdir(parents=True)
+    (knowledge_dir / "index.md").write_text("# Page Knowledge", encoding="utf-8")
+    runtime = _GoalRunRuntime()
+    events: list[RunEvent] = []
+    agent = FsqAgent(
+        Settings(knowledge_dir=knowledge_dir),
+        verifier=Verifier(),
+        reporter=_Reporter(),  # type: ignore[arg-type]
+        knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
+        skill_loader=_SkillLoader(),  # type: ignore[arg-type]
+        runtime=runtime,  # type: ignore[arg-type]
+    )
+    task = Task(
+        id="downloads",
+        name="Access Downloads",
+        description="Access Downloads through the overflow menu.",
+        verification_goal="Goal completed: Access Downloads",
+        acceptance_criteria=["Goal completed: Access Downloads"],
+        verification_criteria=[VerificationCriterion(text="Goal completed: Access Downloads", kind="goal", source="test")],
+    )
+
+    result = await agent.run(task, event_sink=events.append)
+
+    assert result.status == "success"
+    assert runtime.pre_plan_goal == "Access Downloads"
+    assert runtime.last_task is not None
+    assert runtime.last_task.key_actions == [
+        "Key action 1: Open the overflow menu.",
+        "Key action 2: Tap Downloads.",
+    ]
+    assert [criterion.text for criterion in runtime.last_task.verification_criteria] == ["Goal completed: Access Downloads"]
+    assert any(event.title == "Goal pre-plan injected" for event in events)
 
 
 @pytest.mark.asyncio

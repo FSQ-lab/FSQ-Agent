@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fsq_agent.config import Settings, load_settings
 from fsq_agent.knowledge import PrivateKnowledgeLoader
-from fsq_agent.models import GoalPrePlan, KnowledgeBundle, RunEvent, RunEventSink, Task, TaskResult
+from fsq_agent.models import GoalPrePlan, KnowledgeBundle, RunEvent, RunEventSink, Task, TaskResult, VerificationCriterion
 from fsq_agent.observation import ExecutionLogger
 from fsq_agent.report import ReportGenerator
 from fsq_agent.skills import SkillLoader
@@ -90,6 +90,7 @@ class FsqAgent:
                     payload={"skill_count": len(skills), "knowledge_item_count": len(knowledge.items)},
                 )
             )
+            task = await self._augment_goal_only_task_with_pre_plan(task, skills, run_id, emitter)
             results = await self.runtime.run_task(task, knowledge, skills, run_id, emitter.emit)
             events_path = self.event_logger.log_root / run_id / "events.jsonl" if self.event_logger else None
             run_verification_task = getattr(self.runtime, "_run_verification_task", None)
@@ -189,3 +190,67 @@ class FsqAgent:
         else:
             warnings.append("Knowledge index not found: index.md")
         return KnowledgeBundle(items=items, warnings=warnings)
+
+    async def _augment_goal_only_task_with_pre_plan(
+        self,
+        task: Task,
+        skills: list[object],
+        run_id: str,
+        emitter: RunEventEmitter,
+    ) -> Task:
+        if task.key_actions:
+            return task
+
+        goal = self._goal_text_for_task(task)
+        pre_plan = await self.runtime.run_pre_plan(goal, self._load_page_knowledge_index(), skills, run_id, emitter.emit)
+        key_actions = [
+            f"Key action {index}: {action.action.strip()}"
+            for index, action in enumerate(pre_plan.key_actions, start=1)
+            if action.action.strip()
+        ]
+        payload = {
+            "key_action_count": len(key_actions),
+            "relevant_page_ids": pre_plan.relevant_page_ids,
+            "warnings": pre_plan.warnings,
+        }
+        if not key_actions:
+            await emitter.emit(
+                RunEvent(
+                    run_id=run_id,
+                    task_id=task.id,
+                    type="planning_update",
+                    title="Goal pre-plan produced no key actions",
+                    message="Continuing with goal-only execution because no useful key-action chain was generated.",
+                    payload=payload,
+                )
+            )
+            return self._ensure_goal_verification(task, goal)
+
+        await emitter.emit(
+            RunEvent(
+                run_id=run_id,
+                task_id=task.id,
+                type="planning_update",
+                title="Goal pre-plan injected",
+                message=pre_plan.summary or f"Generated {len(key_actions)} key actions for goal-only execution.",
+                payload=payload,
+            )
+        )
+        return self._ensure_goal_verification(task, goal).model_copy(update={"key_actions": key_actions})
+
+    def _goal_text_for_task(self, task: Task) -> str:
+        if task.verification_goal and task.verification_goal.startswith("Goal completed: "):
+            return task.verification_goal.removeprefix("Goal completed: ").strip()
+        return task.name if task.name and task.name != "Task" else task.description
+
+    def _ensure_goal_verification(self, task: Task, goal: str) -> Task:
+        if task.verification_criteria or task.verification_goal or task.acceptance_criteria:
+            return task
+        verification_goal = f"Goal completed: {goal}"
+        return task.model_copy(
+            update={
+                "verification_goal": verification_goal,
+                "acceptance_criteria": [verification_goal],
+                "verification_criteria": [VerificationCriterion(text=verification_goal, kind="goal", source="goal_task")],
+            }
+        )

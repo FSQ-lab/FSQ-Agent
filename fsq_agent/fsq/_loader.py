@@ -28,12 +28,15 @@ class FsqCaseLoader:
         return [self.load_case(candidate) for candidate in candidates]
 
     def _build_case(self, path: Path, docs: list[Any]) -> FsqCase:
-        if len(docs) != 2:
-            raise ConfigurationError("Invalid FSQ case file.", context={"path": str(path), "reason": "expected two YAML documents"})
-        config_doc, commands_doc = docs
+        if len(docs) not in {1, 2}:
+            raise ConfigurationError("Invalid FSQ case file.", context={"path": str(path), "reason": "expected one or two YAML documents"})
+        config_doc = docs[0]
+        commands_doc = docs[1] if len(docs) == 2 else []
         if not isinstance(config_doc, dict):
             raise ConfigurationError("Invalid FSQ case config.", context={"path": str(path)})
-        if not isinstance(commands_doc, list) or not commands_doc:
+        if commands_doc is None:
+            commands_doc = []
+        if not isinstance(commands_doc, list):
             raise ConfigurationError("Invalid FSQ case commands.", context={"path": str(path)})
         try:
             config = FsqCaseConfig.model_validate(config_doc)

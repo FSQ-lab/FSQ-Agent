@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
+import re
 
 import click
 
@@ -10,7 +11,7 @@ from fsq_agent.cli._logging import configure_cli_logging
 from fsq_agent.cli._pre_plan_formatting import log_pre_plan
 from fsq_agent.cli._task_loader import load_task, load_tasks
 from fsq_agent.config import load_settings, validate_runtime_settings
-from fsq_agent.models import FsqAgentError
+from fsq_agent.models import FsqAgentError, Task, VerificationCriterion
 from fsq_agent.tools import CapabilityRegistry
 
 
@@ -45,6 +46,24 @@ def run(config_path: str | None, workspace_path: str | None, task_path: str, str
     try:
         settings = load_settings(config_path, workspace_path)
         task = load_task(task_path, settings.cases.dir)
+        sink = (lambda event: log_run_event(event, stream_format)) if stream else None
+        result = asyncio.run(FsqAgent.from_settings(settings).run(task, event_sink=sink))
+        log_result(result)
+    except FsqAgentError as exc:
+        logger.error("Error: %s", exc)
+        raise click.Abort() from exc
+
+
+@main.command("run-goal")
+@click.option("--config", "config_path", type=click.Path(exists=False, dir_okay=False), default=None)
+@click.option("--workspace", "workspace_path", type=click.Path(file_okay=False), default=None)
+@click.option("--goal", required=True)
+@click.option("--stream/--no-stream", "stream", default=True, show_default=True)
+@click.option("--stream-format", type=click.Choice(["rich", "jsonl"]), default="rich", show_default=True)
+def run_goal(config_path: str | None, workspace_path: str | None, goal: str, stream: bool, stream_format: str) -> None:
+    try:
+        settings = load_settings(config_path, workspace_path)
+        task = _task_from_goal(goal)
         sink = (lambda event: log_run_event(event, stream_format)) if stream else None
         result = asyncio.run(FsqAgent.from_settings(settings).run(task, event_sink=sink))
         log_result(result)
@@ -155,3 +174,27 @@ def report(config_path: str | None, workspace_path: str | None, run_id: str, rep
         logger.error("Report not found: %s", path)
         raise click.Abort()
     logger.info(path.read_text(encoding="utf-8"))
+
+
+def _task_from_goal(goal: str) -> Task:
+    normalized_goal = " ".join(goal.split())
+    task_id = _goal_task_id(normalized_goal)
+    verification_goal = f"Goal completed: {normalized_goal}"
+    return Task(
+        id=task_id,
+        name=normalized_goal,
+        description=(
+            "Run this natural-language goal as a goal-driven automation task. "
+            "First derive ordered key actions from page knowledge, then execute them while adapting to live UI state. "
+            "Final verification should judge whether the goal is complete.\n\n"
+            f"Goal: {normalized_goal}"
+        ),
+        acceptance_criteria=[verification_goal],
+        verification_goal=verification_goal,
+        verification_criteria=[VerificationCriterion(text=verification_goal, kind="goal", source="cli_goal")],
+    )
+
+
+def _goal_task_id(goal: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", goal.casefold()).strip("-")
+    return slug[:80] or "goal-task"

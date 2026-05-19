@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository and convert them into goal-driven agent tasks. FSQ YAML is treated as structured reference context: case metadata, intended flow, locator hints, and assertions guide the OpenAI Agents SDK loop, but the agent may adapt the flow to live UI state. Required concrete commands are distilled into complete ordered key actions for execution and structured verification criteria for final judgment.
+Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository and convert them into goal-driven agent tasks. FSQ YAML is treated as structured reference context: case metadata, intended flow, locator hints, and assertions guide the OpenAI Agents SDK loop, but the agent may adapt the flow to live UI state. Required concrete commands are distilled into complete ordered key actions for execution and structured verification criteria for final judgment. Goal-only FSQ cases may omit the command document or provide an empty command list; those cases use the case name as the goal and rely on the agent pre-plan integration to derive execution key actions before running.
 
 ## Dependencies
 
@@ -12,24 +12,25 @@ Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository and conv
 
 Current `__init__.py` exports via `__all__`:
 
-- `FsqCaseLoader`: Loads two-document `.codex.yaml` FSQ cases from explicit paths or the configured read-only case directory.
+- `FsqCaseLoader`: Loads `.codex.yaml` FSQ cases from explicit paths or the configured read-only case directory. It accepts traditional metadata-plus-command cases and goal-only metadata cases.
 - `FsqTaskAdapter`: Converts an `FsqCase` into the project `Task` model.
 - `is_fsq_case_file`: Detects FSQ case file names.
 
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
-- `_loader.py`: YAML parsing, validation of FSQ document shape, and batch discovery.
+- `_loader.py`: YAML parsing, validation of FSQ document shape, goal-only case normalization, and batch discovery.
 - `_task_adapter.py`: Renders FSQ metadata, inferred preconditions, and commands into an advisory task description for the agent loop, extracts required ordered key actions, and classifies them as structured verification criteria.
 - `SPEC.md`: Module design.
 
 ## Error Handling
 
-Invalid FSQ YAML raises `ConfigurationError` with the failing path. Missing command documents, unsupported schema versions, missing platform values, and malformed command lists are rejected before agent execution starts.
+Invalid FSQ YAML raises `ConfigurationError` with the failing path. Unsupported schema versions, missing platform values, and malformed command documents are rejected before agent execution starts. A missing command document or empty command list is valid only as a goal-only case and is normalized to `commands=[]`.
 
 ## Design Decisions
 
 - `.codex.yaml` is the canonical test case input format.
+- Single-document `.codex.yaml` files containing only valid case metadata are supported as goal-only cases. Two-document cases with `[]` or an otherwise empty command list are also goal-only cases.
 - Configured `cases.dir` is treated as read-only input. Task execution may read FSQ case files from it, but generated files and evidence must be written under the output root.
 - Markdown conversion reports are intentionally ignored and are not loaded as task inputs.
 - FSQ commands are reference flow hints rather than a mandatory deterministic script.
@@ -39,6 +40,7 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Missing comm
 - `launchApp` and `killApp` are treated as setup and teardown intent, not as core goal key actions.
 - Commands marked `optional: true` are preserved in the reference flow but are not required key actions or final verification criteria.
 - If a case has no required key actions, the case name is still represented as the goal-level criterion.
+- Goal-only cases intentionally produce no adapter-owned ordered key actions and only a goal-level final verification criterion. Generated key actions from runtime pre-planning are execution guidance and must not be added as blocking final-verification criteria by the FSQ adapter.
 - Locators and assertions are preserved in the rendered task description so the agent can prefer them while still handling optional dialogs, missing setup, or extra recovery steps.
 - Case metadata, tags, description text, and command targets are scanned for AI-friendly precondition signals such as `requires-*`, `already signed in`, `MSA`, `login`, `account`, or similar setup language. Inferred preconditions are rendered as setup obligations before ordered key actions: the agent must inspect live state first, complete the prerequisite only when it is not already satisfied, and then continue with the case flow.
 - Account-dependent FSQ cases may reference secret environment variable names such as `TEST_ACCOUNT_EMAIL` and `TEST_ACCOUNT_PASSWORD`, but the adapter must never embed credential values in task descriptions, key actions, or verification criteria.
