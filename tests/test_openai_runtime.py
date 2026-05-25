@@ -2,6 +2,7 @@ from contextlib import AsyncExitStack
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -47,7 +48,7 @@ class _DiagnosticMCPFactory:
 @pytest.mark.asyncio
 async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
-    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
     task = Task(
         id="runtime-failure",
@@ -64,7 +65,7 @@ async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPat
 
 
 def test_runtime_builds_step_results_from_structured_pre_plan() -> None:
-    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
     final_output = """
 {
@@ -102,7 +103,7 @@ def test_runtime_builds_step_results_from_structured_pre_plan() -> None:
 
 
 def test_runtime_task_input_requests_derived_acceptance_criteria() -> None:
-    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
     task = Task(id="derive", name="Derive", description="Open the page and verify it loads.")
 
@@ -117,7 +118,6 @@ def test_runtime_task_input_requests_derived_acceptance_criteria() -> None:
 def test_runtime_instructions_include_custom_operator_instructions() -> None:
     settings = Settings(
         openai_agents=OpenAIAgentsSettings(
-            enabled=True,
             prompt={"custom_instructions": ["Prefer accessibility locators before coordinate-based actions."]},
         )
     )
@@ -147,7 +147,6 @@ def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) ->
     )
     settings = Settings(
         openai_agents=OpenAIAgentsSettings(
-            enabled=True,
             prompt={
                 "agent_template_path": agent_template,
                 "task_template_path": task_template,
@@ -166,7 +165,7 @@ def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) ->
 
 
 def test_runtime_instructions_include_knowledge_index_content() -> None:
-    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
     knowledge = KnowledgeBundle(items={"project.md": "Use Other ways to sign in, then choose password sign-in."})
 
@@ -178,7 +177,7 @@ def test_runtime_instructions_include_knowledge_index_content() -> None:
 
 
 def test_prompt_model_builder_and_renderer_use_templates() -> None:
-    settings = OpenAIAgentsSettings(enabled=True, prompt={"custom_instructions": ["Custom."]}).prompt
+    settings = OpenAIAgentsSettings(prompt={"custom_instructions": ["Custom."]}).prompt
     builder = PromptModelBuilder(settings)
     renderer = PromptRenderer(settings)
 
@@ -195,13 +194,26 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
     assert "- Done." in renderer.render_task_prompt(task_model)
 
 
+def test_prompt_model_builder_loads_custom_instructions_file(tmp_path: Path) -> None:
+    custom_instructions = tmp_path / "custom-instructions.md"
+    custom_instructions.write_text("First instruction.\n\nSecond instruction.", encoding="utf-8")
+    settings = OpenAIAgentsSettings(prompt={"custom_instructions_path": custom_instructions}).prompt
+    builder = PromptModelBuilder(settings)
+    renderer = PromptRenderer(settings)
+
+    agent_model = builder.build_agent_prompt(KnowledgeBundle(), [])
+    rendered = renderer.render_agent_prompt(agent_model)
+
+    assert "- First instruction." in rendered
+    assert "- Second instruction." in rendered
+
+
 def test_prompt_renderer_injects_model_into_configured_jinja_templates(tmp_path: Path) -> None:
     agent_template = tmp_path / "agent.j2"
     task_template = tmp_path / "task.j2"
     agent_template.write_text("{{ variables.prefix }}{% for instruction in custom_instructions %} {{ instruction }}{% endfor %}", encoding="utf-8")
     task_template.write_text("Task {{ task.id }} {{ task.variables.prefix }}", encoding="utf-8")
     settings = OpenAIAgentsSettings(
-        enabled=True,
         prompt={
             "agent_template_path": agent_template,
             "task_template_path": task_template,
@@ -220,7 +232,7 @@ def test_prompt_renderer_injects_model_into_configured_jinja_templates(tmp_path:
 
 
 def test_runtime_builds_mcp_validation_diagnostic_steps() -> None:
-    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _DiagnosticMCPFactory())
 
     steps = runtime._build_mcp_validation_steps()
@@ -234,7 +246,7 @@ def test_runtime_builds_mcp_validation_diagnostic_steps() -> None:
 def test_runtime_mcp_strict_schema_conversion_follows_config() -> None:
     strict_runtime = OpenAIAgentsRuntime(
         Settings(
-            openai_agents=OpenAIAgentsSettings(enabled=True),
+            openai_agents=OpenAIAgentsSettings(),
             mcp_tool_validation=MCPToolValidationSettings(strict_schema=True),
         ),
         _EmptyToolFactory(),
@@ -242,7 +254,7 @@ def test_runtime_mcp_strict_schema_conversion_follows_config() -> None:
     )
     relaxed_runtime = OpenAIAgentsRuntime(
         Settings(
-            openai_agents=OpenAIAgentsSettings(enabled=True),
+            openai_agents=OpenAIAgentsSettings(),
             mcp_tool_validation=MCPToolValidationSettings(strict_schema=False),
         ),
         _EmptyToolFactory(),
@@ -329,7 +341,7 @@ def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
         def __init__(self, **kwargs: Any) -> None:
             self.kwargs = kwargs
 
-    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
 
     run_config = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider")
@@ -343,6 +355,40 @@ def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
         "preview_chars": 1000,
         "trimmable_tools": None,
     }
+
+
+def test_runtime_builds_azure_openai_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _AsyncOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-key")
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+
+    client = runtime._build_openai_client(_AsyncOpenAI)
+
+    assert client.kwargs == {
+        "api_key": "azure-key",
+        "base_url": "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/",
+    }
+    assert runtime._use_responses_api() is True
+
+
+def test_runtime_builds_github_copilot_client() -> None:
+    settings = Settings(
+        openai_agents=OpenAIAgentsSettings(
+            provider="github_copilot",
+        )
+    )
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+
+    with patch("fsq_agent.agent._openai_runtime.build_copilot_async_openai_client", return_value="client") as build_client:
+        client = runtime._build_openai_client(object)
+
+    assert client == "client"
+    build_client.assert_called_once_with(object, settings.workspace.root_dir)
+    assert runtime._use_responses_api() is True
 
 
 def test_runtime_tool_count_filter_keeps_recent_outputs_and_trims_history() -> None:
@@ -361,7 +407,7 @@ def test_runtime_tool_count_filter_keeps_recent_outputs_and_trims_history() -> N
         def __call__(self, data: Any) -> Any:
             return data.model_data
 
-    settings = Settings(openai_agents=OpenAIAgentsSettings(enabled=True))
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider").kwargs["call_model_input_filter"]
     old_output = "old-output " * 1000
@@ -406,7 +452,6 @@ def test_runtime_tool_count_filter_writes_artifact_for_trimmed_history(tmp_path:
 
     settings = Settings(
         openai_agents=OpenAIAgentsSettings(
-            enabled=True,
             local_tool_output=LocalToolOutputSettings(recent_full_output_count=0),
         ),
         output=OutputSettings(runs_dir=tmp_path / "runs"),
@@ -453,7 +498,7 @@ def test_runtime_input_filter_leaves_plain_screenshot_outputs_text_only(tmp_path
     screenshot_path = screenshots_dir / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
     settings = Settings(
-        openai_agents=OpenAIAgentsSettings(enabled=True),
+        openai_agents=OpenAIAgentsSettings(),
         output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
     )
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
@@ -501,7 +546,7 @@ def test_runtime_input_filter_attaches_submitted_visual_assertion_image(tmp_path
     screenshot_path = screenshots_dir / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
     settings = Settings(
-        openai_agents=OpenAIAgentsSettings(enabled=True),
+        openai_agents=OpenAIAgentsSettings(),
         output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
     )
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
@@ -562,7 +607,7 @@ def test_runtime_input_filter_rejects_screenshot_images_outside_output_root(tmp_
     screenshot_path = outside_root / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
     settings = Settings(
-        openai_agents=OpenAIAgentsSettings(enabled=True),
+        openai_agents=OpenAIAgentsSettings(),
         output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
     )
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())

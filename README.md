@@ -59,6 +59,6 @@ fsq-agent pre-plan --config config.local.yaml --goal "Open Downloads from the Ne
 
 ## Current Scope
 
-This implementation provides validated models, configuration loading, OpenAI Agents SDK runtime wiring, MCP configuration, allowlisted CLI execution, optional SDK ShellTool execution, descriptive skill loading, evidence manifests, and report generation. Task execution requires OpenAI Agents SDK to be enabled and `AZURE_OPENAI_API_KEY` to be present.
+This implementation provides validated models, configuration loading, OpenAI Agents SDK runtime wiring, MCP configuration, allowlisted CLI execution, optional SDK ShellTool execution, descriptive skill loading, evidence manifests, and report generation. Task execution requires the OpenAI Agents SDK package and authentication for the selected `openai_agents.provider`.
 
 Local shell execution is disabled by default. Enable `shell.enabled` with `shell.mode: allowlist` for normal command restrictions, or `shell.mode: allow_all` for intentionally unrestricted local runs inside the fsq-agent workspace. Runtime artifacts are written under the configured workspace `output` directory.

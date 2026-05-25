@@ -77,6 +77,7 @@ class OpenAIAgentPromptConfig(BaseModel):
 
     agent_template_path: Path | None = None
     task_template_path: Path | None = None
+    custom_instructions_path: Path | None = None
     custom_instructions: list[str] = Field(default_factory=list)
     variables: dict[str, Any] = Field(default_factory=dict)
 
@@ -84,14 +85,13 @@ class OpenAIAgentPromptConfig(BaseModel):
 class OpenAIAgentsSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    provider: Literal["azure_openai", "github_copilot"] = "azure_openai"
     base_url: str = "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/"
     api_key_env: str = "AZURE_OPENAI_API_KEY"
     model: str = "gpt-5.4"
     max_turns: int = Field(default=50, ge=1)
     tracing_enabled: bool = False
     trace_include_sensitive_data: bool = False
-    use_responses: bool = True
     fail_without_api_key: bool = True
     prompt: OpenAIAgentPromptConfig = Field(default_factory=OpenAIAgentPromptConfig)
     context_trimming: ContextTrimmingSettings = Field(default_factory=ContextTrimmingSettings)

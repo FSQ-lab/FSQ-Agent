@@ -1,0 +1,73 @@
+from typing import Any
+import json
+import time
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from fsq_agent.agent import _copilot_provider as copilot
+from fsq_agent.models import ConfigurationError
+
+
+class _AsyncOpenAI:
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+
+
+def test_build_copilot_async_openai_client_uses_plan_endpoint(tmp_path) -> None:
+    token_cache_path = tmp_path / "auth" / "github-copilot-token.json"
+    token_cache_path.parent.mkdir()
+    token_cache_path.write_text(json.dumps({"access_token": "ghu_test", "expires_at": time.time() + 3600}), encoding="utf-8")
+    with patch.object(copilot, "_get_copilot_plan", return_value="business") as get_plan, patch.object(
+        copilot,
+        "_get_copilot_token",
+        return_value=copilot.CopilotToken(token="copilot-token", expires_at=9999999999),
+    ) as get_token:
+        client = copilot.build_copilot_async_openai_client(_AsyncOpenAI, tmp_path)
+
+    get_plan.assert_called_once_with("ghu_test")
+    get_token.assert_called_once_with("ghu_test")
+    assert client.kwargs["api_key"] == "copilot-token"
+    assert client.kwargs["base_url"] == "https://api.business.githubcopilot.com"
+    assert client.kwargs["default_headers"]["copilot-integration-id"] == "vscode-chat"
+
+
+def test_load_cached_token_returns_none_when_expired(tmp_path) -> None:
+    token_cache_path = tmp_path / "auth" / "github-copilot-token.json"
+    token_cache_path.parent.mkdir()
+    token_cache_path.write_text(json.dumps({"access_token": "ghu_old", "expires_at": time.time() - 1}), encoding="utf-8")
+
+    assert copilot._load_cached_token(token_cache_path) is None
+
+
+def test_resolve_github_token_authenticates_when_cache_expired(tmp_path) -> None:
+    token_cache_path = tmp_path / "auth" / "github-copilot-token.json"
+    token_cache_path.parent.mkdir()
+    token_cache_path.write_text(json.dumps({"access_token": "ghu_old", "expires_at": time.time() - 1}), encoding="utf-8")
+
+    with patch.object(copilot, "_authenticate", return_value="ghu_new") as authenticate:
+        token = copilot._resolve_github_token(token_cache_path)
+
+    assert token == "ghu_new"
+    authenticate.assert_called_once_with(token_cache_path)
+
+
+def test_get_copilot_plan_rejects_unknown_plan() -> None:
+    response = MagicMock()
+    response.json.return_value = {"copilot_plan": "unknown"}
+    response.raise_for_status = MagicMock()
+
+    with patch.object(copilot.httpx, "get", return_value=response):
+        with pytest.raises(ConfigurationError, match="Unknown GitHub Copilot plan"):
+            copilot._get_copilot_plan("ghu_test")
+
+
+def test_get_copilot_token_requires_token_field() -> None:
+    response = MagicMock()
+    response.json.return_value = {}
+    response.raise_for_status = MagicMock()
+
+    with patch.object(copilot.httpx, "get", return_value=response):
+        with pytest.raises(ConfigurationError, match="did not include a token"):
+            copilot._get_copilot_token("ghu_test")
+

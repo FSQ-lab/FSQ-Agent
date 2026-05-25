@@ -14,6 +14,7 @@ from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, 
 from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory, LifecycleControllerFactory, MCPToolCaller
 from fsq_agent.tools._tool_artifacts import ToolArtifactStore
 
+from fsq_agent.agent._copilot_provider import build_copilot_async_openai_client
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._pre_plan import (
     PRE_PLAN_AGENT_INSTRUCTIONS,
@@ -233,18 +234,15 @@ class OpenAIAgentsRuntime:
         validate_runtime_settings(self.settings)
         started = time.perf_counter()
         try:
-            from agents import Agent, FunctionTool, OpenAIProvider, RunConfig, Runner, set_tracing_disabled
+            from agents import Agent, OpenAIProvider, RunConfig, Runner, set_tracing_disabled
             from agents.extensions import ToolOutputTrimmer
             from openai import AsyncOpenAI
         except ImportError as exc:
             raise ConfigurationError("openai-agents and openai packages are required when SDK runtime is enabled.") from exc
 
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
-        client = AsyncOpenAI(
-            api_key=os.environ[self.settings.openai_agents.api_key_env],
-            base_url=self.settings.openai_agents.base_url,
-        )
-        provider = OpenAIProvider(openai_client=client, use_responses=self.settings.openai_agents.use_responses)
+        client = self._build_openai_client(AsyncOpenAI)
+        provider = OpenAIProvider(openai_client=client, use_responses=self._use_responses_api())
         try:
             try:
                 async with AsyncExitStack() as stack:
@@ -378,11 +376,8 @@ class OpenAIAgentsRuntime:
             ),
         )
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
-        client = AsyncOpenAI(
-            api_key=os.environ[self.settings.openai_agents.api_key_env],
-            base_url=self.settings.openai_agents.base_url,
-        )
-        provider = OpenAIProvider(openai_client=client, use_responses=self.settings.openai_agents.use_responses)
+        client = self._build_openai_client(AsyncOpenAI)
+        provider = OpenAIProvider(openai_client=client, use_responses=self._use_responses_api())
         try:
             agent = Agent(
                 name=f"{self.settings.agent.name} pre-planner",
@@ -530,11 +525,8 @@ class OpenAIAgentsRuntime:
             mode=self.settings.verification.mode,
         )
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
-        client = AsyncOpenAI(
-            api_key=os.environ[self.settings.openai_agents.api_key_env],
-            base_url=self.settings.openai_agents.base_url,
-        )
-        provider = OpenAIProvider(openai_client=client, use_responses=self.settings.openai_agents.use_responses)
+        client = self._build_openai_client(AsyncOpenAI)
+        provider = OpenAIProvider(openai_client=client, use_responses=self._use_responses_api())
         try:
             agent = Agent(
                 name=f"{self.settings.agent.name} verifier",
@@ -617,6 +609,20 @@ class OpenAIAgentsRuntime:
                 self.settings.output.root_dir,
             )
         return run_config_cls(model_provider=provider, call_model_input_filter=input_filter)
+
+    def _build_openai_client(self, async_openai_cls: Any) -> Any:
+        if self.settings.openai_agents.provider == "github_copilot":
+            return build_copilot_async_openai_client(
+                async_openai_cls,
+                self.settings.workspace.root_dir,
+            )
+        return async_openai_cls(
+            api_key=os.environ[self.settings.openai_agents.api_key_env],
+            base_url=self.settings.openai_agents.base_url,
+        )
+
+    def _use_responses_api(self) -> bool:
+        return True
 
     def _build_mcp_config(self) -> dict[str, Any]:
         return {"convert_schemas_to_strict": self.settings.mcp_tool_validation.strict_schema}

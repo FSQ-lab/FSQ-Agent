@@ -137,7 +137,7 @@ def validate_config(config_path: str | None, workspace_path: str | None) -> None
     try:
         settings = load_settings(config_path, workspace_path)
         validate_runtime_settings(settings)
-        logger.info("Configuration valid. OpenAI Agents SDK enabled: %s", settings.openai_agents.enabled)
+        logger.info("Configuration valid. OpenAI Agents SDK provider: %s", settings.openai_agents.provider)
         logger.info("Model: %s", settings.openai_agents.model)
         logger.info("Base URL: %s", settings.openai_agents.base_url)
         logger.info("API key env: %s", settings.openai_agents.api_key_env)

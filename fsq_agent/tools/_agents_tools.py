@@ -96,7 +96,7 @@ class AgentsToolFactory:
         try:
             from agents import FunctionTool, ShellTool
         except ImportError as exc:
-            raise ToolExecutionError("openai-agents is required when OpenAI Agents SDK is enabled.") from exc
+            raise ToolExecutionError("openai-agents is required when the OpenAI Agents SDK runtime is used.") from exc
 
         self.run_id = run_id
         self.task_id = task_id

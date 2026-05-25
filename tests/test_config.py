@@ -166,7 +166,6 @@ def test_openai_agents_endpoint_is_normalized(tmp_path: Path) -> None:
             tmp_path,
             """
 openai_agents:
-  enabled: false
   base_url: https://edgeqa-resource.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview
 """,
         ),
@@ -178,23 +177,63 @@ openai_agents:
     assert settings.openai_agents.base_url == "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/"
 
 
+def test_github_copilot_provider_disables_responses_and_skips_azure_key(
+  tmp_path: Path,
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+  config_path = tmp_path / "config.yaml"
+  config_path.write_text(
+    _base_config(
+      tmp_path,
+      """
+openai_agents:
+  provider: github_copilot
+""",
+    ),
+    encoding="utf-8",
+  )
+
+  settings = load_settings(config_path)
+
+  validate_runtime_settings(settings)
+  assert settings.openai_agents.provider == "github_copilot"
+
+
+def test_load_settings_rejects_invalid_provider(tmp_path: Path) -> None:
+  config_path = tmp_path / "config.yaml"
+  config_path.write_text(
+    _base_config(
+      tmp_path,
+      """
+openai_agents:
+  provider: local_llm
+""",
+    ),
+    encoding="utf-8",
+  )
+
+  with pytest.raises(ConfigurationError, match="Invalid configuration"):
+    load_settings(config_path)
+
+
 def test_load_settings_accepts_context_and_tool_output_policy(tmp_path: Path) -> None:
     agent_template = tmp_path / "agent.j2"
     task_template = tmp_path / "task.j2"
+    custom_instructions = tmp_path / "custom-instructions.md"
     agent_template.write_text("Agent {{ variables.voice }}", encoding="utf-8")
     task_template.write_text("Task {{ task.id }}", encoding="utf-8")
+    custom_instructions.write_text("Prefer semantic UI assertions before visual fallback.", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
 openai_agents:
-  enabled: false
   prompt:
     agent_template_path: ./agent.j2
     task_template_path: ./task.j2
-    custom_instructions:
-      - Prefer semantic UI assertions before visual fallback.
+    custom_instructions_path: ./custom-instructions.md
     variables:
       voice: concise
   context_trimming:
@@ -222,7 +261,7 @@ openai_agents:
     assert settings.openai_agents.context_trimming.recent_turns == 3
     assert settings.openai_agents.prompt.agent_template_path == agent_template.resolve()
     assert settings.openai_agents.prompt.task_template_path == task_template.resolve()
-    assert settings.openai_agents.prompt.custom_instructions == ["Prefer semantic UI assertions before visual fallback."]
+    assert settings.openai_agents.prompt.custom_instructions_path == custom_instructions.resolve()
     assert settings.openai_agents.prompt.variables == {"voice": "concise"}
     assert settings.openai_agents.context_trimming.trimmable_tools == ["run_cli_tool"]
     assert settings.openai_agents.local_tool_output.recent_full_output_count == 4
@@ -256,7 +295,6 @@ def test_validate_runtime_settings_requires_api_key_when_enabled(tmp_path: Path)
             tmp_path,
             """
 openai_agents:
-  enabled: true
   api_key_env: FSQ_AGENT_MISSING_KEY
 """,
         ),
@@ -268,21 +306,21 @@ openai_agents:
         validate_runtime_settings(settings)
 
 
-def test_validate_runtime_settings_requires_openai_agents_enabled(tmp_path: Path) -> None:
+def test_validate_runtime_settings_requires_azure_api_key_by_default(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
 openai_agents:
-  enabled: false
+  api_key_env: FSQ_AGENT_MISSING_KEY
 """,
         ),
         encoding="utf-8",
     )
     settings = load_settings(config_path)
 
-    with pytest.raises(ConfigurationError, match="OpenAI Agents SDK must be enabled"):
+    with pytest.raises(ConfigurationError, match="API key"):
         validate_runtime_settings(settings)
 
 
@@ -296,8 +334,6 @@ def test_validate_runtime_settings_requires_shell_allowlist_when_enabled(
         _base_config(
             tmp_path,
             """
-openai_agents:
-  enabled: true
 shell:
   enabled: true
   mode: allowlist
@@ -322,8 +358,6 @@ def test_validate_runtime_settings_allows_shell_allow_all(
         _base_config(
             tmp_path,
             """
-openai_agents:
-  enabled: true
 shell:
   enabled: true
   mode: allow_all
@@ -350,7 +384,7 @@ def test_load_settings_loads_dotenv_from_config_directory(
             tmp_path,
             """
 openai_agents:
-  enabled: true
+  api_key_env: AZURE_OPENAI_API_KEY
 """,
         ),
         encoding="utf-8",
@@ -374,7 +408,7 @@ def test_load_settings_dotenv_does_not_override_existing_env(
             tmp_path,
             """
 openai_agents:
-  enabled: true
+  api_key_env: AZURE_OPENAI_API_KEY
 """,
         ),
         encoding="utf-8",
@@ -406,7 +440,6 @@ def test_validate_runtime_settings_rejects_placeholder_api_key(
             tmp_path,
             """
 openai_agents:
-  enabled: true
   api_key_env: FSQ_AGENT_PLACEHOLDER_KEY
 """,
         ),

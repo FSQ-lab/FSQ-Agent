@@ -67,10 +67,11 @@ def test_verification_settings_default_to_normal() -> None:
 def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:
     settings = OpenAIAgentsSettings()
 
-    assert settings.enabled is False
+    assert settings.provider == "azure_openai"
     assert settings.model == "gpt-5.4"
     assert settings.api_key_env == "AZURE_OPENAI_API_KEY"
     assert settings.prompt.custom_instructions == []
+    assert settings.prompt.custom_instructions_path is None
     assert settings.prompt.agent_template_path is None
     assert settings.prompt.task_template_path is None
     assert settings.prompt.variables == {}

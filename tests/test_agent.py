@@ -14,7 +14,7 @@ from fsq_agent.observation import ExecutionLogger
 
 
 @pytest.mark.asyncio
-async def test_agent_run_requires_openai_agents_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_agent_run_requires_configured_model_provider_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -37,7 +37,7 @@ knowledge_dir: knowledge
         acceptance_criteria=["A report exists."],
     )
 
-    with pytest.raises(ConfigurationError, match="OpenAI Agents SDK must be enabled"):
+    with pytest.raises(ConfigurationError, match="API key"):
         await FsqAgent.from_config(config_path).run(task)
 
 

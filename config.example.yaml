@@ -6,19 +6,26 @@ agent:
   max_retries: 3
 
 openai_agents:
-  enabled: true
+  # Provider selector: azure_openai or github_copilot.
+  # github_copilot runs GitHub device-code auth on first use and caches the
+  # OAuth token under workspace.root_dir/auth/github-copilot-token.json.
+  # When provider is github_copilot, use model: gpt-5.5.
+  provider: azure_openai
+  # Azure OpenAI only: normalized /openai/v1/ endpoint used when provider is azure_openai.
   base_url: https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/
+  # Azure OpenAI only: environment variable containing the Azure OpenAI API key.
   api_key_env: AZURE_OPENAI_API_KEY
+  # Azure OpenAI: Azure deployment name. GitHub Copilot: use Copilot model gpt-5.5.
   model: gpt-5.4
   max_turns: 50
   tracing_enabled: false
   trace_include_sensitive_data: false
-  use_responses: true
   prompt:
     agent_template_path: ./fsq_agent/agent/templates/agent_instructions.j2
     task_template_path: ./fsq_agent/agent/templates/task_input.j2
-    custom_instructions:
-      - Prefer targeted artifact searches over full artifact reads when recovering details from large tool outputs.
+    # Optional: put long operator guidance in a Markdown/text file instead of inline YAML.
+    # custom_instructions_path: ./fsq_agent/agent/templates/openai-agent-custom-instructions.md
+    custom_instructions: []
     variables: {}
   context_trimming:
     enabled: true
