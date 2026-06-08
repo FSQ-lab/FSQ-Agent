@@ -50,6 +50,7 @@ Current `__init__.py` exports via `__all__`:
 - `ToolDefinition`: Pydantic model describing a discovered MCP, CLI, or file operation capability.
 - `ToolCall`: Pydantic model describing a tool invocation request.
 - `ToolResult`: Pydantic model describing a normalized tool invocation response.
+- Planned execution-core contract models: Pydantic models for StepRunner, HarnessInterface inputs/outputs, runner events, and EvidenceBundle manifests. These include `ExecutableStep`, `SourceRef`, `RetryPolicy`, `EvidencePolicy`, `StepCallInfo`, `StepPhaseReport`, core `StepResult` equivalent naming to be finalized before implementation, `RunnerEvent`, `HarnessContext`, `HarnessActionResult`, `HarnessArtifactRef`, `EvidenceBundle`, and `EvidenceManifest`. Exact public names must be confirmed before implementation to avoid ambiguity with the existing `StepResult` model.
 - `OpenAIAgentsSettings`: Pydantic model for OpenAI Agents SDK provider configuration, including provider selection (`azure_openai` or `github_copilot`), Azure OpenAI base URL, API key environment variable, model deployment/name, tracing policy, turn limits, file-based prompt template customization, context trimming policy, and local tool output artifact policy. GitHub Copilot OAuth token storage is runtime-owned under the configured workspace and is not exposed as a YAML token setting. The agent runtime uses the Responses API for configured model providers.
 - `PrePlanSettings`: Pydantic model for standalone goal pre-planning configuration, including the optional page-knowledge graph directory used instead of the normal task knowledge root.
 - `VerificationSettings`: Pydantic model for the final verification policy. The default mode is `normal`.
@@ -82,6 +83,7 @@ Current `__init__.py` exports via `__all__`:
 - `_events.py`: Live run event model and event sink type alias.
 - `_fsq.py`: FSQ AI Test DSL case metadata and case models.
 - `_tools.py`: Tool metadata, tool call, tool result, MCP validation issue/settings, MCP config, and CLI config models.
+- Planned `_core.py`: Shared execution-core contract models for executable steps, runner phases/events, harness context/results, artifact references, and evidence manifests. This file should be added only after `core` and `models` SPEC changes are reviewed and confirmed.
 - `_settings.py`: Settings value models.
 - `_skills.py`: Skill configuration and loaded skill bundle models.
 - `_report.py`: Report artifact and evidence models.
@@ -97,6 +99,7 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 ## Design Decisions
 
 - Centralizing types prevents circular imports and inconsistent result schemas.
+- New execution-core contracts must be added to this module rather than to `fsq_agent.core`, because cross-module data structures live only in `models`.
 - Pydantic is used at boundaries where external inputs, config files, agent output, and tool output enter the system.
 - The agent final output contract is model-owned. The runtime always uses the current `AgentFinalOutput` schema through OpenAI Agents SDK structured output. The schema version is emitted in the final output for traceability, but schema selection is not a user-facing configuration.
 - Task verification data is split from execution planning data as a breaking change. `key_actions` preserves every required ordered FSQ action for the execution agent, while `verification_criteria` records structured final-verification requirements. `acceptance_criteria` is no longer the primary contract for FSQ verification.

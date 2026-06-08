@@ -1,8 +1,8 @@
 # Step Runner Core Contracts Design Spec
 
-Status: approved for contract planning
+Status: draft for project-guide review
 Date: 2026-06-08
-Scope: first implementation batch for FSQ-Agent core execution contracts
+Scope: first implementation batch for FSQ-Agent execution-core contracts under the project module rules
 Language policy: English is the contract source of truth. Chinese notes are included where they clarify team intent.
 
 ## 1. Purpose
@@ -22,14 +22,14 @@ Planner output / FSQ step
   -> EvidenceBundle
 ```
 
-For this first batch, the work intentionally focuses on contracts:
+For this first batch, the work intentionally focuses on contracts and project-spec alignment:
 
 ```text
-ExecutableStep
-StepRunner protocol models
-HarnessInterface
-RunnerEvent models
-EvidenceBundle manifest schema
+models-owned ExecutableStep and runner protocol models
+core-owned HarnessInterface protocol boundary
+models-owned RunnerEvent models
+models-owned EvidenceBundle manifest schema
+core module SPEC and DAG registration
 ```
 
 It does not implement real Android/Web/iOS harness behavior, CLI integration, report generation, verifier integration, or planner repair.
@@ -38,13 +38,14 @@ It does not implement real Android/Web/iOS harness behavior, CLI integration, re
 
 ## 2. Confirmed Decisions
 
-- Create a new root package: `fsq_agent/core/`.
+- Create a new root package: `fsq_agent/core/`, but only after adding `fsq_agent/core/SPEC.md` and registering the module in `CLAUDE.md`.
 - Split execution-core modules under that root:
   - `fsq_agent/core/runner/`
   - `fsq_agent/core/harness/`
   - `fsq_agent/core/evidence/`
-- Place `ExecutableStep` in `fsq_agent/core/runner/` for the first batch because it is the direct input contract consumed by `StepRunner`.
-- Use Pydantic `BaseModel` for structured data contracts.
+- Place `ExecutableStep` and other shared Pydantic data contracts in `fsq_agent.models`, not in `fsq_agent.core`, because `CLAUDE.md` requires shared data structures to live only in `models`.
+- Let `fsq_agent/core/runner/` consume `ExecutableStep` from `models` as the direct input contract for future `StepRunner` work.
+- Use Pydantic `BaseModel` for structured data contracts in `models`.
 - Use `typing.Protocol` for `HarnessInterface` because it is a capability interface, not a persisted data model.
 - Keep the first batch contract-first and test-first. Product integration comes later.
 
@@ -58,7 +59,7 @@ Trade-off: This validates behavior quickly, but it can force contracts to evolve
 
 ### Approach B: Stable Contracts First
 
-Define the core Pydantic models, `HarnessInterface` protocol, event taxonomy, and evidence manifest schema before wiring execution flows.
+Define the shared Pydantic models in `models`, the `HarnessInterface` protocol in `core`, the event taxonomy, and evidence manifest schema before wiring execution flows.
 
 Trade-off: This produces less visible runtime behavior in the first batch, but it gives the team a stable boundary for parallel work. This is the selected approach.
 
@@ -72,31 +73,32 @@ Recommendation: Use Approach B first, then implement Approach A as the second ba
 
 ## 4. Package Layout
 
-The first batch should introduce this structure:
+The first batch should introduce or prepare this structure:
 
 ```text
 fsq_agent/core/
   __init__.py
+  SPEC.md
   runner/
     __init__.py
-    _models.py
-    _events.py
+    _runner.py
   harness/
     __init__.py
     _interface.py
-    _models.py
   evidence/
     __init__.py
-    _models.py
+    _recorder.py
+fsq_agent/models/
+  _core.py
 ```
 
-The module split is intentionally small. `StepRunner` implementation can be added in a later batch as `fsq_agent/core/runner/_runner.py` after the models are tested.
+The module split is intentionally small. `StepRunner` implementation can be added in a later batch as `fsq_agent/core/runner/_runner.py` after the models are tested. Shared Pydantic contracts should be added in `fsq_agent/models/_core.py` and exported through `fsq_agent/models/__init__.py`.
 
 Public exports should be explicit through each module's `__init__.py`. Internal files should keep leading underscores, matching existing repository style.
 
 ## 5. Modeling Policy
 
-Use Pydantic for data contracts because the repository already uses Pydantic for core models such as `FsqCase`, `Task`, `StepResult`, and verification models.
+Use Pydantic for data contracts because the repository already uses Pydantic for core models such as `FsqCase`, `Task`, `StepResult`, and verification models. Per `CLAUDE.md`, these shared contracts belong in `fsq_agent.models`.
 
 Pydantic should be used for:
 
@@ -106,7 +108,7 @@ Pydantic should be used for:
 - `EvidencePolicy`
 - `StepCallInfo`
 - `StepPhaseReport`
-- `StepResult`
+- distinct execution-core step result model name to be confirmed before implementation
 - `RunnerEvent`
 - `HarnessContext`
 - `HarnessActionResult`
@@ -114,7 +116,7 @@ Pydantic should be used for:
 - `EvidenceBundle`
 - `EvidenceManifest`
 
-`Protocol` should be used for:
+`Protocol` should be used in `fsq_agent.core.harness` for:
 
 - `HarnessInterface`
 
@@ -122,13 +124,13 @@ Reasoning:
 
 - Pydantic gives validation, serialization, manifest compatibility, and API readiness.
 - `Protocol` lets `AndroidHarness`, `WebHarness`, `IOSHarness`, and `FakeHarness` satisfy the same contract without inheritance coupling.
-- This keeps the key separation clear: data is modeled, capability is abstracted.
+- This keeps the key separation clear: shared data is modeled in `models`, capability is abstracted in `core`.
 
 ## 6. Runner Contracts
 
 ### 6.1 ExecutableStep
 
-`ExecutableStep` is the direct input to the runner. It is produced by future `StepBuilder` work and consumed by future `StepRunner` work.
+`ExecutableStep` is the direct input to the runner. It is produced by future `StepBuilder` work and consumed by future `StepRunner` work. The model is owned by `fsq_agent.models`, while `fsq_agent.core.runner` consumes it.
 
 Minimum fields:
 
@@ -215,7 +217,7 @@ Phase reports make it possible to distinguish:
 
 ### 6.5 StepResult
 
-The new core `StepResult` should summarize the complete execution result of one `ExecutableStep`.
+The new execution-core step result should summarize the complete execution result of one `ExecutableStep`.
 
 Minimum fields:
 
@@ -235,7 +237,7 @@ evidence_refs
 metadata
 ```
 
-This model is intentionally separate from the existing `fsq_agent.models.StepResult`. A later integration batch can add adapters between the old report model and the new core result model.
+This contract must avoid ambiguity with the existing `fsq_agent.models.StepResult`. Before implementation, choose a distinct public name such as `CoreStepResult`, `RunnerStepResult`, or `ExecutionStepResult`, then document it in `fsq_agent/models/SPEC.md` and export it from `fsq_agent.models`.
 
 ## 7. Runner Events
 
@@ -282,7 +284,7 @@ The runner may emit events and return results. It should not write the final evi
 
 ### 8.1 HarnessInterface
 
-`HarnessInterface` is the stable platform capability contract. It should be defined as a `typing.Protocol`.
+`HarnessInterface` is the stable platform capability contract. It should be defined as a `typing.Protocol` in `fsq_agent.core.harness` and use models-owned input/output contracts.
 
 First-batch methods:
 
@@ -296,7 +298,7 @@ capture_artifact(kind, reason, context)
 classify_error(error, phase, step)
 ```
 
-The exact Python signatures should use typed Pydantic input/output models from `core.runner` and `core.harness`.
+The exact Python signatures should use typed Pydantic input/output models from `fsq_agent.models`.
 
 ### 8.2 HarnessContext
 
@@ -460,9 +462,9 @@ The first batch should not require Android, Appium, Playwright, OpenAI APIs, MCP
 
 ### Batch 1: Contracts
 
-Create `fsq_agent/core/` and define the Pydantic models, `HarnessInterface` protocol, enums/literals, and focused unit tests.
+Update `CLAUDE.md`, add `fsq_agent/core/SPEC.md`, update `fsq_agent/models/SPEC.md`, then define Pydantic models/enums/literals in `fsq_agent.models`, the `HarnessInterface` protocol in `fsq_agent.core.harness`, and focused unit tests.
 
-Expected outcome: stable importable contracts with passing tests.
+Expected outcome: stable importable contracts with passing tests and module boundaries that follow the project DAG.
 
 ### Batch 2: Minimal Runner Slice
 
@@ -499,6 +501,7 @@ Expected outcome: reports and verification consume historical facts from the new
 - Planner repair policy.
 - Retry execution behavior beyond modeling `RetryPolicy`.
 - Backward compatibility adapters for existing `fsq_agent.models.StepResult`.
+- Defining shared Pydantic data models inside `fsq_agent.core`.
 
 ## 14. Open Follow-Up Decisions
 
@@ -507,16 +510,16 @@ These decisions should be made during later batches, not before Batch 1:
 - Whether `StepRunner` should be sync-only first or support async harness methods.
 - Whether `EvidenceRecorder` writes a single manifest file or a directory-level bundle with multiple typed manifests.
 - Whether `FakeHarness` belongs under `core/harness/` or only under tests.
-- How legacy `fsq_agent.models.StepResult` maps to the new core `StepResult`.
+- What distinct public name should be used for the new execution-core step result so it does not conflict with legacy `fsq_agent.models.StepResult`.
+- How legacy `fsq_agent.models.StepResult` maps to the new execution-core step result.
 - Where StepBuilder should live once Owner 1 contracts are moved or expanded.
 
 ## 15. Acceptance Criteria
 
-This design is ready for implementation planning when:
+This design is ready for implementation planning after user review confirms:
 
 - The team agrees that Batch 1 is contract-only.
 - `fsq_agent/core/runner/`, `fsq_agent/core/harness/`, and `fsq_agent/core/evidence/` are accepted as package boundaries.
-- `ExecutableStep` ownership under `core/runner/` is accepted for the first batch.
-- Pydantic-for-data and Protocol-for-harness is accepted as the modeling rule.
+- `ExecutableStep` and other shared data contracts are accepted as `models`-owned contracts consumed by `core/runner/`.
+- Pydantic-in-`models` for data and Protocol-in-`core` for harness is accepted as the modeling rule.
 - Later runtime behavior is explicitly deferred to Batch 2 and beyond.
-
