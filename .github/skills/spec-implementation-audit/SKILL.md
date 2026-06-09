@@ -23,6 +23,8 @@ Tests, lint, keyword scans, and implementation summaries are auxiliary evidence 
 
 Use a fresh reviewer or independent context whenever the platform supports it. The reviewer must not inherit the implementation agent's conversation history or rely on its self-report.
 
+When using a subagent for the independent review, use the same model as the main agent by default. Do not pass an explicit `model` override to the subagent unless the user explicitly requests a different model.
+
 Reviewer input is limited to:
 
 - Root `SPEC.md`.

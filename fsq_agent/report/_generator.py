@@ -41,13 +41,14 @@ class ReportGenerator:
         verification: VerificationResult,
     ) -> None:
         tool_calls = self._load_tool_calls(report_dir)
+        platform_actions = self._load_platform_actions(report_dir)
         report_path.write_text(
-            self._render_markdown(task, steps, verification, tool_calls),
+            self._render_markdown(task, steps, verification, tool_calls, platform_actions),
             encoding="utf-8",
         )
         json_path = report_dir / "report.json"
         json_path.write_text(
-            json.dumps(self._build_json_report(report_dir, task, steps, verification, tool_calls), indent=2, ensure_ascii=False),
+            json.dumps(self._build_json_report(report_dir, task, steps, verification, tool_calls, platform_actions), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 
@@ -58,18 +59,21 @@ class ReportGenerator:
         steps: list[StepResult],
         verification: VerificationResult,
         tool_calls: list[dict[str, Any]] | None = None,
+        platform_actions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         agent_output = self._parse_runner_output(steps)
         tool_calls = tool_calls if tool_calls is not None else self._load_tool_calls(report_dir)
+        platform_actions = platform_actions if platform_actions is not None else self._load_platform_actions(report_dir)
         return {
             "task": task.model_dump(mode="json"),
             "agent_output": agent_output.model_dump(mode="json") if agent_output else None,
             "execution": {
                 "runtime_steps": [self._step_record(step) for step in steps],
                 "tool_calls": tool_calls,
+                "platform_actions": platform_actions,
             },
             "verification": verification.model_dump(mode="json"),
-            "failure_classification": self.failure_analyzer.classify(steps, verification, tool_calls),
+            "failure_classification": self.failure_analyzer.classify(steps, verification, tool_calls, platform_actions),
         }
 
     def _parse_runner_output(self, steps: list[StepResult]) -> AgentFinalOutput | None:
@@ -150,6 +154,55 @@ class ReportGenerator:
             )
         return [call.model_dump(mode="json") for call in calls]
 
+    def _load_platform_actions(self, report_dir: Path) -> list[dict[str, Any]]:
+        events_path = report_dir / "events.jsonl"
+        if not events_path.exists():
+            return []
+
+        starts: list[dict[str, Any]] = []
+        actions: list[dict[str, Any]] = []
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = event.get("type")
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if event_type == "platform_action_started":
+                starts.append(event)
+                continue
+            if event_type not in {"platform_action_completed", "platform_action_failed"}:
+                continue
+            start = self._pop_platform_action_start(starts, payload.get("action_name"))
+            start_payload = start.get("payload") if isinstance(start.get("payload"), dict) else {}
+            actions.append(
+                {
+                    "action_name": payload.get("action_name") or start_payload.get("action_name") or "unknown",
+                    "status": "failed" if event_type == "platform_action_failed" else "completed",
+                    "started_sequence": start.get("sequence"),
+                    "completed_sequence": event.get("sequence"),
+                    "started_at": start.get("timestamp"),
+                    "completed_at": event.get("timestamp"),
+                    "arguments": start_payload.get("action_arguments"),
+                    "failure_category": payload.get("failure_category"),
+                    "evidence_refs": payload.get("evidence_refs") or [],
+                    "backend_debug_preview": payload.get("backend_debug_preview") or {},
+                    "error": event.get("message") if event_type == "platform_action_failed" else None,
+                    "duration_ms": event.get("duration_ms"),
+                }
+            )
+        return actions
+
+    def _pop_platform_action_start(self, starts: list[dict[str, Any]], action_name: Any) -> dict[str, Any]:
+        if action_name:
+            for index, start in enumerate(starts):
+                payload = start.get("payload") if isinstance(start.get("payload"), dict) else {}
+                if payload.get("action_name") == action_name:
+                    return starts.pop(index)
+        return starts.pop(0) if starts else {}
+
     def _pop_unpaired_start(self, starts: list[dict[str, Any]], event: dict[str, Any]) -> dict[str, Any]:
         event_tool = event.get("tool_name")
         if event_tool:
@@ -209,9 +262,10 @@ class ReportGenerator:
         steps: list[StepResult],
         verification: VerificationResult,
         tool_calls: list[dict[str, Any]] | None = None,
+        platform_actions: list[dict[str, Any]] | None = None,
     ) -> str:
         agent_output = self._parse_runner_output(steps)
-        failure_classification = self.failure_analyzer.classify(steps, verification, tool_calls or [])
+        failure_classification = self.failure_analyzer.classify(steps, verification, tool_calls or [], platform_actions or [])
         lines = [
             f"# Test Report: {task.name}",
             "",

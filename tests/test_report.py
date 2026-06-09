@@ -66,6 +66,7 @@ def test_report_generator_writes_markdown_and_json(tmp_path: Path) -> None:
     assert payload["agent_output"]["pre_plan"][0]["action"] == "Press Back"
     assert payload["execution"]["runtime_steps"][0]["source"] == "pre_plan"
     assert payload["execution"]["tool_calls"] == []
+    assert payload["execution"]["platform_actions"] == []
     assert artifact.evidence_manifest_path is not None
     assert artifact.evidence_manifest_path.exists()
 
@@ -120,6 +121,55 @@ def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> N
             "artifact_path": None,
             "error": None,
             "duration_ms": None,
+        }
+    ]
+
+
+def test_report_generator_summarizes_platform_actions_from_events(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-platform-events"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "platform_action_started",
+                        "sequence": 20,
+                        "timestamp": "2026-05-09T00:00:00Z",
+                        "payload": {"action_name": "android_tap", "action_arguments": {"target": "Login"}},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "platform_action_completed",
+                        "sequence": 21,
+                        "timestamp": "2026-05-09T00:00:01Z",
+                        "duration_ms": 42,
+                        "payload": {"action_name": "android_tap", "status": "success", "evidence_refs": ["screenshot://1"]},
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ReportGenerator(tmp_path).generate("run-platform-events", _task(), [], _verification())
+
+    payload = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    assert payload["execution"]["platform_actions"] == [
+        {
+            "action_name": "android_tap",
+            "status": "completed",
+            "started_sequence": 20,
+            "completed_sequence": 21,
+            "started_at": "2026-05-09T00:00:00Z",
+            "completed_at": "2026-05-09T00:00:01Z",
+            "arguments": {"target": "Login"},
+            "failure_category": None,
+            "evidence_refs": ["screenshot://1"],
+            "backend_debug_preview": {},
+            "error": None,
+            "duration_ms": 42,
         }
     ]
 

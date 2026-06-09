@@ -2,19 +2,19 @@
 
 ## Purpose
 
-Generate human-readable and machine-readable reports under the fsq-agent output directory from task results, typed agent final output, execution records, normalized real tool-call events, verification outcomes, satisfied/unmet criteria, and failure diagnostics.
+Generate human-readable and machine-readable reports under the fsq-agent output directory from task results, typed agent final output, execution records, normalized real tool-call events, harness/platform action events, verification outcomes, satisfied/unmet criteria, and failure diagnostics.
 
 ## Dependencies
 
-- `models`: Uses `Task`, `AgentFinalOutput`, `ToolCallRecord`, `StepResult`, `VerificationResult`, `ReportArtifact`, and `ReportGenerationError`.
+- `models`: Uses `Task`, `AgentFinalOutput`, `ToolCallRecord`, `PlatformActionResult`, `StepResult`, `VerificationResult`, `ReportArtifact`, and `ReportGenerationError`.
 
 ## Public Interface
 
 Current `__init__.py` exports via `__all__`:
 
 - `ReportGenerator`: Generates reports for completed task runs under the configured output runs directory.
-- `EvidenceBundler`: Creates a manifest for evidence references supplied by execution steps, including paths or snapshots produced by configured MCP/tools.
-- `FailureAnalyzer`: Classifies failures as success, tool usage error, semantic action unmet, execution issue, planning issue, verification issue, or a combined label when multiple rule-assisted signals are present.
+- `EvidenceBundler`: Creates a manifest for evidence references supplied by execution steps, including paths or snapshots produced by harness/platform actions or configured tools.
+- `FailureAnalyzer`: Classifies failures as success, platform action issue, tool usage error, semantic action unmet, execution issue, planning issue, verification issue, or a combined label when multiple rule-assisted signals are present.
 
 ## Internal Structure
 
@@ -32,7 +32,8 @@ If rich Markdown/JSON report generation fails after a task run, `ReportGenerator
 ## Design Decisions
 
 - Markdown and JSON reports are part of the design because they are easy to inspect in CI and IDEs.
-- JSON reports are structured by lifecycle concern: `task`, `agent_output`, `execution`, `verification`, and `failure_classification`. The `agent_output` section contains the typed `AgentFinalOutput` when available. The `execution.tool_calls` collection contains normalized `ToolCallRecord` values for real MCP/local/hosted/shell tool calls reconstructed from run events; step records use `source` for runtime/provenance labels rather than overloading it as a tool name. Failure classification may use both verification output and normalized real tool-call output previews so tool usage failures can be distinguished from planning failures.
+- JSON reports are structured by lifecycle concern: `task`, `agent_output`, `execution`, `verification`, and `failure_classification`. The `agent_output` section contains the typed `AgentFinalOutput` when available. The `execution.tool_calls` collection contains normalized `ToolCallRecord` values for real MCP/local/hosted/shell tool calls reconstructed from run events; `execution.platform_actions` contains harness/platform action records reconstructed from platform action events when present. Step records use `source` for runtime/provenance labels rather than overloading it as a tool name. Failure classification may use verification output, normalized real tool-call output previews, and normalized platform action failures so tool usage, platform action, and planning failures can be distinguished.
+- Reports should present harness and platform actions as the primary user-facing subject for platform automation. Backend operation details may appear only as bounded debug metadata and should not be treated as the public action contract.
 - Report artifacts are stored below `output.runs_dir/<run-id>` so installed CLI usage does not create report files in the caller's current directory.
 - HTML report generation is intentionally out of scope.
 - Failure analysis starts rule-assisted and can later include LLM-assisted explanations.
