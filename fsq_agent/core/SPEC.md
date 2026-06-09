@@ -89,6 +89,20 @@ In this model, `AndroidHarness` implements `HarnessInterface` and owns FSQ runne
 
 `AndroidDriverInterface` should represent lower-level Android primitives such as tap/click, text input, screenshot capture, UI tree capture, back, scroll, wait/stabilize, and backend-specific error exposure. This layer is closer to Midscene's low-level interface concept, while `HarnessInterface` remains the higher-level runner-facing harness contract.
 
+The first Android contract implementation should stay backend-free and expose only a small synchronous driver protocol:
+
+```python
+class AndroidDriverInterface(Protocol):
+    def context(self) -> dict[str, object]: ...
+    def tap(self, params: dict[str, object]) -> dict[str, object]: ...
+    def input_text(self, params: dict[str, object]) -> dict[str, object]: ...
+    def back(self) -> dict[str, object]: ...
+    def screenshot(self) -> bytes: ...
+    def ui_tree(self) -> dict[str, object]: ...
+```
+
+`AndroidHarness(driver=driver, artifact_store=store | None)` should satisfy `HarnessInterface`. Its first action dispatcher should support `tap`, `inputText`, and `back`. Screenshot and UI-tree capture should be available through `capture_artifact`; when an `ArtifactStore` is provided, screenshots and UI trees should be written to the standard artifact directories and returned as `HarnessArtifactRef` values. Unsupported actions should return a failed `HarnessActionResult` with `failure_category="configuration_error"` rather than calling the driver.
+
 ## Internal Structure
 
 Planned structure after the first implementation batch:
