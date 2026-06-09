@@ -27,14 +27,21 @@ spec-implementation-audit
 
 `sdd-init` is a project bootstrap skill, not a daily development workflow. It installs or updates the SDD workflow instructions for a repository.
 
-It supports two agent entry points:
+It installs a root project specification plus two thin agent entry points:
 
 ```text
-CLAUDE.md  # Claude / Claude Code project instructions
-AGENTS.md  # Codex / VS Code Codex durable repo instructions
+SPEC.md    # Project-level specification and module navigation source of truth
+CLAUDE.md  # Claude / Claude Code project instruction entry point
+AGENTS.md  # Codex / VS Code Codex durable repo instruction entry point
 ```
 
-It writes the same SDD hard gates into both files while preserving existing project guidance. If either file already has project-specific instructions, `sdd-init` should update only a clearly marked SDD workflow section. If existing instructions conflict with the SDD gates, it must stop and ask the user to choose the intended policy.
+Root `SPEC.md` is the project-level source of truth. It owns repository-wide architecture, module tables, dependency diagrams, and global development rules. Module-level `SPEC.md` files own module contracts.
+
+`CLAUDE.md` and `AGENTS.md` are not specifications. They are thin agent-readable entry points that instruct Claude and Codex to read root `SPEC.md` first, then the relevant module `SPEC.md` files.
+
+If a repository already has a `CLAUDE.md` containing project specification content and lacks root `SPEC.md`, `sdd-init` should migrate that specification content into root `SPEC.md`, then replace `CLAUDE.md` with a thin pointer. It should create or update `AGENTS.md` with the same thin pointer for Codex/VS Code.
+
+It writes SDD hard gates into root `SPEC.md`, not into the thin agent entry points. If existing `CLAUDE.md`, `AGENTS.md`, or root `SPEC.md` instructions conflict with the SDD gates, it must stop and ask the user to choose the intended policy.
 
 It also installs or updates the project skills:
 
@@ -77,6 +84,8 @@ It is based on the current project skill at `.github/skills/spec-driven/SKILL.md
 It should preserve these principles:
 
 - `SPEC.md` is the single source of truth for implementation.
+- Root `SPEC.md` is the project-level specification and navigation index.
+- Module `SPEC.md` files are the module-level contract specifications.
 - Implementation must not start until the relevant `SPEC.md` files are reviewed and confirmed.
 - Every module has one `SPEC.md` with a consistent structure.
 - Public symbols are exported only from module entry points such as `__init__.py`, using explicit public API declarations where applicable.
@@ -97,6 +106,7 @@ Once `SPEC.md` files are confirmed, implementation must use those `SPEC.md` file
 
 It should use a fresh reviewer or independent context whenever the platform supports it. The reviewer input is limited to:
 
+- Root `SPEC.md`.
 - Relevant module `SPEC.md` files.
 - The worktree diff or commit range being audited.
 - Minimal project navigation instructions needed to locate modules and public APIs.
@@ -130,7 +140,7 @@ Blocking gaps prevent completion claims. The implementation agent must fix the c
 
 ## Workflow Hard Gates
 
-The SDD workflow installed by `sdd-init` should state these gates in `CLAUDE.md` and `AGENTS.md`:
+The SDD workflow installed by `sdd-init` should state these gates in root `SPEC.md`:
 
 ```text
 For non-trivial development:
@@ -143,6 +153,8 @@ For non-trivial development:
 ```
 
 Bug fixes may use a shorter path only when they do not change public interfaces or intended module behavior. Even then, the agent must read the relevant `SPEC.md`, fix the issue, and verify that `SPEC.md` remains accurate.
+
+`CLAUDE.md` and `AGENTS.md` should remain thin pointers to root `SPEC.md`. They should not duplicate the project specification or SDD workflow details beyond the instruction to read root `SPEC.md` and relevant module specs.
 
 ## Superpowers Fusion
 
@@ -177,13 +189,14 @@ docs/superpowers/specs/
 It still needs, if this design is implemented here:
 
 ```text
+SPEC.md
 AGENTS.md
 .github/skills/sdd-init/SKILL.md
 .github/skills/requirements-to-design/SKILL.md
 .github/skills/spec-implementation-audit/SKILL.md
 ```
 
-The existing `spec-driven` skill should be enhanced and generalized rather than replaced wholesale.
+The current `CLAUDE.md` content should be migrated into root `SPEC.md`. After migration, `CLAUDE.md` should become a thin Claude entry point that directs agents to root `SPEC.md`; `AGENTS.md` should do the same for Codex/VS Code. The existing `spec-driven` skill should be enhanced and generalized rather than replaced wholesale.
 
 ## Success Criteria
 
@@ -194,7 +207,7 @@ idea
   -> requirements-to-design
   -> design document
   -> spec-driven
-  -> confirmed SPEC.md
+  -> confirmed root/module SPEC.md
   -> implementation
   -> spec-implementation-audit
   -> completion only if audit passes
