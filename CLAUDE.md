@@ -23,6 +23,7 @@ This repository uses spec-driven development. Implementation must not start unti
 ```mermaid
 flowchart TD
     CLI[cli] --> Agent[agent]
+    CLI --> Core[core]
     CLI --> FSQ[fsq]
     Agent --> Core[core]
     Agent --> Config[config]
