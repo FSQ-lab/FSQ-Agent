@@ -72,6 +72,17 @@ class InvokeFailureHarness(SuccessfulHarness):
         return "action_error"
 
 
+class FailedResultHarness(SuccessfulHarness):
+    def invoke_action(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
+        self.calls.append(f"invoke:{step.action_name}:{context.session_id}")
+        return HarnessActionResult(
+            status="failed",
+            action_name=step.action_name,
+            failure_category="target_resolution_error",
+            error_message="target not found",
+        )
+
+
 def _tap_step() -> ExecutableStep:
     return ExecutableStep(
         step_id="step-1",
@@ -134,3 +145,16 @@ def test_step_runner_wraps_invoke_exception_and_still_finalizes() -> None:
     ]
     assert "step_error" in [event.event_type for event in runner.events]
     assert runner.events[-1].event_type == "step_finish"
+
+
+def test_step_runner_preserves_failed_harness_action_result() -> None:
+    harness = FailedResultHarness()
+    runner = StepRunner(harness=harness)
+
+    result = runner.run_step(run_id="run-1", step=_tap_step())
+
+    assert result.status == "failed"
+    assert result.failure_category == "target_resolution_error"
+    assert result.error_message == "target not found"
+    assert [phase.status for phase in result.phase_reports] == ["passed", "failed", "passed"]
+    assert "step_error" in [event.event_type for event in runner.events]

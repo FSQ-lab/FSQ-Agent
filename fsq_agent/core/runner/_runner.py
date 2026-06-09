@@ -41,6 +41,10 @@ class StepRunner:
         try:
             action_result = self.harness.invoke_action(step, context)
             self._emit(run_id=run_id, event_type="harness_call_finish", step=step, phase="invoke")
+            if action_result.status in {"failed", "cancelled", "skipped"}:
+                failure_category = action_result.failure_category
+                error_message = action_result.error_message
+                self._emit(run_id=run_id, event_type="step_error", step=step, phase="invoke")
             phase_reports.append(StepPhaseReport(step_id=step.step_id, phase="invoke", status=action_result.status))
         except Exception as exc:  # noqa: BLE001 - runner converts phase exceptions into structured results.
             failure_category = self.harness.classify_error(exc, "invoke", step)
@@ -67,7 +71,7 @@ class StepRunner:
         return RunnerStepResult(
             step_id=step.step_id,
             source_ref=step.source_ref,
-            status="failed" if failure_category else "passed",
+            status=action_result.status if action_result and action_result.status in {"failed", "cancelled", "skipped"} else "failed" if failure_category else "passed",
             duration_ms=self._duration_ms(started),
             phase_reports=phase_reports,
             max_attempts=step.retry_policy.max_attempts,

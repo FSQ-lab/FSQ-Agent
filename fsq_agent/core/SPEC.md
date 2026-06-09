@@ -18,6 +18,7 @@ Planned `__init__.py` exports via `__all__`:
 
 - `HarnessInterface`: Protocol describing platform capabilities required by StepRunner. Concrete Android, Web, iOS, and fake harnesses may satisfy the protocol structurally.
 - `StepRunner`: Minimal synchronous runner that executes one `ExecutableStep` through the `prepare`, `invoke`, and `finalize` phases using a supplied `HarnessInterface`.
+- `StepSequenceRunner`: Minimal synchronous runner that executes an ordered list of `ExecutableStep` records with `StepRunner`, records events and step results, and builds an `EvidenceBundle` through `EvidenceRecorder`.
 - `EvidenceRecorder`: Event/result sink that builds an `EvidenceBundle` and writes a JSON manifest for execution facts and artifact references.
 - `ArtifactStore`: Evidence artifact path policy and writer for run-local screenshots, UI trees, harness-call JSON, logs, and raw files.
 
@@ -36,6 +37,23 @@ events = runner.events
 ```
 
 `StepRunner` accepts any object satisfying `HarnessInterface`. Entry-layer code and future factories are responsible for constructing platform-specific harnesses such as Android, Web, iOS, or fake harnesses.
+
+The first sequence runner implementation exposes a narrow synchronous API:
+
+```python
+runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+result = runner.run_steps(run_id="run-1", steps=executable_steps)
+```
+
+`StepSequenceRunner` accepts only shared `ExecutableStep` records and must not import `fsq`, parse YAML, construct platform drivers, or generate reports. Its first behavior is intentionally small:
+
+- Run steps in list order by delegating each step to `StepRunner.run_step`.
+- Record every event emitted by each `StepRunner` into the supplied `EvidenceRecorder`.
+- Record every `RunnerStepResult` into the supplied `EvidenceRecorder`.
+- Stop on the first step whose result status is `failed`, `cancelled`, or `skipped`.
+- Build and return the current `EvidenceBundle` after execution stops or all steps pass.
+
+The first sequence runner does not implement retry, timeout enforcement, optional/non-blocking semantics, automatic screenshot capture, CLI integration, report generation, or platform-driver construction. Those are later batches and should reuse the same shared events and evidence bundle contracts.
 
 The first evidence implementation exposes a narrow API:
 
@@ -153,6 +171,7 @@ Planned structure after the first implementation batch:
 - `__init__.py`: Public exports only.
 - `runner/__init__.py`: Runner subpackage exports only.
 - `runner/_runner.py`: `StepRunner` implementation for the minimal single-step protocol.
+- `runner/_sequence.py`: `StepSequenceRunner` implementation for ordered `ExecutableStep` execution and evidence recording.
 - `harness/__init__.py`: Harness subpackage exports only.
 - `harness/_interface.py`: `HarnessInterface` protocol.
 - `harness/_android.py`: Future FSQ built-in `AndroidHarness` implementation that satisfies `HarnessInterface`.
