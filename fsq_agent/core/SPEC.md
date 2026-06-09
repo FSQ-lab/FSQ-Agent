@@ -19,12 +19,13 @@ Planned `__init__.py` exports via `__all__`:
 - `HarnessInterface`: Protocol describing platform capabilities required by StepRunner. Concrete Android, Web, iOS, and fake harnesses may satisfy the protocol structurally.
 - `StepRunner`: Minimal synchronous runner that executes one `ExecutableStep` through the `prepare`, `invoke`, and `finalize` phases using a supplied `HarnessInterface`.
 - `EvidenceRecorder`: Event/result sink that builds an `EvidenceBundle` and writes a JSON manifest for execution facts and artifact references.
+- `ArtifactStore`: Evidence artifact path policy and writer for run-local screenshots, UI trees, harness-call JSON, logs, and raw files.
 
 Planned subpackage exports:
 
 - `fsq_agent.core.runner`: Home for `StepRunner` and runner orchestration helpers. It imports shared runner models from `fsq_agent.models` rather than defining cross-module data models locally.
 - `fsq_agent.core.harness`: Home for `HarnessInterface` and future harness-neutral helper code. It imports shared harness models from `fsq_agent.models`.
-- `fsq_agent.core.evidence`: Home for `EvidenceRecorder` and evidence coordination logic. It imports evidence bundle and artifact models from `fsq_agent.models`.
+- `fsq_agent.core.evidence`: Home for `EvidenceRecorder`, `ArtifactStore`, and evidence coordination logic. It imports evidence bundle and artifact models from `fsq_agent.models`.
 
 The first runner implementation exposes a narrow synchronous API:
 
@@ -47,6 +48,30 @@ manifest_path = recorder.write_manifest()
 ```
 
 `EvidenceRecorder` stores historical execution facts. It must not execute actions, retry steps, classify case success, or know platform-specific driver behavior. Manifest writing should serialize model-owned contracts with `model_dump(mode="json")` and write below the caller-provided output directory.
+
+The first artifact-store implementation exposes a narrow API:
+
+```python
+store = ArtifactStore(run_dir=Path("runs/run-1"))
+ref = store.write_json(kind="ui_tree", step_id="step-1", phase="finalize", name="ui-tree", payload=ui_tree)
+ref = store.write_text(kind="log", step_id="step-1", phase="invoke", name="driver", text=log_text)
+ref = store.write_bytes(kind="screenshot", step_id="step-1", phase="finalize", name="screen", data=image_bytes)
+```
+
+`ArtifactStore` owns directory policy and filename normalization. It should create this run-local structure as needed:
+
+```text
+<run_dir>/
+  evidence-manifest.json
+  artifacts/
+    screenshots/
+    ui-trees/
+    harness-calls/
+    logs/
+    raw/
+```
+
+Artifact refs returned by `ArtifactStore` should use paths relative to `run_dir`, for example `artifacts/screenshots/step-1-finalize-screen.png`. This keeps `EvidenceBundle` portable when a run directory is moved. `EvidenceRecorder` should consume these refs; it should not decide artifact subdirectories or write screenshot/UI-tree/log files itself.
 
 Future Android platform support should use a two-layer extension model:
 
@@ -77,6 +102,7 @@ Planned structure after the first implementation batch:
 - `harness/_android_driver.py`: Future `AndroidDriverInterface` protocol and driver-owned primitive contracts.
 - `evidence/__init__.py`: Evidence subpackage exports only.
 - `evidence/_recorder.py`: `EvidenceRecorder` implementation.
+- `evidence/_artifact_store.py`: `ArtifactStore` implementation for run-local artifact paths and file writing.
 - `SPEC.md`: Module design.
 
 The core module must not define Pydantic models that are shared across modules. Shared models belong in `fsq_agent.models` according to the project guide.
@@ -104,5 +130,7 @@ Runner phases should preserve failure boundaries:
 - Direct custom `HarnessInterface` implementations should remain possible for advanced platform plugins, but they are not the preferred ordinary Android backend extension point.
 - `EvidenceRecorder` should consume shared runner events and result facts. It should not execute actions, retry steps, or decide case success.
 - The first `EvidenceRecorder` writes one manifest file and references artifact paths supplied by events/results. It does not copy binary artifacts or generate reports.
+- `ArtifactStore` owns evidence directory layout and artifact file writing. Harnesses, drivers, and future evidence policies should ask `ArtifactStore` for artifact refs instead of constructing paths manually.
+- Artifact paths in model refs should be relative to the run directory unless a later external storage backend requires URI-style refs.
 - Concrete Android/Web/iOS harness implementations are out of scope for the first contract batch and must not be placed in `core`.
 - CLI, report generation, verifier behavior, planner repair, and FSQ StepBuilder integration are later batches.
