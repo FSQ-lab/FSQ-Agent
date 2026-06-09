@@ -2,7 +2,7 @@
 
 fsq-agent is a goal-driven automated testing agent for FSQ YAML-guided tasks. It uses OpenAI Agents SDK with Azure OpenAI, executes MCP or CLI capabilities, captures evidence, verifies acceptance criteria, and generates reports.
 
-The project follows spec-driven development. See [CLAUDE.md](CLAUDE.md) and each module `SPEC.md` before changing public interfaces.
+The project follows spec-driven development. See root [SPEC.md](SPEC.md) and each relevant module `SPEC.md` before changing public interfaces.
 
 See [docs/openai-agent-loop.md](docs/openai-agent-loop.md) for how task execution loops through OpenAI Agents SDK, MCP tools, verification, and reporting.
 
