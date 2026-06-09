@@ -18,12 +18,13 @@ Planned `__init__.py` exports via `__all__`:
 
 - `HarnessInterface`: Protocol describing platform capabilities required by StepRunner. Concrete Android, Web, iOS, and fake harnesses may satisfy the protocol structurally.
 - `StepRunner`: Minimal synchronous runner that executes one `ExecutableStep` through the `prepare`, `invoke`, and `finalize` phases using a supplied `HarnessInterface`.
+- `EvidenceRecorder`: Event/result sink that builds an `EvidenceBundle` and writes a JSON manifest for execution facts and artifact references.
 
 Planned subpackage exports:
 
 - `fsq_agent.core.runner`: Home for `StepRunner` and runner orchestration helpers. It imports shared runner models from `fsq_agent.models` rather than defining cross-module data models locally.
 - `fsq_agent.core.harness`: Home for `HarnessInterface` and future harness-neutral helper code. It imports shared harness models from `fsq_agent.models`.
-- `fsq_agent.core.evidence`: Future home for `EvidenceRecorder` and evidence coordination logic. It imports evidence bundle and artifact models from `fsq_agent.models`.
+- `fsq_agent.core.evidence`: Home for `EvidenceRecorder` and evidence coordination logic. It imports evidence bundle and artifact models from `fsq_agent.models`.
 
 The first runner implementation exposes a narrow synchronous API:
 
@@ -34,6 +35,18 @@ events = runner.events
 ```
 
 `StepRunner` accepts any object satisfying `HarnessInterface`. Entry-layer code and future factories are responsible for constructing platform-specific harnesses such as Android, Web, iOS, or fake harnesses.
+
+The first evidence implementation exposes a narrow API:
+
+```python
+recorder = EvidenceRecorder(run_id="run-1", output_dir=run_dir)
+recorder.record_event(event)
+recorder.record_step_result(result)
+bundle = recorder.build_bundle()
+manifest_path = recorder.write_manifest()
+```
+
+`EvidenceRecorder` stores historical execution facts. It must not execute actions, retry steps, classify case success, or know platform-specific driver behavior. Manifest writing should serialize model-owned contracts with `model_dump(mode="json")` and write below the caller-provided output directory.
 
 Future Android platform support should use a two-layer extension model:
 
@@ -63,7 +76,7 @@ Planned structure after the first implementation batch:
 - `harness/_android.py`: Future FSQ built-in `AndroidHarness` implementation that satisfies `HarnessInterface`.
 - `harness/_android_driver.py`: Future `AndroidDriverInterface` protocol and driver-owned primitive contracts.
 - `evidence/__init__.py`: Evidence subpackage exports only.
-- `evidence/_recorder.py`: Future `EvidenceRecorder` implementation.
+- `evidence/_recorder.py`: `EvidenceRecorder` implementation.
 - `SPEC.md`: Module design.
 
 The core module must not define Pydantic models that are shared across modules. Shared models belong in `fsq_agent.models` according to the project guide.
@@ -90,5 +103,6 @@ Runner phases should preserve failure boundaries:
 - FSQ should provide a built-in `AndroidHarness` for Android execution semantics. Extension users who want uiautomator2, Appium, MCP, or another backend should usually implement `AndroidDriverInterface`, not a full custom `HarnessInterface`.
 - Direct custom `HarnessInterface` implementations should remain possible for advanced platform plugins, but they are not the preferred ordinary Android backend extension point.
 - `EvidenceRecorder` should consume shared runner events and result facts. It should not execute actions, retry steps, or decide case success.
+- The first `EvidenceRecorder` writes one manifest file and references artifact paths supplied by events/results. It does not copy binary artifacts or generate reports.
 - Concrete Android/Web/iOS harness implementations are out of scope for the first contract batch and must not be placed in `core`.
 - CLI, report generation, verifier behavior, planner repair, and FSQ StepBuilder integration are later batches.
