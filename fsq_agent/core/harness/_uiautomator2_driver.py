@@ -1,0 +1,222 @@
+from typing import Any
+
+from fsq_agent.models import ConfigurationError
+
+
+class UiAutomator2AndroidDriver:
+    def __init__(self, *, app_id: str, serial: str | None = None, device: object | None = None) -> None:
+        self.app_id = app_id
+        self.serial = serial
+        self.device = device if device is not None else self._connect(serial)
+
+    def context(self) -> dict[str, object]:
+        info = self._device_info()
+        width = info.get("displayWidth")
+        height = info.get("displayHeight")
+        return {
+            "session_id": f"uiautomator2:{self.serial or 'fake-device'}",
+            "current_activity": self._current_activity(),
+            "screen_size": (width, height) if isinstance(width, int) and isinstance(height, int) else None,
+            "metadata": {
+                "backend": "uiautomator2",
+                "current_package": info.get("currentPackageName"),
+            },
+        }
+
+    def launch_app(self, params: dict[str, object]) -> dict[str, object]:
+        options = {key: value for key, value in params.items() if key != "app_id"}
+        self.device.app_start(str(params.get("app_id") or self.app_id), **options)
+        return self._passed({"app_id": str(params.get("app_id") or self.app_id)})
+
+    def kill_app(self, params: dict[str, object]) -> dict[str, object]:
+        self.device.app_stop(str(params.get("app_id") or self.app_id))
+        return self._passed({"app_id": str(params.get("app_id") or self.app_id)})
+
+    def tap_on(self, params: dict[str, object]) -> dict[str, object]:
+        selector = self._selector(params)
+        if not self._exists(selector):
+            return self._target_missing(params)
+        selector.click()
+        return self._passed()
+
+    def long_press_on(self, params: dict[str, object]) -> dict[str, object]:
+        selector = self._selector(params)
+        if not self._exists(selector):
+            return self._target_missing(params)
+        selector.long_click()
+        return self._passed()
+
+    def input_text(self, params: dict[str, object]) -> dict[str, object]:
+        text = params.get("text")
+        if not isinstance(text, str):
+            return self._configuration_error("inputText requires a string text parameter.")
+        selector = self._selector(params)
+        if not self._exists(selector):
+            return self._target_missing(params)
+        selector.set_text(text)
+        return self._passed()
+
+    def press_key(self, params: dict[str, object]) -> dict[str, object]:
+        key = params.get("key") or params.get("value")
+        if not isinstance(key, str) or not key.strip():
+            return self._configuration_error("pressKey requires a key parameter.")
+        self.device.press(key.strip().lower())
+        return self._passed({"key": key.strip()})
+
+    def swipe(self, params: dict[str, object]) -> dict[str, object]:
+        direction = params.get("direction")
+        if not isinstance(direction, str):
+            return self._configuration_error("swipe requires a direction parameter.")
+        width, height = self._screen_size()
+        duration_ms = params.get("duration") if isinstance(params.get("duration"), int) else 200
+        duration = max(duration_ms, 1) / 1000
+        sx, sy, ex, ey = self._swipe_points(direction, width, height)
+        self.device.swipe(sx, sy, ex, ey, duration)
+        return self._passed({"direction": direction})
+
+    def perform_actions(self, params: dict[str, object]) -> dict[str, object]:
+        return self._configuration_error("performActions is not implemented for the uiautomator2 backend yet.")
+
+    def assert_visible(self, params: dict[str, object]) -> dict[str, object]:
+        selector = self._selector(params)
+        if self._exists(selector):
+            return self._passed()
+        return self._target_missing(params)
+
+    def assert_not_visible(self, params: dict[str, object]) -> dict[str, object]:
+        selector = self._selector(params)
+        if not self._exists(selector):
+            return self._passed()
+        return self._failed("assertion_error", "Target is visible.")
+
+    def assert_state(self, params: dict[str, object]) -> dict[str, object]:
+        selector = self._selector(params, locator_key="element")
+        if not self._exists(selector):
+            return self._target_missing(params)
+        expected = params.get("text")
+        if not isinstance(expected, dict):
+            return self._configuration_error("assert requires a text assertion object.")
+        actual = selector.get_text()
+        contains = expected.get("contains")
+        if isinstance(contains, str) and contains in actual:
+            return self._passed({"text": actual})
+        equals = expected.get("equals")
+        if isinstance(equals, str) and equals == actual:
+            return self._passed({"text": actual})
+        return self._failed("assertion_error", "Text assertion failed.", output={"text": actual})
+
+    def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
+        return self._configuration_error("assertWithAI is not implemented for the uiautomator2 backend yet.")
+
+    def screenshot(self) -> bytes:
+        image = self.device.screenshot(format="raw")
+        if isinstance(image, bytes):
+            return image
+        if isinstance(image, bytearray):
+            return bytes(image)
+        raise RuntimeError("uiautomator2 screenshot did not return bytes.")
+
+    def ui_tree(self) -> dict[str, object]:
+        return {"xml": self.device.dump_hierarchy()}
+
+    def _connect(self, serial: str | None) -> object:
+        try:
+            import uiautomator2 as u2
+        except ImportError as exc:
+            raise ConfigurationError(
+                "uiautomator2 is required for UiAutomator2AndroidDriver.",
+                context={"install": "pip install fsq-agent[android]"},
+            ) from exc
+        return u2.connect(serial)
+
+    def _selector(self, params: dict[str, object], *, locator_key: str = "locator") -> object:
+        locator = params.get(locator_key)
+        if not isinstance(locator, dict):
+            locator = params.get("locator")
+        if isinstance(locator, dict):
+            if isinstance(locator.get("xpath"), str):
+                return self.device.xpath(locator["xpath"])
+            query = self._selector_query(locator)
+            if query:
+                return self.device(**query)
+        fallback = params.get("target") or params.get("value")
+        if isinstance(fallback, str) and fallback.strip():
+            return self.device(text=fallback.strip())
+        return self.device(**{})
+
+    def _selector_query(self, locator: dict[str, object]) -> dict[str, object]:
+        query: dict[str, object] = {}
+        if isinstance(locator.get("resourceId"), str):
+            query["resourceId"] = locator["resourceId"]
+        if isinstance(locator.get("accessibilityId"), str):
+            query["description"] = locator["accessibilityId"]
+        if isinstance(locator.get("text"), str):
+            query["text"] = locator["text"]
+        if isinstance(locator.get("className"), str):
+            query["className"] = locator["className"]
+        return query
+
+    def _exists(self, selector: object) -> bool:
+        exists = getattr(selector, "exists", False)
+        return bool(exists() if callable(exists) else exists)
+
+    def _device_info(self) -> dict[str, object]:
+        info = getattr(self.device, "info", {})
+        return info if isinstance(info, dict) else {}
+
+    def _current_activity(self) -> str | None:
+        app_current = getattr(self.device, "app_current", None)
+        if not callable(app_current):
+            return None
+        current = app_current()
+        if not isinstance(current, dict):
+            return None
+        activity = current.get("activity")
+        return activity if isinstance(activity, str) else None
+
+    def _screen_size(self) -> tuple[int, int]:
+        info = self._device_info()
+        width = info.get("displayWidth")
+        height = info.get("displayHeight")
+        if isinstance(width, int) and isinstance(height, int):
+            return width, height
+        return 1080, 1920
+
+    def _swipe_points(self, direction: str, width: int, height: int) -> tuple[int, int, int, int]:
+        normalized = direction.strip().lower()
+        mid_x = width // 2
+        mid_y = height // 2
+        if normalized == "up":
+            return mid_x, int(height * 0.75), mid_x, int(height * 0.25)
+        if normalized == "down":
+            return mid_x, int(height * 0.25), mid_x, int(height * 0.75)
+        if normalized == "left":
+            return int(width * 0.75), mid_y, int(width * 0.25), mid_y
+        if normalized == "right":
+            return int(width * 0.25), mid_y, int(width * 0.75), mid_y
+        return mid_x, int(height * 0.75), mid_x, int(height * 0.25)
+
+    def _target_missing(self, params: dict[str, object]) -> dict[str, object]:
+        return self._failed("target_resolution_error", "Target was not found.", metadata={"params": params})
+
+    def _configuration_error(self, message: str) -> dict[str, object]:
+        return self._failed("configuration_error", message)
+
+    def _passed(self, output: object | None = None) -> dict[str, object]:
+        return {"status": "passed", "output": output}
+
+    def _failed(
+        self,
+        failure_category: str,
+        error_message: str,
+        *,
+        output: object | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "status": "failed",
+            "failure_category": failure_category,
+            "error_message": error_message,
+            "output": output,
+            "metadata": metadata or {},
+        }

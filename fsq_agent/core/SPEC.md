@@ -21,6 +21,7 @@ Planned `__init__.py` exports via `__all__`:
 - `StepSequenceRunner`: Minimal synchronous runner that executes an ordered list of `ExecutableStep` records with `StepRunner`, records events and step results, and builds an `EvidenceBundle` through `EvidenceRecorder`.
 - `EvidenceRecorder`: Event/result sink that builds an `EvidenceBundle` and writes a JSON manifest for execution facts and artifact references.
 - `ArtifactStore`: Evidence artifact path policy and writer for run-local screenshots, UI trees, harness-call JSON, logs, and raw files.
+- `UiAutomator2AndroidDriver`: Optional Android backend driver that satisfies `AndroidDriverInterface` using uiautomator2 when the `android` extra is installed.
 
 Planned subpackage exports:
 
@@ -174,6 +175,30 @@ The phase-1 dispatch table is:
 
 `AndroidHarness(driver=driver, artifact_store=store | None)` should satisfy `HarnessInterface`. Its first action dispatcher should support exactly the phase-1 FSQ action names above. Screenshot and UI-tree capture should be available through `capture_artifact`; when an `ArtifactStore` is provided, screenshots and UI trees should be written to the standard artifact directories and returned as `HarnessArtifactRef` values. `capture_artifact` must receive FSQ-owned evidence metadata such as `step_id` and `phase` from the caller and must not infer those values from Android session context. Unsupported actions from the complete command set should return a failed `HarnessActionResult` with `failure_category="configuration_error"` rather than calling the driver until their driver methods are specified and implemented.
 
+The first concrete backend implementation is `UiAutomator2AndroidDriver`. It should satisfy `AndroidDriverInterface` and remain narrower than `AndroidHarness`:
+
+```python
+driver = UiAutomator2AndroidDriver(app_id="com.microsoft.emmx", serial="device-1")
+driver = UiAutomator2AndroidDriver(app_id="com.microsoft.emmx", device=fake_device)
+```
+
+`device` injection is required for unit tests and local backend adapters that already own a uiautomator2 device object. If `device` is omitted, the driver imports `uiautomator2` lazily and calls `uiautomator2.connect(serial)`. Missing `uiautomator2` must raise `ConfigurationError` with installation guidance for the optional `android` extra rather than failing at package import time.
+
+The phase-1 `UiAutomator2AndroidDriver` should implement only the existing `AndroidDriverInterface` methods. It may translate FSQ locator payloads to uiautomator2 selectors using these first rules:
+
+| FSQ locator field | uiautomator2 selector behavior |
+|---|---|
+| `resourceId` | `device(resourceId=value)` |
+| `accessibilityId` | `device(description=value)` |
+| `text` | `device(text=value)` |
+| `className` | `device(className=value)` |
+| `xpath` | `device.xpath(value)` |
+| missing locator with `target` or scalar `value` | text selector fallback |
+
+Backend methods should return driver output dictionaries that `AndroidHarness` can convert into `HarnessActionResult`. Target lookup failures should return `status="failed"`, `failure_category="target_resolution_error"`, and a concise error message. Unsupported or underspecified backend operations should return `status="failed"` with `failure_category="configuration_error"`. The driver should not raise for ordinary target/assertion misses, decide retry policy, write artifacts, emit runner events, or aggregate case results.
+
+`assert_with_ai` remains a placeholder backend assertion in phase 1. It should return a failed configuration result explaining that AI visual assertion is not implemented in the uiautomator2 backend yet; later visual-verification work should consume screenshots through FSQ-owned evidence and verification layers.
+
 ## Internal Structure
 
 Planned structure after the first implementation batch:
@@ -186,6 +211,7 @@ Planned structure after the first implementation batch:
 - `harness/_interface.py`: `HarnessInterface` protocol.
 - `harness/_android.py`: Future FSQ built-in `AndroidHarness` implementation that satisfies `HarnessInterface`.
 - `harness/_android_driver.py`: Future `AndroidDriverInterface` protocol and driver-owned primitive contracts.
+- `harness/_uiautomator2_driver.py`: Optional uiautomator2 backend implementation of `AndroidDriverInterface` with lazy dependency import and fake-device injection for tests.
 - `evidence/__init__.py`: Evidence subpackage exports only.
 - `evidence/_recorder.py`: `EvidenceRecorder` implementation.
 - `evidence/_artifact_store.py`: `ArtifactStore` implementation for run-local artifact paths and file writing.
