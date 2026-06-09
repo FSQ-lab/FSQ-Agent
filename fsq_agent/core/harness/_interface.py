@@ -32,9 +32,15 @@ class HarnessInterface(Protocol):
     ) -> None:
         ...
 
-    def capture_artifact(self, kind: str, reason: str, context: HarnessContext) -> HarnessArtifactRef:
+    def capture_artifact(
+        self,
+        kind: str,
+        reason: str,
+        context: HarnessContext,
+        step_id: str,
+        phase: StepPhase,
+    ) -> HarnessArtifactRef:
         ...
 
     def classify_error(self, error: BaseException, phase: StepPhase, step: ExecutableStep) -> FailureCategory:
         ...
-

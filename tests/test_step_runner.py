@@ -39,8 +39,15 @@ class SuccessfulHarness:
         status = action_result.status if action_result else "none"
         self.calls.append(f"after:{step.action_name}:{status}")
 
-    def capture_artifact(self, kind: str, reason: str, context: HarnessContext) -> HarnessArtifactRef:
-        return HarnessArtifactRef(artifact_id=f"{kind}-1", kind="log", path=Path(f"runs/run-1/{reason}.log"))
+    def capture_artifact(
+        self,
+        kind: str,
+        reason: str,
+        context: HarnessContext,
+        step_id: str,
+        phase: StepPhase,
+    ) -> HarnessArtifactRef:
+        return HarnessArtifactRef(artifact_id=f"{kind}-1", kind="log", path=Path(f"runs/run-1/{step_id}-{phase}-{reason}.log"))
 
     def classify_error(self, error: BaseException, phase: StepPhase, step: ExecutableStep) -> FailureCategory:
         return "unknown"

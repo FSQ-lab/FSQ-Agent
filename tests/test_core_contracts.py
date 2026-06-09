@@ -55,8 +55,10 @@ def test_fake_harness_satisfies_runtime_protocol() -> None:
             kind: str,
             reason: str,
             context: HarnessContext,
+            step_id: str,
+            phase: str,
         ) -> HarnessArtifactRef:
-            return HarnessArtifactRef(artifact_id=f"{kind}-1", kind="log", path=Path(f"runs/run-1/{reason}.log"))
+            return HarnessArtifactRef(artifact_id=f"{kind}-1", kind="log", path=Path(f"runs/run-1/{step_id}-{phase}-{reason}.log"))
 
         def classify_error(self, error: BaseException, phase: str, step: ExecutableStep) -> str:
             return "unknown"

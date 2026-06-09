@@ -87,21 +87,64 @@ StepRunner
 
 In this model, `AndroidHarness` implements `HarnessInterface` and owns FSQ runner-facing behavior: action dispatch from `ExecutableStep.action_name`, conversion to `HarnessActionResult`, context shaping, artifact refs, evidence policy entry points, and failure category mapping. Users who want to replace the underlying automation backend should implement `AndroidDriverInterface` instead of reimplementing `HarnessInterface` directly.
 
-`AndroidDriverInterface` should represent lower-level Android primitives such as tap/click, text input, screenshot capture, UI tree capture, back, scroll, wait/stabilize, and backend-specific error exposure. This layer is closer to Midscene's low-level interface concept, while `HarnessInterface` remains the higher-level runner-facing harness contract.
+Platform harnesses are FSQ-controlled adapters, not independent platform runners. The execution protocol must stay platform-neutral and owned by FSQ: `StepRunner` controls `prepare -> invoke -> finalize`, emits `RunnerEvent` records, and provides the event/result stream consumed by `EvidenceRecorder`. Platform harnesses may translate FSQ actions into backend driver calls and shape platform context, but they must not own retry policy, event emission, evidence manifest structure, artifact directory policy, case result aggregation, or report generation.
 
-The first Android contract implementation should stay backend-free and expose only a small synchronous driver protocol:
+Driver interfaces are thinner than harnesses. A driver implementation may execute backend actions and return raw platform observations such as screenshots, UI trees, logs, window/app state, or driver call metadata. It must not decide when artifacts are captured, where artifacts are stored, how evidence bundles are structured, or how runner phases are ordered. Those decisions remain in FSQ-owned runner, harness, evidence, and artifact-store code so Android, iOS, desktop, web, and future platforms produce consistent execution history and replayable evidence.
+
+`AndroidDriverInterface` should be aligned with the FSQ AI Test DSL command vocabulary instead of exposing unrelated low-level primitive names. `AndroidHarness` dispatches from `ExecutableStep.action_name` using the original FSQ command name, while the Python driver protocol uses the corresponding snake_case method name. This keeps testcase actions, harness dispatch, and backend implementation visually traceable, while still allowing Appium, uiautomator2, MCP, or user drivers to implement the actual platform mechanics differently.
+
+The complete FSQ AI Test DSL command set recognized by the Android harness design is:
+
+```text
+launchApp, stopApp, killApp, clearState, setPermissions,
+tapOn, doubleTapOn, longPressOn, rightClickOn, hoverOn,
+inputText, clearText, pressKey, swipe, scrollUntilVisible, scroll,
+assertVisible, assertNotVisible, assert, assertWithAI,
+waitUntil, waitForAnimationToEnd,
+performActions, releaseActions, executeMethod,
+runFlow, repeat, retry,
+takeScreenshot, startRecording, stopRecording
+```
+
+The first Android contract implementation is limited to the commands currently used by the Android FSQ testcase corpus. The phase-1 driver protocol is synchronous and backend-free:
 
 ```python
 class AndroidDriverInterface(Protocol):
     def context(self) -> dict[str, object]: ...
-    def tap(self, params: dict[str, object]) -> dict[str, object]: ...
+    def launch_app(self, params: dict[str, object]) -> dict[str, object]: ...
+    def kill_app(self, params: dict[str, object]) -> dict[str, object]: ...
+    def tap_on(self, params: dict[str, object]) -> dict[str, object]: ...
+    def long_press_on(self, params: dict[str, object]) -> dict[str, object]: ...
     def input_text(self, params: dict[str, object]) -> dict[str, object]: ...
-    def back(self) -> dict[str, object]: ...
+    def press_key(self, params: dict[str, object]) -> dict[str, object]: ...
+    def swipe(self, params: dict[str, object]) -> dict[str, object]: ...
+    def perform_actions(self, params: dict[str, object]) -> dict[str, object]: ...
+    def assert_visible(self, params: dict[str, object]) -> dict[str, object]: ...
+    def assert_not_visible(self, params: dict[str, object]) -> dict[str, object]: ...
+    def assert_state(self, params: dict[str, object]) -> dict[str, object]: ...
+    def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]: ...
     def screenshot(self) -> bytes: ...
     def ui_tree(self) -> dict[str, object]: ...
 ```
 
-`AndroidHarness(driver=driver, artifact_store=store | None)` should satisfy `HarnessInterface`. Its first action dispatcher should support `tap`, `inputText`, and `back`. Screenshot and UI-tree capture should be available through `capture_artifact`; when an `ArtifactStore` is provided, screenshots and UI trees should be written to the standard artifact directories and returned as `HarnessArtifactRef` values. Unsupported actions should return a failed `HarnessActionResult` with `failure_category="configuration_error"` rather than calling the driver.
+The phase-1 dispatch table is:
+
+| FSQ action | Driver method | Phase-1 parameter shape |
+|---|---|---|
+| `launchApp` | `launch_app` | bare command, normalized to `{}` |
+| `killApp` | `kill_app` | bare command, normalized to `{}` |
+| `tapOn` | `tap_on` | `{target, locator, timeout?}` |
+| `assertVisible` | `assert_visible` | `{target, locator, optional?, timeout?}` |
+| `performActions` | `perform_actions` | W3C actions array, passed as `{"actions": [...]}` |
+| `assert` | `assert_state` | `{element, text, optional}` |
+| `pressKey` | `press_key` | string shorthand normalized to `{"key": "Back"}` or object form |
+| `inputText` | `input_text` | `{text, target, locator}` |
+| `assertNotVisible` | `assert_not_visible` | `{target, locator, optional?}` |
+| `longPressOn` | `long_press_on` | `{target, locator}` |
+| `swipe` | `swipe` | `{direction, duration}` or future point form |
+| `assertWithAI` | `assert_with_ai` | `{prompt, optional, timeout?}` |
+
+`AndroidHarness(driver=driver, artifact_store=store | None)` should satisfy `HarnessInterface`. Its first action dispatcher should support exactly the phase-1 FSQ action names above. Screenshot and UI-tree capture should be available through `capture_artifact`; when an `ArtifactStore` is provided, screenshots and UI trees should be written to the standard artifact directories and returned as `HarnessArtifactRef` values. `capture_artifact` must receive FSQ-owned evidence metadata such as `step_id` and `phase` from the caller and must not infer those values from Android session context. Unsupported actions from the complete command set should return a failed `HarnessActionResult` with `failure_category="configuration_error"` rather than calling the driver until their driver methods are specified and implemented.
 
 ## Internal Structure
 
@@ -141,6 +184,8 @@ Runner phases should preserve failure boundaries:
 - The minimal runner slice is synchronous. Async support should be decided when real MCP/Appium/Playwright harness integration is planned.
 - Fake harnesses for the minimal runner slice should live in tests until a reusable product fake is needed.
 - FSQ should provide a built-in `AndroidHarness` for Android execution semantics. Extension users who want uiautomator2, Appium, MCP, or another backend should usually implement `AndroidDriverInterface`, not a full custom `HarnessInterface`.
+- Platform harnesses should remain FSQ-owned controlled adapters. They may handle platform action translation, context shaping, driver-result conversion, and failure-category mapping, but not runner ordering, retry policy, event emission, evidence manifest format, artifact path policy, case-level result aggregation, or report generation.
+- Driver interfaces should remain backend mechanics contracts. They may execute actions and expose raw observations, but not control when evidence is captured or how execution history is recorded.
 - Direct custom `HarnessInterface` implementations should remain possible for advanced platform plugins, but they are not the preferred ordinary Android backend extension point.
 - `EvidenceRecorder` should consume shared runner events and result facts. It should not execute actions, retry steps, or decide case success.
 - The first `EvidenceRecorder` writes one manifest file and references artifact paths supplied by events/results. It does not copy binary artifacts or generate reports.

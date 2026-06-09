@@ -6,13 +6,40 @@ class AndroidDriverInterface(Protocol):
     def context(self) -> dict[str, object]:
         ...
 
-    def tap(self, params: dict[str, object]) -> dict[str, object]:
+    def launch_app(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def kill_app(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def tap_on(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def long_press_on(self, params: dict[str, object]) -> dict[str, object]:
         ...
 
     def input_text(self, params: dict[str, object]) -> dict[str, object]:
         ...
 
-    def back(self) -> dict[str, object]:
+    def press_key(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def swipe(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def perform_actions(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def assert_visible(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def assert_not_visible(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def assert_state(self, params: dict[str, object]) -> dict[str, object]:
+        ...
+
+    def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
         ...
 
     def screenshot(self) -> bytes:
@@ -20,4 +47,3 @@ class AndroidDriverInterface(Protocol):
 
     def ui_tree(self) -> dict[str, object]:
         ...
-
