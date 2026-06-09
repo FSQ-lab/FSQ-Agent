@@ -339,6 +339,26 @@ metadata
 
 Harness implementations should report capability and platform facts. They should not decide case pass/fail.
 
+### 8.4 Android Harness And Driver Extension Model
+
+`HarnessInterface` is the runner-facing platform harness contract. It is higher-level than a raw device/page primitive interface. For Android, the preferred long-term product shape is:
+
+```text
+StepRunner
+  -> HarnessInterface
+      -> AndroidHarness          # FSQ built-in
+          -> AndroidDriverInterface
+              -> AppiumDriver
+              -> UiAutomator2Driver
+              -> UserCustomDriver
+```
+
+`AndroidHarness` should be built into FSQ and should implement `HarnessInterface`. It owns FSQ-specific execution semantics: mapping `ExecutableStep.action_name` to Android operations, producing `HarnessActionResult`, shaping `HarnessContext`, creating artifact refs, applying evidence policy entry points, and classifying Android/platform failures into shared `FailureCategory` values.
+
+Users who want to use a different Android automation backend should usually implement `AndroidDriverInterface`, not a full custom `HarnessInterface`. The driver interface should expose lower-level Android primitives such as tap/click, input text, screenshot, UI tree capture, back, scroll, wait/stabilize, and backend-specific error details. This layer is closer to Midscene's low-level interface concept; `HarnessInterface` remains the higher-level contract seen by `StepRunner`.
+
+Direct custom `HarnessInterface` implementations should remain possible for advanced platform plugins or non-Android platforms, but they should not be the ordinary Android backend extension path.
+
 ## 9. Evidence Contracts
 
 ### 9.1 EvidenceBundle
@@ -478,13 +498,19 @@ Implement `EvidenceRecorder` and a manifest writer that consumes runner events a
 
 Expected outcome: a run produces an `EvidenceBundle` manifest with step facts and artifact refs.
 
-### Batch 4: FSQ Integration
+### Batch 4: Android Harness / Driver Contracts
+
+Define the built-in `AndroidHarness` contract boundary and the lower-level `AndroidDriverInterface` extension point. Use in-test fake drivers to validate action dispatch for a small operation set such as `tap`, `inputText`, `back`, screenshot, and UI tree capture. Do not require real Appium or uiautomator2 in this batch.
+
+Expected outcome: Android backend authors have a smaller driver interface to implement, while `StepRunner` continues to depend only on `HarnessInterface`.
+
+### Batch 5: FSQ Integration
 
 Adapt existing FSQ paths so YAML/planner steps can become `ExecutableStep[]` through StepBuilder work.
 
 Expected outcome: FSQ regression path starts converging on the shared execution core.
 
-### Batch 5: Report and Verifier Integration
+### Batch 6: Report and Verifier Integration
 
 Add adapters so report and verifier code can read from `EvidenceBundle` rather than relying only on legacy `StepResult` summaries or agent claims.
 

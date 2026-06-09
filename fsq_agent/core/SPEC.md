@@ -35,6 +35,22 @@ events = runner.events
 
 `StepRunner` accepts any object satisfying `HarnessInterface`. Entry-layer code and future factories are responsible for constructing platform-specific harnesses such as Android, Web, iOS, or fake harnesses.
 
+Future Android platform support should use a two-layer extension model:
+
+```text
+StepRunner
+  -> HarnessInterface
+      -> AndroidHarness          # FSQ built-in runner-facing harness
+          -> AndroidDriverInterface
+              -> AppiumDriver
+              -> UiAutomator2Driver
+              -> UserCustomDriver
+```
+
+In this model, `AndroidHarness` implements `HarnessInterface` and owns FSQ runner-facing behavior: action dispatch from `ExecutableStep.action_name`, conversion to `HarnessActionResult`, context shaping, artifact refs, evidence policy entry points, and failure category mapping. Users who want to replace the underlying automation backend should implement `AndroidDriverInterface` instead of reimplementing `HarnessInterface` directly.
+
+`AndroidDriverInterface` should represent lower-level Android primitives such as tap/click, text input, screenshot capture, UI tree capture, back, scroll, wait/stabilize, and backend-specific error exposure. This layer is closer to Midscene's low-level interface concept, while `HarnessInterface` remains the higher-level runner-facing harness contract.
+
 ## Internal Structure
 
 Planned structure after the first implementation batch:
@@ -44,6 +60,8 @@ Planned structure after the first implementation batch:
 - `runner/_runner.py`: `StepRunner` implementation for the minimal single-step protocol.
 - `harness/__init__.py`: Harness subpackage exports only.
 - `harness/_interface.py`: `HarnessInterface` protocol.
+- `harness/_android.py`: Future FSQ built-in `AndroidHarness` implementation that satisfies `HarnessInterface`.
+- `harness/_android_driver.py`: Future `AndroidDriverInterface` protocol and driver-owned primitive contracts.
 - `evidence/__init__.py`: Evidence subpackage exports only.
 - `evidence/_recorder.py`: Future `EvidenceRecorder` implementation.
 - `SPEC.md`: Module design.
@@ -65,9 +83,12 @@ Runner phases should preserve failure boundaries:
 - `core` owns execution control boundaries, not shared data models.
 - `models` owns serializable execution contracts, result records, runner events, harness context/result records, evidence manifests, and status/failure taxonomies.
 - `HarnessInterface` is a protocol because it represents platform capability rather than persisted data.
+- `HarnessInterface` is the runner-facing harness contract. It is intentionally higher-level than a raw Appium, Playwright, uiautomator2, or Midscene-style primitive interface.
 - `StepRunner` should call harness capabilities through `HarnessInterface`, emit shared runner events, and return shared step result models.
 - The minimal runner slice is synchronous. Async support should be decided when real MCP/Appium/Playwright harness integration is planned.
 - Fake harnesses for the minimal runner slice should live in tests until a reusable product fake is needed.
+- FSQ should provide a built-in `AndroidHarness` for Android execution semantics. Extension users who want uiautomator2, Appium, MCP, or another backend should usually implement `AndroidDriverInterface`, not a full custom `HarnessInterface`.
+- Direct custom `HarnessInterface` implementations should remain possible for advanced platform plugins, but they are not the preferred ordinary Android backend extension point.
 - `EvidenceRecorder` should consume shared runner events and result facts. It should not execute actions, retry steps, or decide case success.
 - Concrete Android/Web/iOS harness implementations are out of scope for the first contract batch and must not be placed in `core`.
 - CLI, report generation, verifier behavior, planner repair, and FSQ StepBuilder integration are later batches.
