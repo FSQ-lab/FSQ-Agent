@@ -61,8 +61,9 @@ result = runner.run_steps(run_id="run-1", steps=executable_steps)
 - Record every `RunnerStepResult` into the supplied `EvidenceRecorder`.
 - Stop on the first step whose result status is `failed`, `cancelled`, or `skipped`.
 - Build and return the current `EvidenceBundle` after execution stops or all steps pass.
+- Leave manifest persistence to the caller by requiring an explicit `EvidenceRecorder.write_manifest()` call after `run_steps` when disk output is desired.
 
-The first sequence runner does not implement retry, timeout enforcement, optional/non-blocking semantics, automatic screenshot capture, CLI integration, report generation, or platform-driver construction. Those are later batches and should reuse the same shared events and evidence bundle contracts.
+The first sequence runner does not implement retry, timeout enforcement, optional/non-blocking semantics, manifest writing, CLI integration, report generation, or platform-driver construction. Those are later batches and should reuse the same shared events and evidence bundle contracts.
 
 The first evidence implementation exposes a narrow API:
 
