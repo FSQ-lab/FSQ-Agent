@@ -38,6 +38,15 @@ events = runner.events
 
 `StepRunner` accepts any object satisfying `HarnessInterface`. Entry-layer code and future factories are responsible for constructing platform-specific harnesses such as Android, Web, iOS, or fake harnesses.
 
+`StepRunner` owns evidence-policy timing. When `ExecutableStep.evidence_policy` requests artifact capture, the runner should call `HarnessInterface.capture_artifact` with FSQ-owned `step_id`, `phase`, and a stable reason string. The first evidence-policy implementation should support:
+
+- `capture_before=True`: capture requested `artifact_kinds` during the `prepare` phase after context is available and before `before_action` completes.
+- `capture_after=True`: capture requested `artifact_kinds` during the `finalize` phase after `after_action` completes.
+- `capture_on_failure=True`: when invoke returns or raises a failure, capture requested `artifact_kinds` during `finalize` with a failure reason.
+- `artifact_kinds`: only `screenshot` and `ui_tree` are required in the first implementation. Unsupported kinds should not crash the runner; they should produce a failed finalize phase report with `failure_category="artifact_error"` and a useful error message.
+
+Captured artifact refs should be attached to the corresponding `StepPhaseReport.artifact_refs`, and every successful capture should emit a `RunnerEvent(event_type="artifact_captured")` with payload fields for `artifact_id`, `kind`, `path`, `reason`, and `phase`. The runner must not decide artifact directories or serialize binary data; `HarnessInterface` and `ArtifactStore` handle raw capture and path policy.
+
 The first sequence runner implementation exposes a narrow synchronous API:
 
 ```python
