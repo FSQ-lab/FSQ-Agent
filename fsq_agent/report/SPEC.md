@@ -15,6 +15,7 @@ Current `__init__.py` exports via `__all__`:
 - `ReportGenerator`: Generates reports for completed task runs under the configured output runs directory.
 - `EvidenceBundler`: Creates a manifest for evidence references supplied by execution steps, including paths or snapshots produced by configured MCP/tools.
 - `FailureAnalyzer`: Classifies failures as success, tool usage error, semantic action unmet, execution issue, planning issue, verification issue, or a combined label when multiple rule-assisted signals are present.
+- `CoreEvidenceReportGenerator`: Generates Markdown and JSON reports from one deterministic core `evidence-manifest.json` path.
 
 Planned execution-core report support:
 
@@ -23,6 +24,14 @@ Planned execution-core report support:
 - Keep this as a report-layer concern. `StepRunner`, `StepSequenceRunner`, `AndroidHarness`, drivers, and `EvidenceRecorder` must not know Markdown layout or report classification rules.
 - The first implementation should accept an existing manifest path so device-run evidence can be reported after the run without re-executing the case.
 - The existing `ReportGenerator` path for agent `StepResult` reports should remain intact until the core evidence report path is implemented and reviewed.
+
+The first core evidence report API is:
+
+```python
+artifact = CoreEvidenceReportGenerator().generate_from_manifest(Path("runs/run-1/evidence-manifest.json"))
+```
+
+It writes `core-report.md` and `core-report.json` next to the manifest and returns `ReportArtifact(run_id=..., path=core-report.md, evidence_manifest_path=manifest_path)`.
 
 Planned strict-regression and recovery report support:
 
@@ -37,7 +46,7 @@ Planned strict-regression and recovery report support:
 - `__init__.py`: Public exports only.
 - `_generator.py`: Markdown and JSON report generation with minimal JSON fallback, typed agent output rendering, execution/verification report shaping, and `ToolCallRecord` reconstruction from `events.jsonl`.
 - `_evidence.py`: Evidence manifest and bundle creation.
-- Future `_core_evidence_report.py`: Markdown and JSON report generation from `EvidenceBundle` or a core `evidence-manifest.json` path.
+- `_core_evidence_report.py`: Markdown and JSON report generation from `EvidenceBundle` or a core `evidence-manifest.json` path.
 - Future `_regression_report.py`: Strict-vs-recovery comparison report generation from one strict manifest and an optional recovery manifest.
 - `_failure_analysis.py`: Failure classification helpers.
 - `templates/`: Optional report templates.
