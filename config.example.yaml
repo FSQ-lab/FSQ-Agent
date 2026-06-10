@@ -43,9 +43,15 @@ openai_agents:
     historical_preview_chars: 1000
     model_response_max_chars: 4000
 
-lifecycle:
-  controller: none
+harness:
+  name: none
   options: {}
+  platform:
+    type: none
+    automation: none
+    capabilities_config_env: CAPABILITIES_CONFIG
+    session_create_attempts: 3
+    session_create_retry_delay_seconds: 2.0
 
 verification:
   # strict: goal + all key actions; normal: goal + assertion key actions; goal: goal only.

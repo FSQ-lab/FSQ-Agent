@@ -1,6 +1,6 @@
 import pytest
 
-from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, LifecycleControllerSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, ShellSettings, SkillConfig, Task, VerificationCriterion, VerificationSettings
+from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, HarnessSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, PlatformActionDefinition, PlatformActionResult, ShellSettings, SkillConfig, Task, VerificationCriterion, VerificationSettings
 
 
 def test_task_defaults() -> None:
@@ -81,11 +81,22 @@ def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:
     assert settings.local_tool_output.full_output_max_chars == 30000
 
 
-def test_lifecycle_controller_settings_default_to_noop() -> None:
-    settings = LifecycleControllerSettings()
+def test_harness_settings_default_to_noop() -> None:
+    settings = HarnessSettings()
 
-    assert settings.controller == "none"
+    assert settings.name == "none"
     assert settings.options == {}
+    assert settings.platform.type == "none"
+    assert settings.platform.automation == "none"
+
+
+def test_platform_action_models_capture_visibility_and_result() -> None:
+    definition = PlatformActionDefinition(name="android_tap", visibility="agent_visible")
+    result = PlatformActionResult(action_name="android_tap", status="failed", failure_category="action_error")
+
+    assert definition.name == "android_tap"
+    assert definition.visibility == "agent_visible"
+    assert result.failure_category == "action_error"
 
 
 def test_skill_config_defaults_to_markdown() -> None:

@@ -8,6 +8,17 @@ ToolKind = Literal["mcp", "cli", "file"]
 ToolStatus = Literal["success", "failed", "skipped"]
 MCPTransport = Literal["stdio", "streamable_http", "sse", "hosted"]
 MCPInvalidToolPolicy = Literal["auto_ignore", "fail_fast", "warn_only"]
+PlatformActionVisibility = Literal["agent_visible", "runner_only", "lifecycle_only"]
+PlatformFailureCategory = Literal[
+    "configuration_error",
+    "lifecycle_error",
+    "unsupported_action",
+    "action_error",
+    "observation_error",
+    "timeout_error",
+    "backend_error",
+    "unknown_error",
+]
 
 
 class MCPToolValidationSettings(BaseModel):
@@ -97,3 +108,28 @@ class ToolResult(BaseModel):
     error: str | None = None
     duration_ms: int = Field(default=0, ge=0)
     raw: Any = None
+
+
+class PlatformActionDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str = ""
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    visibility: PlatformActionVisibility = "agent_visible"
+    idempotent: bool = False
+    timeout_seconds: int | None = Field(default=None, ge=1)
+    evidence_policy: str = "default"
+
+
+class PlatformActionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action_name: str
+    status: ToolStatus
+    duration_ms: int = Field(default=0, ge=0)
+    output: Any = None
+    error: str | None = None
+    failure_category: PlatformFailureCategory | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    backend_debug: dict[str, Any] = Field(default_factory=dict)

@@ -2,11 +2,11 @@
 
 ## Scope
 
-Applies to all automation runs, regardless of MCP server or target platform.
+Applies to all automation runs, regardless of backend transport or target platform.
 
 ## Execution Rules
 
-- Use only configured MCP, local, shell, or CLI tools for external actions.
+- Use only configured harness platform actions, local tools, shell tools, or CLI tools for external actions.
 - Prefer semantic actions and stable locators over coordinate-only gestures.
 - Verify state-changing actions with fresh observations before claiming success.
 - Treat historical artifact search as context, not proof of the current UI state.

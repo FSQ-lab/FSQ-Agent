@@ -7,9 +7,13 @@ import json
 import pytest
 
 from fsq_agent.models import (
+    HarnessPlatformSettings,
+    HarnessSettings,
     MCPServerConfig,
     MCPToolValidationSettings,
     LocalToolOutputSettings,
+    PlatformActionDefinition,
+    PlatformActionResult,
     RunEvent,
     RuntimeSecretSettings,
     ShellSettings,
@@ -22,15 +26,17 @@ from fsq_agent.models import (
 from fsq_agent.tools import (
     AgentsMCPFactory,
     AgentsToolFactory,
-    AppiumAndroidLifecycleController,
+    AndroidAppiumPlatformAdapter,
+    AndroidHarness,
     CLIRunner,
     CapabilityRegistry,
     FileOps,
-    LifecycleControllerFactory,
-    MCPToolCaller,
+    HarnessFactory,
+    NoopHarness,
     MCPToolValidator,
     ToolExecutor,
 )
+from fsq_agent.tools._android_harness import AndroidAppiumMCPBackend
 
 
 class _FakeMCPTool:
@@ -71,7 +77,41 @@ class _FakeCallableMCPServer:
             return type("ToolResult", (), {"content": [type("Text", (), {"text": message})()], "isError": True})()
         if tool_name == "appium_session_management" and arguments.get("action") == "create":
             return type("ToolResult", (), {"content": [type("Text", (), {"text": "ANDROID session created successfully with ID: session-1"})()], "isError": False})()
+        if tool_name == "appium_find_element":
+            return type("ToolResult", (), {"content": [type("Text", (), {"text": "elementId 'element-1'\nSuccessfully found element."})()], "isError": False})()
+        if tool_name == "appium_get_page_source":
+            return type("ToolResult", (), {"content": [type("Text", (), {"text": "<node text='Settings'/>" * 20})()], "isError": False})()
+        if tool_name == "appium_screenshot":
+            return type("ToolResult", (), {"content": [type("Text", (), {"text": "Screenshot saved successfully to: C:/tmp/screenshot.png"})()], "isError": False})()
         return type("ToolResult", (), {"content": [type("Text", (), {"text": "ok"})()], "isError": False})()
+
+
+class _FakeAndroidBackend:
+    def __init__(self, failures: list[tuple[str, str]] | None = None) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.failures = failures or []
+
+    async def call(self, action_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append((action_name, arguments))
+        if self.failures and self.failures[0][0] == action_name:
+            _, message = self.failures.pop(0)
+            return {"ok": False, "error": message, "failure_category": "lifecycle_error"}
+        if action_name == "android_create_session":
+            return {"ok": True, "session_id": "session-1"}
+        return {"ok": True}
+
+
+class _FakeHarness:
+    def __init__(self, result: PlatformActionResult) -> None:
+        self.result = result
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def action_space(self, consumer: str = "agent") -> list[PlatformActionDefinition]:
+        return [PlatformActionDefinition(name="android_page_source", input_schema={"type": "object", "properties": {}, "additionalProperties": False})]
+
+    async def invoke_action(self, action_name: str, params: dict[str, Any]) -> PlatformActionResult:
+        self.calls.append((action_name, params))
+        return self.result
 
 
 @pytest.mark.asyncio
@@ -289,6 +329,42 @@ async def test_agents_tool_factory_large_output_uses_artifact_search_and_slice(t
     assert "gamma" in json.loads(slice_output)["content"]
 
 
+@pytest.mark.asyncio
+async def test_agents_tool_factory_platform_action_large_output_uses_artifact_search_and_slice(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    harness = _FakeHarness(
+        PlatformActionResult(
+            action_name="android_page_source",
+            status="success",
+            output={"text": "alpha beta gamma " * 20},
+        )
+    )
+    factory = AgentsToolFactory(
+        CLIRunner([]),
+        FileOps(tmp_path),
+        local_tool_output_settings=LocalToolOutputSettings(
+            full_output_max_chars=50,
+            historical_preview_chars=20,
+            model_response_max_chars=500,
+        ),
+        runs_dir=runs_dir,
+    )
+    factory.build_tools(run_id="run-1", task_id="task-1", harness=harness)
+
+    output = await factory._platform_action_tool(harness, "android_page_source")(None, json.dumps({"max_chars": 12000}))
+    payload = json.loads(output)
+
+    assert harness.calls == [("android_page_source", {"max_chars": 12000})]
+    assert payload["tool_name"] == "android_page_source"
+    assert payload["model_output"] == "artifact_reference"
+    search_output = await factory._search_artifact(
+        None,
+        json.dumps({"artifact_path": payload["artifact"]["path"], "query": "gamma"}),
+    )
+    search_payload = json.loads(search_output)
+    assert search_payload["matches"][0]["offset"] >= 0
+
+
 def test_agents_mcp_factory_applies_client_session_timeout() -> None:
     config = MCPServerConfig(name="browser", command="npx", timeout_seconds=42)
     server = AgentsMCPFactory([config])._build_local_server(config)
@@ -296,103 +372,329 @@ def test_agents_mcp_factory_applies_client_session_timeout() -> None:
     assert server.client_session_timeout_seconds == 42.0
 
 
-def test_lifecycle_controller_factory_resolves_appium_android() -> None:
-    from fsq_agent.models import LifecycleControllerSettings
-
-    controller = LifecycleControllerFactory.create(
-        LifecycleControllerSettings(controller="appium_android", options={})
+def test_harness_factory_resolves_android() -> None:
+    harness = HarnessFactory.create(
+        HarnessSettings(name="android", platform=HarnessPlatformSettings(type="android", automation="appium"))
     )
 
-    assert isinstance(controller, AppiumAndroidLifecycleController)
+    assert isinstance(harness, AndroidHarness)
+
+
+def test_harness_factory_defaults_to_noop() -> None:
+    harness = HarnessFactory.create(HarnessSettings())
+
+    assert isinstance(harness, NoopHarness)
+
+
+def test_agents_tool_factory_adds_agent_visible_platform_actions(tmp_path: Path) -> None:
+    backend = _FakeAndroidBackend()
+    adapter = AndroidAppiumPlatformAdapter(HarnessPlatformSettings(type="android", automation="appium"), backend=backend)
+    harness = AndroidHarness(adapter)
+    factory = AgentsToolFactory(CLIRunner([]), FileOps(tmp_path))
+
+    tools = factory.build_tools(harness=harness)
+    tool_names = {getattr(tool, "name", None) for tool in tools}
+
+    assert "android_tap" in tool_names
+    assert "android_scroll_to_element" in tool_names
+    assert "android_drag_and_drop" in tool_names
+    assert "android_get_attribute" in tool_names
+    assert "android_page_source" in tool_names
+    assert "android_screenshot" in tool_names
+    assert "android_context" in tool_names
+    assert "android_device_info" in tool_names
+    assert "android_create_session" not in tool_names
+
+
+def test_android_platform_action_schemas_expose_precise_locators() -> None:
+    adapter = AndroidAppiumPlatformAdapter(HarnessPlatformSettings(type="android", automation="appium"), backend=_FakeAndroidBackend())
+
+    tap_schema = adapter.action_definition("android_tap").input_schema
+    assert set(tap_schema["properties"]).issuperset({"element_id", "strategy", "selector", "target"})
+    assert "x" not in tap_schema["properties"]
+    assert "y" not in tap_schema["properties"]
+    assert "accessibility id" in tap_schema["properties"]["strategy"]["enum"]
+    assert tap_schema["required"] == []
+    assert adapter.action_definition("android_create_session").visibility == "lifecycle_only"
+    assert adapter.action_definition("android_page_source").evidence_policy == "ui_tree"
+
+    drag_schema = adapter.action_definition("android_drag_and_drop").input_schema
+    assert set(drag_schema["properties"]).issuperset(
+        {"source_element_id", "source_strategy", "source_selector", "source_target", "source_x", "source_y", "target_element_id", "target_strategy", "target_selector", "target_target", "target_x", "target_y"}
+    )
+
+    context_schema = adapter.action_definition("android_context").input_schema
+    assert context_schema["properties"]["action"]["enum"] == ["list", "switch"]
+
+    device_info_schema = adapter.action_definition("android_device_info").input_schema
+    assert device_info_schema["properties"]["action"]["enum"] == ["info", "battery", "time"]
 
 
 @pytest.mark.asyncio
-async def test_appium_android_lifecycle_calls_expected_tools(tmp_path: Path) -> None:
-    capabilities_path = tmp_path / "capabilities.json"
-    capabilities_path.write_text(json.dumps({"android": {"appium:appPackage": "com.example.app"}}), encoding="utf-8")
-    server = _FakeCallableMCPServer({"CAPABILITIES_CONFIG": str(capabilities_path)})
-    caller = MCPToolCaller([server], "run-1", "task-1")
-    controller = AppiumAndroidLifecycleController()
+async def test_android_appium_mcp_backend_creates_session() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
 
-    await controller.batch_setup(caller)
-    assert controller.runtime_policy()[0] == "The runtime has already created exactly one Appium Android session for this MCP client. Because the strict Appium MCP tool schema requires sessionId, use sessionId 'session-1' on every appium-mcp tool call that accepts sessionId."
-    await controller.case_setup(caller, Task(description="Run case."))
-    await controller.case_teardown(caller, Task(description="Run case."))
-    await controller.batch_teardown(caller)
+    result = await backend.call("android_create_session", {"platform": "android"})
 
-    terminate_args = {
-        "action": "terminate",
-        "id": "com.example.app",
-        "name": "",
-        "path": "",
-        "keepData": False,
-        "applicationType": "User",
-        "seconds": 5,
-        "url": "",
-        "waitForLaunch": True,
-        "sessionId": "session-1",
-    }
-    activate_args = {**terminate_args, "action": "activate"}
-    query_state_args = {**terminate_args, "action": "query_state"}
+    assert result["ok"] is True
+    assert result["session_id"] == "session-1"
+    assert backend.session_id == "session-1"
+    assert server.calls == [("appium_session_management", {"action": "create", "platform": "android"})]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_tap_finds_then_taps() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call("android_tap", {"target": "accessibilityId=Login"})
+
+    assert result["ok"] is True
     assert server.calls == [
-        ("appium_session_management", {"action": "create", "platform": "android"}),
-        ("appium_session_management", {"action": "list"}),
-        ("appium_app_lifecycle", terminate_args),
-        ("appium_app_lifecycle", activate_args),
-        ("appium_app_lifecycle", query_state_args),
-        ("appium_mobile_keyboard", {"action": "hide", "keys": [], "sessionId": "session-1"}),
-        ("appium_alert", {"action": "dismiss", "buttonLabel": "", "sessionId": "session-1"}),
-        ("appium_app_lifecycle", terminate_args),
-        ("appium_session_management", {"action": "delete"}),
-        ("appium_session_management", {"action": "list"}),
+        ("appium_find_element", {"strategy": "accessibility id", "selector": "Login", "sessionId": "session-1"}),
+        ("appium_gesture", {"action": "tap", "elementUUID": "element-1", "sessionId": "session-1"}),
     ]
 
 
 @pytest.mark.asyncio
-async def test_appium_android_lifecycle_retries_session_create(tmp_path: Path) -> None:
+async def test_android_appium_mcp_backend_tap_accepts_direct_element_id() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call("android_tap", {"target": "elementId 'element-1'"})
+
+    assert result["ok"] is True
+    assert server.calls == [
+        ("appium_gesture", {"action": "tap", "elementUUID": "element-1", "sessionId": "session-1"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_tap_accepts_precise_locator() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call("android_tap", {"strategy": "id", "selector": "com.example:id/settings"})
+
+    assert result["ok"] is True
+    assert server.calls == [
+        ("appium_find_element", {"strategy": "id", "selector": "com.example:id/settings", "sessionId": "session-1"}),
+        ("appium_gesture", {"action": "tap", "elementUUID": "element-1", "sessionId": "session-1"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_tap_prefers_element_over_coordinates() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call("android_tap", {"element_id": "element-1", "x": 999999, "y": 999999})
+
+    assert result["ok"] is True
+    assert server.calls == [
+        ("appium_gesture", {"action": "tap", "elementUUID": "element-1", "sessionId": "session-1"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_scrolls_to_element_with_locator() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call(
+        "android_scroll_to_element",
+        {"strategy": "accessibility id", "selector": "Settings", "direction": "down", "max_scroll_attempts": 4},
+    )
+
+    assert result["ok"] is True
+    assert server.calls == [
+        (
+            "appium_gesture",
+            {
+                "action": "scroll_to_element",
+                "strategy": "accessibility id",
+                "selector": "Settings",
+                "direction": "down",
+                "maxScrollAttempts": 4,
+                "sessionId": "session-1",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_get_attribute_accepts_direct_element_id() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call("android_get_attribute", {"element_id": "element-1", "attribute": "displayed"})
+
+    assert result["ok"] is True
+    assert server.calls == [
+        ("appium_get_element_attribute", {"elementUUID": "element-1", "attribute": "displayed", "sessionId": "session-1"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_page_source_is_bounded() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call("android_page_source", {"max_chars": 20})
+
+    assert result["ok"] is True
+    assert result["truncated"] is True
+    assert len(result["text"]) == 20
+    assert server.calls == [("appium_get_page_source", {"sessionId": "session-1"})]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_drag_and_drop_accepts_locators() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call(
+        "android_drag_and_drop",
+        {
+            "source_strategy": "id",
+            "source_selector": "com.example:id/source",
+            "target_element_id": "target-1",
+            "duration": 1200,
+            "long_press_duration": 600,
+        },
+    )
+
+    assert result["ok"] is True
+    assert server.calls == [
+        ("appium_find_element", {"strategy": "id", "selector": "com.example:id/source", "sessionId": "session-1"}),
+        ("appium_drag_and_drop", {"sessionId": "session-1", "sourceElementUUID": "element-1", "targetElementUUID": "target-1", "duration": 1200, "longPressDuration": 600}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_drag_and_drop_accepts_coordinate_fallback() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    result = await backend.call("android_drag_and_drop", {"source_x": 10, "source_y": 20, "target_x": 30, "target_y": 40})
+
+    assert result["ok"] is True
+    assert server.calls == [
+        ("appium_drag_and_drop", {"sessionId": "session-1", "sourceX": 10, "sourceY": 20, "targetX": 30, "targetY": 40}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_appium_mcp_backend_context_and_device_info() -> None:
+    server = _FakeCallableMCPServer()
+    backend = AndroidAppiumMCPBackend(server)
+    backend.session_id = "session-1"
+
+    context_result = await backend.call("android_context", {"action": "switch", "context": "NATIVE_APP"})
+    info_result = await backend.call("android_device_info", {"action": "time", "format": "YYYY"})
+
+    assert context_result["ok"] is True
+    assert info_result["ok"] is True
+    assert server.calls == [
+        ("appium_context", {"action": "switch", "sessionId": "session-1", "context": "NATIVE_APP"}),
+        ("appium_mobile_device_info", {"action": "time", "sessionId": "session-1", "format": "YYYY"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_harness_calls_expected_lifecycle_actions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     capabilities_path = tmp_path / "capabilities.json"
     capabilities_path.write_text(json.dumps({"android": {"appium:appPackage": "com.example.app"}}), encoding="utf-8")
-    server = _FakeCallableMCPServer(
-        {"CAPABILITIES_CONFIG": str(capabilities_path)},
-        failures=[("appium_session_management", "Appium Settings app is not running after 5000ms")],
-    )
-    caller = MCPToolCaller([server], "run-1", "task-1")
-    controller = AppiumAndroidLifecycleController(session_create_retry_delay_seconds=0)
+    monkeypatch.setenv("CAPABILITIES_CONFIG", str(capabilities_path))
+    backend = _FakeAndroidBackend()
+    adapter = AndroidAppiumPlatformAdapter(HarnessPlatformSettings(type="android", automation="appium"), backend=backend)
+    harness = AndroidHarness(adapter)
 
-    await controller.batch_setup(caller)
+    await harness.run_setup()
+    assert adapter.session_id == "session-1"
+    assert "android_tap" in {definition.name for definition in harness.action_space("agent")}
+    assert "android_create_session" not in {definition.name for definition in harness.action_space("agent")}
+    await harness.case_setup(Task(description="Run case."))
+    await harness.case_teardown(Task(description="Run case."))
+    await harness.run_teardown()
 
-    assert server.calls[:3] == [
-        ("appium_session_management", {"action": "create", "platform": "android"}),
-        ("appium_session_management", {"action": "create", "platform": "android"}),
-        ("appium_session_management", {"action": "list"}),
+    assert backend.calls == [
+        ("android_create_session", {"platform": "android"}),
+        ("android_terminate_app", {"app_id": "com.example.app"}),
+        ("android_activate_app", {"app_id": "com.example.app"}),
+        ("android_query_app_state", {"app_id": "com.example.app"}),
+        ("android_hide_keyboard", {}),
+        ("android_dismiss_alert", {}),
+        ("android_terminate_app", {"app_id": "com.example.app"}),
+        ("android_delete_session", {}),
     ]
 
 
 @pytest.mark.asyncio
-async def test_appium_android_case_setup_requires_app_package(tmp_path: Path) -> None:
+async def test_android_harness_retries_session_create() -> None:
+    backend = _FakeAndroidBackend(failures=[("android_create_session", "Settings app is not running")])
+    adapter = AndroidAppiumPlatformAdapter(
+        HarnessPlatformSettings(type="android", automation="appium", session_create_retry_delay_seconds=0),
+        backend=backend,
+    )
+    harness = AndroidHarness(adapter)
+
+    await harness.run_setup()
+
+    assert backend.calls[:2] == [
+        ("android_create_session", {"platform": "android"}),
+        ("android_create_session", {"platform": "android"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_android_harness_case_setup_requires_app_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     capabilities_path = tmp_path / "capabilities.json"
     capabilities_path.write_text(json.dumps({"android": {"appium:udid": "device-1"}}), encoding="utf-8")
-    server = _FakeCallableMCPServer({"CAPABILITIES_CONFIG": str(capabilities_path)})
-    caller = MCPToolCaller([server], "run-1", "task-1")
-    controller = AppiumAndroidLifecycleController()
+    monkeypatch.setenv("CAPABILITIES_CONFIG", str(capabilities_path))
+    backend = _FakeAndroidBackend()
+    adapter = AndroidAppiumPlatformAdapter(HarnessPlatformSettings(type="android", automation="appium"), backend=backend)
+    harness = AndroidHarness(adapter)
 
-    await controller.batch_setup(caller)
+    await harness.run_setup()
 
     with pytest.raises(ToolExecutionError, match="appium:appPackage"):
-        await controller.case_setup(caller, Task(description="Run case."))
+        await harness.case_setup(Task(description="Run case."))
+
+
+def test_android_platform_adapter_does_not_fallback_to_hardcoded_capabilities_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fallback_path = tmp_path / ".fsq-agent-workspace" / "appium-capabilities.local.json"
+    fallback_path.parent.mkdir()
+    fallback_path.write_text(json.dumps({"android": {"appium:appPackage": "com.example.app"}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CAPABILITIES_CONFIG", raising=False)
+    adapter = AndroidAppiumPlatformAdapter(HarnessPlatformSettings(type="android", automation="appium"), backend=_FakeAndroidBackend())
+
+    assert adapter.app_id() is None
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_caller_emits_lifecycle_events() -> None:
+async def test_harness_invoke_action_emits_platform_events() -> None:
     events: list[RunEvent] = []
-    server = _FakeCallableMCPServer()
-    caller = MCPToolCaller([server], "run-1", "task-1", events.append)
+    backend = _FakeAndroidBackend()
+    adapter = AndroidAppiumPlatformAdapter(HarnessPlatformSettings(type="android", automation="appium"), backend=backend)
+    harness = AndroidHarness(adapter, event_sink=events.append, run_id="run-1", task_id="task-1")
 
-    await caller.call("appium-mcp", "appium_session_management", {"action": "list"})
+    await harness.invoke_action("android_tap", {"target": "Login"})
 
-    assert [event.type for event in events] == ["tool_call_started", "tool_call_completed"]
-    assert events[0].payload["lifecycle"] is True
-    assert events[0].payload["tool_origin"] == "mcp"
+    assert [event.type for event in events] == ["platform_action_started", "platform_action_completed"]
+    assert events[0].payload["action_name"] == "android_tap"
+    assert events[1].payload["status"] == "success"
 
 
 def test_mcp_tool_validator_flags_unsupported_schema_keyword() -> None:
