@@ -8,6 +8,7 @@ Provide command line entry points for validating OpenAI Agents SDK configuration
 
 - `models`: Uses `Task`, `TaskResult`, FSQ case models, and shared exceptions.
 - `config`: Loads settings.
+- `core`: Composes deterministic `ExecutableStep` execution, runner events, and evidence manifest writing at the entry boundary.
 - `fsq`: Loads `.codex.yaml` FSQ cases and converts them into agent tasks.
 - `agent`: Runs task workflows.
 - `tools`: Lists available capabilities.
@@ -29,6 +30,35 @@ Current commands:
 - `fsq-agent capabilities --config PATH --workspace PATH`: Print discovered MCP, CLI, and file operation capabilities.
 - `fsq-agent report --run-id ID --format FORMAT --config PATH --workspace PATH`: Print a report from the configured workspace output runs directory.
 - `fsq-agent pre-plan --goal TEXT --config PATH --workspace PATH --format text|json --stream/--no-stream --stream-format rich|jsonl`: Generate an ordered key-action pre-plan from a natural-language goal using configured page knowledge. This command does not execute UI actions or generate a run report.
+- `fsq-agent run-strict-core --task PATH --android-serial SERIAL --app-id APP_ID? --run-id ID? --config PATH --workspace PATH`: Run one Android `.codex.yaml` FSQ case through the deterministic core strict path using `UiAutomator2AndroidDriver`, write `evidence-manifest.json`, generate `core-report.md/json`, and print the generated paths. Relative task paths resolve against `cases.dir` first. `appId` is read from the FSQ case unless `--app-id` is provided.
+
+Planned internal deterministic-core composition helper:
+
+```python
+bundle = run_fsq_core_case(
+    case_path=Path("case.codex.yaml"),
+    harness=harness,
+    output_dir=Path("runs/run-1"),
+    run_id="run-1",
+)
+```
+
+This helper is not a public CLI command in the first batch. It exists to give future CLI commands and tests a single entry-layer path for running one FSQ case through the deterministic core. It should load the FSQ case, convert commands to `ExecutableStep` records, run them through `StepSequenceRunner` with the caller-supplied harness, write `evidence-manifest.json`, and return an `EvidenceBundle` whose `manifest_path` points to the written manifest.
+
+The helper must not construct real platform drivers, choose Android backend settings, or add retry/report policy. Those remain future entry-layer responsibilities after the core execution contract is stable.
+
+Planned internal strict deterministic-core entry:
+
+```python
+artifact = run_strict_fsq_core_case(
+    case_path=Path("case.codex.yaml"),
+    harness=harness,
+    output_dir=Path("runs/run-1"),
+    run_id="run-1",
+)
+```
+
+This strict entry executes the YAML exactly as authored with the supplied harness, writes `evidence-manifest.json`, generates `core-report.md` and `core-report.json`, and returns the generated Markdown `ReportArtifact`. It must not enable locator fallback, AI recovery, testcase mutation, or platform-driver construction. Recovery execution should use a separate future entry so strict results remain auditable.
 
 ## Internal Structure
 
@@ -36,6 +66,7 @@ Current commands:
 - `__main__.py`: Package entry point for `python -m fsq_agent.cli` and VS Code launch configurations.
 - `_main.py`: Click command group and command handlers.
 - `_task_loader.py`: FSQ `.codex.yaml` loading and conversion to agent tasks.
+- `_core_execution.py`: Internal composition helper for deterministic FSQ case execution through `core` with a caller-supplied harness.
 - `_pre_plan_formatting.py`: CLI rendering helpers for goal pre-plan text and JSON output.
 - `_formatting.py`: Logging-backed CLI rendering helpers for task results, live events, and capability tables.
 - `_logging.py`: CLI logging configuration.

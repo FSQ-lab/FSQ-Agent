@@ -27,6 +27,9 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]
+android = [
+    "uiautomator2>=3.0.0",
+]
 
 [project.scripts]
 fsq-agent = "fsq_agent.cli:main"

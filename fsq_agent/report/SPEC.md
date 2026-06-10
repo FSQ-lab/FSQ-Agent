@@ -15,12 +15,39 @@ Current `__init__.py` exports via `__all__`:
 - `ReportGenerator`: Generates reports for completed task runs under the configured output runs directory.
 - `EvidenceBundler`: Creates a manifest for evidence references supplied by execution steps, including paths or snapshots produced by configured MCP/tools.
 - `FailureAnalyzer`: Classifies failures as success, tool usage error, semantic action unmet, execution issue, planning issue, verification issue, or a combined label when multiple rule-assisted signals are present.
+- `CoreEvidenceReportGenerator`: Generates Markdown and JSON reports from one deterministic core `evidence-manifest.json` path.
+
+Planned execution-core report support:
+
+- Add a report path that consumes `EvidenceBundle` records or `evidence-manifest.json` files produced by `fsq_agent.core.evidence.EvidenceRecorder`.
+- Generate human-readable Markdown and machine-readable JSON summaries for deterministic core runs, including case/run identity, ordered runner step results, phase failures, event timeline summaries, artifact references, and concise failure notes.
+- Keep this as a report-layer concern. `StepRunner`, `StepSequenceRunner`, `AndroidHarness`, drivers, and `EvidenceRecorder` must not know Markdown layout or report classification rules.
+- The first implementation should accept an existing manifest path so device-run evidence can be reported after the run without re-executing the case.
+- The existing `ReportGenerator` path for agent `StepResult` reports should remain intact until the core evidence report path is implemented and reviewed.
+
+The first core evidence report API is:
+
+```python
+artifact = CoreEvidenceReportGenerator().generate_from_manifest(Path("runs/run-1/evidence-manifest.json"))
+```
+
+It writes `core-report.md` and `core-report.json` next to the manifest and returns `ReportArtifact(run_id=..., path=core-report.md, evidence_manifest_path=manifest_path)`.
+
+Planned strict-regression and recovery report support:
+
+- Regression reporting must distinguish strict testcase truth from recovery attempts. A strict run executes the YAML exactly as authored, without AI, locator fallback, or testcase mutation. A recovery run is optional and may consume strict-run failure evidence to try deterministic locator fallback or later AI-assisted repair.
+- Reports should support both a single-run core evidence report and a comparison report. The single-run report summarizes one strict or recovery `evidence-manifest.json`. The comparison report combines strict evidence plus optional recovery evidence for the same testcase.
+- Comparison reports should classify outcomes as `strict_passed`, `strict_failed_recovery_passed`, `strict_failed_recovery_failed`, or `strict_failed_recovery_not_attempted`.
+- Recovery success must not rewrite the strict result into a normal pass. It should produce a recommendation such as updating the YAML locator, approving a deterministic fallback rule, investigating app behavior, or requiring manual review.
+- Recovery attempt details should be reportable: attempted strategy, original locator/action, candidate selector or action, selected repair, result, and linked evidence artifacts.
 
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
 - `_generator.py`: Markdown and JSON report generation with minimal JSON fallback, typed agent output rendering, execution/verification report shaping, and `ToolCallRecord` reconstruction from `events.jsonl`.
 - `_evidence.py`: Evidence manifest and bundle creation.
+- `_core_evidence_report.py`: Markdown and JSON report generation from `EvidenceBundle` or a core `evidence-manifest.json` path.
+- Future `_regression_report.py`: Strict-vs-recovery comparison report generation from one strict manifest and an optional recovery manifest.
 - `_failure_analysis.py`: Failure classification helpers.
 - `templates/`: Optional report templates.
 - `SPEC.md`: Module design.
@@ -36,3 +63,5 @@ If rich Markdown/JSON report generation fails after a task run, `ReportGenerator
 - Report artifacts are stored below `output.runs_dir/<run-id>` so installed CLI usage does not create report files in the caller's current directory.
 - HTML report generation is intentionally out of scope.
 - Failure analysis starts rule-assisted and can later include LLM-assisted explanations.
+- Deterministic core execution reports should be generated from persisted evidence manifests rather than live runner objects. This keeps report generation replayable and allows reports to be regenerated after real-device runs.
+- Regression comparison reports should be generated after execution from persisted strict and recovery manifests. This keeps self-healing auditable and prevents recovery from masking the original regression signal.
