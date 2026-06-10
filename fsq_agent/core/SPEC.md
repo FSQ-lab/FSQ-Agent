@@ -52,17 +52,20 @@ The first sequence runner implementation exposes a narrow synchronous API:
 
 ```python
 runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
-result = runner.run_steps(run_id="run-1", steps=executable_steps)
+result = runner.run_steps(run_id="run-1", steps=executable_steps, teardown_steps=teardown_steps)
 ```
 
 `StepSequenceRunner` accepts only shared `ExecutableStep` records and must not import `fsq`, parse YAML, construct platform drivers, or generate reports. Its first behavior is intentionally small:
 
-- Run steps in list order by delegating each step to `StepRunner.run_step`.
+- Run normal steps in list order by delegating each step to `StepRunner.run_step`.
 - Record every event emitted by each `StepRunner` into the supplied `EvidenceRecorder`.
 - Record every `RunnerStepResult` into the supplied `EvidenceRecorder`.
-- Stop on the first step whose result status is `failed`, `cancelled`, or `skipped`.
+- Stop normal-step execution on the first step whose result status is `failed`, `cancelled`, or `skipped`.
+- Always execute supplied `teardown_steps` after normal execution stops or completes, including after failed, cancelled, skipped, or exception-converted normal steps.
 - Build and return the current `EvidenceBundle` after execution stops or all steps pass.
 - Leave manifest persistence to the caller by requiring an explicit `EvidenceRecorder.write_manifest()` call after `run_steps` when disk output is desired.
+
+The sequence runner should follow xUnit-style control flow internally: a normal-step failure is converted into an internal sequence failure that exits the normal body, while teardown execution is protected by `finally`-style logic. The internal failure mechanism must not leak out of the runner or replace structured evidence; it only controls execution order. Teardown results are recorded as ordinary `RunnerStepResult` facts so reports can show both the primary normal-step failure and any cleanup failure. A normal-step failure must not cause subsequent normal business steps to run, but it must not prevent teardown steps from running.
 
 The first sequence runner does not implement retry, timeout enforcement, optional/non-blocking semantics, manifest writing, CLI integration, report generation, or platform-driver construction. Those are later batches and should reuse the same shared events and evidence bundle contracts.
 

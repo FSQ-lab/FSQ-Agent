@@ -24,8 +24,24 @@ appId: com.microsoft.emmx
 """
 
 
+FSQ_CASE_WITH_TEARDOWN = """
+schemaVersion: fsq.ai-test/v1
+name: Core CLI Teardown Case
+platform: android
+appId: com.microsoft.emmx
+---
+- launchApp
+- tapOn: Search box
+- inputText:
+    text: skipped
+    target: Search box
+- killApp
+"""
+
+
 class CliCoreHarness:
-    def __init__(self) -> None:
+    def __init__(self, fail_action: str | None = None) -> None:
+        self.fail_action = fail_action
         self.actions: list[str] = []
 
     def get_context(self) -> HarnessContext:
@@ -39,7 +55,13 @@ class CliCoreHarness:
 
     def invoke_action(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
         self.actions.append(step.action_name)
-        return HarnessActionResult(status="passed", action_name=step.action_name)
+        status = "failed" if step.action_name == self.fail_action else "passed"
+        return HarnessActionResult(
+            status=status,
+            action_name=step.action_name,
+            failure_category="target_resolution_error" if status == "failed" else None,
+            error_message="Target was not found." if status == "failed" else None,
+        )
 
     def after_action(
         self,
@@ -91,6 +113,34 @@ def test_run_fsq_core_case_writes_manifest_and_returns_bundle(tmp_path: Path) ->
     assert [step["step_id"] for step in manifest["steps"]] == ["core_cli-step-001", "core_cli-step-002"]
     assert [step["status"] for step in manifest["steps"]] == ["passed", "passed"]
     assert [event["event_type"] for event in manifest["events"]].count("step_start") == 2
+
+
+def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) -> None:
+    case_path = tmp_path / "core_cli_teardown.codex.yaml"
+    case_path.write_text(FSQ_CASE_WITH_TEARDOWN, encoding="utf-8")
+    harness = CliCoreHarness(fail_action="tapOn")
+
+    bundle = run_fsq_core_case(
+        case_path=case_path,
+        harness=harness,
+        output_dir=tmp_path / "runs" / "run-1",
+        run_id="run-1",
+    )
+
+    assert harness.actions == ["launchApp", "tapOn", "killApp"]
+    assert [step.step_id for step in bundle.steps] == [
+        "core_cli_teardown-step-001",
+        "core_cli_teardown-step-002",
+        "core_cli_teardown-step-004",
+    ]
+    assert [step.status for step in bundle.steps] == ["passed", "failed", "passed"]
+
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+    assert [step["step_id"] for step in manifest["steps"]] == [
+        "core_cli_teardown-step-001",
+        "core_cli_teardown-step-002",
+        "core_cli_teardown-step-004",
+    ]
 
 
 def test_run_strict_fsq_core_case_writes_evidence_and_core_report(tmp_path: Path) -> None:
