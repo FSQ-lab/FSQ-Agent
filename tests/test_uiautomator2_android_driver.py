@@ -31,6 +31,9 @@ class FakeSelector:
     def set_text(self, text: str) -> None:
         self.device.calls.append(("set_text", self.query, text))
 
+    def clear_text(self) -> None:
+        self.device.calls.append(("clear_text", self.query))
+
     def get_text(self) -> str:
         self.device.calls.append(("get_text", self.query))
         return self.device.text
@@ -141,7 +144,7 @@ def test_uiautomator2_driver_actions_use_locator_selectors() -> None:
     assert driver.swipe({"direction": "up", "duration": 100})["status"] == "passed"
     assert driver.assert_state({"element": {"resourceId": "url"}, "text": {"contains": "bing"}})["status"] == "passed"
 
-    assert device.calls[:10] == [
+    assert device.calls[:12] == [
         ("select", {"resourceId": "login"}),
         ("wait", {"resourceId": "login"}, {"exists": True, "timeout": 10.0}),
         ("click", {"resourceId": "login"}),
@@ -150,6 +153,8 @@ def test_uiautomator2_driver_actions_use_locator_selectors() -> None:
         ("long_click", {"description": "Menu"}),
         ("select", {"text": "Search"}),
         ("wait", {"text": "Search"}, {"exists": True, "timeout": 10.0}),
+        ("click", {"text": "Search"}),
+        ("clear_text", {"text": "Search"}),
         ("set_text", {"text": "Search"}, "hello"),
         ("press", "back"),
     ]
@@ -201,6 +206,22 @@ def test_uiautomator2_driver_waits_for_targets_before_actions() -> None:
         ("long_click", {"description": "Menu"}),
     ]
     assert ("wait", {"text": "Search"}, {"exists": True, "timeout": 10.0}) in device.calls
+
+
+def test_uiautomator2_driver_input_text_focuses_clears_and_sets_text() -> None:
+    device = FakeDevice()
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.input_text({"text": "machine learning tutorials", "locator": {"resourceId": "url_bar"}})
+
+    assert result["status"] == "passed"
+    assert device.calls == [
+        ("select", {"resourceId": "url_bar"}),
+        ("wait", {"resourceId": "url_bar"}, {"exists": True, "timeout": 10.0}),
+        ("click", {"resourceId": "url_bar"}),
+        ("clear_text", {"resourceId": "url_bar"}),
+        ("set_text", {"resourceId": "url_bar"}, "machine learning tutorials"),
+    ]
 
 
 def test_uiautomator2_driver_assert_visible_waits_before_missing_target() -> None:

@@ -59,6 +59,10 @@ class UiAutomator2AndroidDriver:
         selector = self._selector(params)
         if not self._wait_for_exists(selector):
             return self._target_missing(params)
+        selector.click()
+        clear_text = getattr(selector, "clear_text", None)
+        if callable(clear_text):
+            clear_text()
         selector.set_text(text)
         return self._passed()
 

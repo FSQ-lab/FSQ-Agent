@@ -204,6 +204,8 @@ Backend methods should return driver output dictionaries that `AndroidHarness` c
 
 `UiAutomator2AndroidDriver.swipe` should support both direction-based and point-based FSQ payloads. Direction-based swipes compute points from the current screen size. Point-based swipes pass authored integer `start.x`, `start.y`, `end.x`, and `end.y` values directly to uiautomator2 with `duration` converted from milliseconds to seconds. Missing or malformed point payloads should return `configuration_error` rather than guessing coordinates.
 
+`UiAutomator2AndroidDriver.input_text` should use a user-like focused input sequence for target-bearing text entry: wait for the authored selector, click it to focus, clear existing text when the backend selector exposes `clear_text`, then call `set_text(text)`. The backend should not silently fall back to AI or alternate locators when this sequence fails.
+
 `UiAutomator2AndroidDriver` owns deterministic Android element wait policy for backend target resolution. FSQ YAML should not carry per-step wait durations for this phase-1 strict path; action payloads remain focused on user intent and locators. The first implementation should use a fixed internal default element wait timeout of `10.0` seconds and should prefer uiautomator2's built-in wait APIs over custom polling:
 
 - `UiObject.wait(exists=True, timeout=10.0)` for ordinary selector existence.
