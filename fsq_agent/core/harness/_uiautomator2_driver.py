@@ -5,6 +5,7 @@ from fsq_agent.models import ConfigurationError
 
 
 DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS = 10.0
+ANDROID_STATE_ASSERTION_FIELDS = ("enabled", "checked", "selected", "clickable", "focused")
 
 
 class UiAutomator2AndroidDriver:
@@ -107,16 +108,14 @@ class UiAutomator2AndroidDriver:
         if not self._wait_for_exists(selector):
             return self._target_missing(params)
         expected = params.get("text")
-        if not isinstance(expected, dict):
-            return self._configuration_error("assert requires a text assertion object.")
-        actual = selector.get_text()
-        contains = expected.get("contains")
-        if isinstance(contains, str) and contains in actual:
-            return self._passed({"text": actual})
-        equals = expected.get("equals")
-        if isinstance(equals, str) and equals == actual:
-            return self._passed({"text": actual})
-        return self._failed("assertion_error", "Text assertion failed.", output={"text": actual})
+        if isinstance(expected, dict):
+            return self._assert_text_state(selector, expected)
+        element = params.get("element")
+        if isinstance(element, dict):
+            expected_states = self._expected_element_states(element)
+            if expected_states:
+                return self._assert_element_states(selector, expected_states)
+        return self._configuration_error("assert requires a text or supported element state assertion.")
 
     def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
         return self._configuration_error("assertWithAI is not implemented for the uiautomator2 backend yet.")
@@ -249,6 +248,39 @@ class UiAutomator2AndroidDriver:
     def _duration_seconds(self, params: dict[str, object]) -> float:
         duration_ms = params.get("duration") if isinstance(params.get("duration"), int) else 200
         return max(duration_ms, 1) / 1000
+
+    def _assert_text_state(self, selector: object, expected: dict[str, object]) -> dict[str, object]:
+        actual = selector.get_text()
+        contains = expected.get("contains")
+        if isinstance(contains, str) and contains in actual:
+            return self._passed({"text": actual})
+        equals = expected.get("equals")
+        if isinstance(equals, str) and equals == actual:
+            return self._passed({"text": actual})
+        return self._failed("assertion_error", "Text assertion failed.", output={"text": actual})
+
+    def _expected_element_states(self, element: dict[str, object]) -> dict[str, bool]:
+        return {field: value for field in ANDROID_STATE_ASSERTION_FIELDS if isinstance((value := element.get(field)), bool)}
+
+    def _assert_element_states(self, selector: object, expected_states: dict[str, bool]) -> dict[str, object]:
+        actual_states = self._selector_info(selector)
+        passed: dict[str, bool] = {}
+        for field, expected in expected_states.items():
+            actual = actual_states.get(field)
+            if actual != expected:
+                return self._failed(
+                    "assertion_error",
+                    "Element state assertion failed.",
+                    output={"field": field, "expected": expected, "actual": actual},
+                )
+            passed[field] = expected
+        return self._passed(passed)
+
+    def _selector_info(self, selector: object) -> dict[str, object]:
+        info = getattr(selector, "info", {})
+        if callable(info):
+            info = info()
+        return info if isinstance(info, dict) else {}
 
     def _target_missing(self, params: dict[str, object]) -> dict[str, object]:
         return self._failed("target_resolution_error", "Target was not found.", metadata={"params": params})

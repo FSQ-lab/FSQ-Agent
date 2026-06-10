@@ -35,6 +35,10 @@ class FakeSelector:
         self.device.calls.append(("get_text", self.query))
         return self.device.text
 
+    def info(self) -> dict[str, object]:
+        self.device.calls.append(("info", self.query))
+        return dict(self.device.selector_info)
+
 
 class FakeXPathSelector(FakeSelector):
     def wait(self, **kwargs: object) -> bool:
@@ -58,6 +62,13 @@ class FakeDevice:
         self.wait_result = wait_result
         self.wait_gone_result = wait_gone_result
         self.calls: list[tuple[Any, ...]] = []
+        self.selector_info: dict[str, object] = {
+            "enabled": True,
+            "checked": False,
+            "selected": False,
+            "clickable": True,
+            "focused": False,
+        }
         self.info = {
             "displayWidth": 1080,
             "displayHeight": 2400,
@@ -251,6 +262,69 @@ def test_uiautomator2_driver_assertion_and_missing_target_results() -> None:
     assert missing["status"] == "failed"
     assert missing["failure_category"] == "target_resolution_error"
     assert absent["status"] == "passed"
+
+
+def test_uiautomator2_driver_asserts_android_element_state_fields() -> None:
+    device = FakeDevice()
+    device.selector_info = {
+        "enabled": False,
+        "checked": True,
+        "selected": True,
+        "clickable": False,
+        "focused": True,
+    }
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.assert_state(
+        {
+            "element": {
+                "xpath": "//android.widget.FrameLayout[1]",
+                "enabled": False,
+                "checked": True,
+                "selected": True,
+                "clickable": False,
+                "focused": True,
+            }
+        }
+    )
+
+    assert result["status"] == "passed"
+    assert result["output"] == {
+        "enabled": False,
+        "checked": True,
+        "selected": True,
+        "clickable": False,
+        "focused": True,
+    }
+    assert device.calls == [
+        ("xpath", "//android.widget.FrameLayout[1]"),
+        ("xpath_wait", {"xpath": "//android.widget.FrameLayout[1]"}, {"exists": True, "timeout": 10.0}),
+        ("xpath_wait", {"xpath": "//android.widget.FrameLayout[1]"}, {"timeout": 10.0}),
+        ("info", {"xpath": "//android.widget.FrameLayout[1]"}),
+    ]
+
+
+def test_uiautomator2_driver_reports_android_element_state_mismatch() -> None:
+    device = FakeDevice()
+    device.selector_info = {"enabled": True}
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.assert_state({"element": {"resourceId": "item", "enabled": False}})
+
+    assert result["status"] == "failed"
+    assert result["failure_category"] == "assertion_error"
+    assert result["error_message"] == "Element state assertion failed."
+    assert result["output"] == {"field": "enabled", "expected": False, "actual": True}
+
+
+def test_uiautomator2_driver_reports_unsupported_assertion_shape() -> None:
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=FakeDevice())
+
+    result = driver.assert_state({"element": {"resourceId": "item"}})
+
+    assert result["status"] == "failed"
+    assert result["failure_category"] == "configuration_error"
+    assert "text or supported element state assertion" in str(result["error_message"])
 
 
 def test_uiautomator2_driver_reports_unimplemented_backend_operations() -> None:
