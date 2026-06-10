@@ -125,6 +125,23 @@ class FailedCapturingHarness(CapturingHarness):
         )
 
 
+class ArtifactResultHarness(SuccessfulHarness):
+    def invoke_action(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
+        self.calls.append(f"invoke:{step.action_name}:{context.session_id}")
+        return HarnessActionResult(
+            status="passed",
+            action_name=step.action_name,
+            artifact_refs=[
+                HarnessArtifactRef(
+                    artifact_id="ai-screenshot",
+                    kind="screenshot",
+                    path=Path("artifacts/screenshots/ai-screenshot.png"),
+                )
+            ],
+            metadata={"assertion_engine": "ai_visual"},
+        )
+
+
 def _tap_step() -> ExecutableStep:
     return ExecutableStep(
         step_id="step-1",
@@ -200,6 +217,18 @@ def test_step_runner_preserves_failed_harness_action_result() -> None:
     assert result.error_message == "target not found"
     assert [phase.status for phase in result.phase_reports] == ["passed", "failed", "passed"]
     assert "step_error" in [event.event_type for event in runner.events]
+
+
+def test_step_runner_attaches_action_result_artifacts_to_invoke_phase() -> None:
+    harness = ArtifactResultHarness()
+    runner = StepRunner(harness=harness)
+
+    result = runner.run_step(run_id="run-1", step=_tap_step())
+
+    invoke_report = result.phase_reports[1]
+    assert result.status == "passed"
+    assert [artifact.artifact_id for artifact in invoke_report.artifact_refs] == ["ai-screenshot"]
+    assert invoke_report.artifact_refs[0].path == Path("artifacts/screenshots/ai-screenshot.png")
 
 
 def test_step_runner_captures_before_and_after_artifacts_from_policy() -> None:
