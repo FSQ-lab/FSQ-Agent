@@ -29,15 +29,16 @@ def test_repository_appium_android_skill_documents_tool_usage_recovery() -> None
 
     bundles = SkillLoader(skill_path.parent).load([SkillConfig(name="appium-android", path=Path("appium-android.md"), required=True)])
 
-    assert "Action Selection" in bundles[0].instructions
-    assert "Action Error Recovery" in bundles[0].instructions
+    assert "Tool Selection" in bundles[0].instructions
+    assert "Tool Usage Error Recovery" in bundles[0].instructions
     assert "Correct Key Examples" in bundles[0].instructions
-    assert "android_press_key" in bundles[0].instructions
-    assert '"key": "Back"' in bundles[0].instructions
-    assert '"key": "Enter"' in bundles[0].instructions
-    assert "appium_mobile_press_key" not in bundles[0].instructions
-    assert "sessionId" not in bundles[0].instructions
-    assert "keyboard cleanup as a Back or Enter substitute" in bundles[0].instructions
+    assert "appium_mobile_press_key" in bundles[0].instructions
+    assert '"key": "BACK"' in bundles[0].instructions
+    assert '"keyCode": 4' in bundles[0].instructions
+    assert '"keyCode": 66' in bundles[0].instructions
+    assert '"key": "ENTER"' not in bundles[0].instructions
+    assert "keyCode-only" not in bundles[0].instructions
+    assert "It only hides or queries the software keyboard" in bundles[0].instructions
     assert "required `pressKey` action succeeded" in bundles[0].instructions
     assert "appium_perform_actions" not in bundles[0].instructions
     assert "pointerType" not in bundles[0].instructions

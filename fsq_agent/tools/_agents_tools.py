@@ -92,7 +92,6 @@ class AgentsToolFactory:
         run_id: str = "",
         task_id: str = "",
         event_sink: RunEventSink | None = None,
-        harness: Any = None,
     ) -> list[Any]:
         try:
             from agents import FunctionTool, ShellTool
@@ -151,16 +150,6 @@ class AgentsToolFactory:
                     on_invoke_tool=self._get_runtime_secret,
                 )
             )
-        if harness is not None:
-            for definition in harness.action_space("agent"):
-                tools.append(
-                    FunctionTool(
-                        name=definition.name,
-                        description=definition.description,
-                        params_json_schema=definition.input_schema,
-                        on_invoke_tool=self._platform_action_tool(harness, definition.name),
-                    )
-                )
         if self.cli_runner.list_tools():
             tools.append(
                 FunctionTool(
@@ -206,23 +195,6 @@ class AgentsToolFactory:
                 )
             )
         return tools
-
-    def _platform_action_tool(self, harness: Any, action_name: str) -> Any:
-        async def invoke(_ctx: Any, args: str) -> str:
-            try:
-                parsed = json.loads(args or "{}")
-            except json.JSONDecodeError as exc:
-                raise ToolExecutionError("Platform action arguments must be valid JSON.") from exc
-            if not isinstance(parsed, dict):
-                raise ToolExecutionError("Platform action arguments must be a JSON object.")
-            result = await harness.invoke_action(action_name, parsed)
-            return self._format_tool_response(
-                action_name,
-                result.model_dump(mode="json"),
-                {"action_name": action_name, "action_arguments": parsed, "tool_origin": "platform"},
-            )
-
-        return invoke
 
     def _build_local_shell_skills(self, skills: list[SkillBundle]) -> list[dict[str, str]]:
         shell_skills: list[dict[str, str]] = []

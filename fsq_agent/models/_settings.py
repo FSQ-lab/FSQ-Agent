@@ -47,22 +47,11 @@ class LocalToolOutputSettings(BaseModel):
         return value
 
 
-class HarnessPlatformSettings(BaseModel):
+class LifecycleControllerSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    type: str = "none"
-    automation: str = "none"
-    capabilities_config_env: str = "CAPABILITIES_CONFIG"
-    session_create_attempts: int = Field(default=3, ge=1)
-    session_create_retry_delay_seconds: float = Field(default=2.0, ge=0.0)
-
-
-class HarnessSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = "none"
+    controller: str = "none"
     options: dict[str, Any] = Field(default_factory=dict)
-    platform: HarnessPlatformSettings = Field(default_factory=HarnessPlatformSettings)
 
 
 class VerificationSettings(BaseModel):

@@ -31,13 +31,10 @@ class FailureAnalyzer:
         steps: list[StepResult],
         verification: VerificationResult,
         tool_calls: list[dict[str, Any]] | None = None,
-        platform_actions: list[dict[str, Any]] | None = None,
     ) -> str:
         if verification.status == "success":
             return "success"
         labels: list[str] = []
-        if self._has_platform_action_error(platform_actions or []):
-            labels.append("platform_action_issue")
         if self._has_tool_usage_error(steps, verification, tool_calls or []):
             labels.append("tool_usage_error")
         if self._has_semantic_action_unmet(verification):
@@ -62,9 +59,6 @@ class FailureAnalyzer:
             texts.append(self._normalize(call.get("output_preview")))
             texts.append(self._normalize(call.get("error")))
         return any(any(marker in text for marker in _TOOL_USAGE_MARKERS) for text in texts)
-
-    def _has_platform_action_error(self, platform_actions: list[dict[str, Any]]) -> bool:
-        return any(action.get("status") == "failed" for action in platform_actions)
 
     def _has_semantic_action_unmet(self, verification: VerificationResult) -> bool:
         texts = [self._normalize(value) for value in verification.unmet_criteria]
