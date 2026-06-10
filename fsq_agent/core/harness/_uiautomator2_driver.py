@@ -69,11 +69,18 @@ class UiAutomator2AndroidDriver:
 
     def swipe(self, params: dict[str, object]) -> dict[str, object]:
         direction = params.get("direction")
+        if "start" in params or "end" in params:
+            points = self._swipe_point_payload(params)
+            if points is None:
+                return self._configuration_error("swipe point payload requires integer start.x, start.y, end.x, and end.y parameters.")
+            sx, sy, ex, ey = points
+            duration = self._duration_seconds(params)
+            self.device.swipe(sx, sy, ex, ey, duration)
+            return self._passed({"start": {"x": sx, "y": sy}, "end": {"x": ex, "y": ey}})
         if not isinstance(direction, str):
             return self._configuration_error("swipe requires a direction parameter.")
         width, height = self._screen_size()
-        duration_ms = params.get("duration") if isinstance(params.get("duration"), int) else 200
-        duration = max(duration_ms, 1) / 1000
+        duration = self._duration_seconds(params)
         sx, sy, ex, ey = self._swipe_points(direction, width, height)
         self.device.swipe(sx, sy, ex, ey, duration)
         return self._passed({"direction": direction})
@@ -225,6 +232,23 @@ class UiAutomator2AndroidDriver:
         if normalized == "right":
             return int(width * 0.25), mid_y, int(width * 0.75), mid_y
         return mid_x, int(height * 0.75), mid_x, int(height * 0.25)
+
+    def _swipe_point_payload(self, params: dict[str, object]) -> tuple[int, int, int, int] | None:
+        start = params.get("start")
+        end = params.get("end")
+        if not isinstance(start, dict) or not isinstance(end, dict):
+            return None
+        sx = start.get("x")
+        sy = start.get("y")
+        ex = end.get("x")
+        ey = end.get("y")
+        if not all(isinstance(value, int) for value in [sx, sy, ex, ey]):
+            return None
+        return sx, sy, ex, ey
+
+    def _duration_seconds(self, params: dict[str, object]) -> float:
+        duration_ms = params.get("duration") if isinstance(params.get("duration"), int) else 200
+        return max(duration_ms, 1) / 1000
 
     def _target_missing(self, params: dict[str, object]) -> dict[str, object]:
         return self._failed("target_resolution_error", "Target was not found.", metadata={"params": params})

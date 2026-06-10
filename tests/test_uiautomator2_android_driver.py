@@ -144,6 +144,35 @@ def test_uiautomator2_driver_actions_use_locator_selectors() -> None:
     ]
 
 
+def test_uiautomator2_driver_supports_point_based_swipe() -> None:
+    device = FakeDevice()
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.swipe(
+        {
+            "start": {"x": 800, "y": 1900},
+            "end": {"x": 200, "y": 1900},
+            "duration": 1000,
+        }
+    )
+
+    assert result == {
+        "status": "passed",
+        "output": {"start": {"x": 800, "y": 1900}, "end": {"x": 200, "y": 1900}},
+    }
+    assert device.calls == [("swipe", 800, 1900, 200, 1900, 1.0)]
+
+
+def test_uiautomator2_driver_rejects_malformed_point_based_swipe() -> None:
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=FakeDevice())
+
+    result = driver.swipe({"start": {"x": 800}, "end": {"x": 200, "y": 1900}})
+
+    assert result["status"] == "failed"
+    assert result["failure_category"] == "configuration_error"
+    assert "start.x, start.y, end.x, and end.y" in str(result["error_message"])
+
+
 def test_uiautomator2_driver_waits_for_targets_before_actions() -> None:
     device = FakeDevice(wait_result=True)
     driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)

@@ -173,7 +173,7 @@ The phase-1 dispatch table is:
 | `inputText` | `input_text` | `{text, target, locator}` |
 | `assertNotVisible` | `assert_not_visible` | `{target, locator, optional?}` |
 | `longPressOn` | `long_press_on` | `{target, locator}` |
-| `swipe` | `swipe` | `{direction, duration}` or future point form |
+| `swipe` | `swipe` | `{direction, duration}` or `{start: {x, y}, end: {x, y}, duration?}` |
 | `assertWithAI` | `assert_with_ai` | `{prompt, optional, timeout?}` |
 
 `AndroidHarness(driver=driver, artifact_store=store | None)` should satisfy `HarnessInterface`. Its first action dispatcher should support exactly the phase-1 FSQ action names above. Screenshot and UI-tree capture should be available through `capture_artifact`; when an `ArtifactStore` is provided, screenshots and UI trees should be written to the standard artifact directories and returned as `HarnessArtifactRef` values. `capture_artifact` must receive FSQ-owned evidence metadata such as `step_id` and `phase` from the caller and must not infer those values from Android session context. Unsupported actions from the complete command set should return a failed `HarnessActionResult` with `failure_category="configuration_error"` rather than calling the driver until their driver methods are specified and implemented.
@@ -199,6 +199,8 @@ The phase-1 `UiAutomator2AndroidDriver` should implement only the existing `Andr
 | missing locator with `target` or scalar `value` | text selector fallback |
 
 Backend methods should return driver output dictionaries that `AndroidHarness` can convert into `HarnessActionResult`. Target lookup failures should return `status="failed"`, `failure_category="target_resolution_error"`, and a concise error message. Unsupported or underspecified backend operations should return `status="failed"` with `failure_category="configuration_error"`. The driver should not raise for ordinary target/assertion misses, decide retry policy, write artifacts, emit runner events, or aggregate case results.
+
+`UiAutomator2AndroidDriver.swipe` should support both direction-based and point-based FSQ payloads. Direction-based swipes compute points from the current screen size. Point-based swipes pass authored integer `start.x`, `start.y`, `end.x`, and `end.y` values directly to uiautomator2 with `duration` converted from milliseconds to seconds. Missing or malformed point payloads should return `configuration_error` rather than guessing coordinates.
 
 `UiAutomator2AndroidDriver` owns deterministic Android element wait policy for backend target resolution. FSQ YAML should not carry per-step wait durations for this phase-1 strict path; action payloads remain focused on user intent and locators. The first implementation should use a fixed internal default element wait timeout of `10.0` seconds and should prefer uiautomator2's built-in wait APIs over custom polling:
 
