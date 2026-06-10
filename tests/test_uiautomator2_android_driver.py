@@ -1,4 +1,5 @@
 import builtins
+from io import BytesIO
 from typing import Any
 
 import pytest
@@ -60,11 +61,16 @@ class FakeDevice:
 
     def screenshot(self, format: str = "raw") -> bytes:
         self.calls.append(("screenshot", format))
-        return b"fake-png"
+        return FakeImage()
 
     def dump_hierarchy(self) -> str:
         self.calls.append(("dump_hierarchy",))
         return "<hierarchy />"
+
+
+class FakeImage:
+    def save(self, output: BytesIO, format: str) -> None:
+        output.write(f"fake-{format.lower()}".encode())
 
 
 def test_uiautomator2_driver_context_launch_kill_and_artifacts() -> None:
@@ -83,7 +89,7 @@ def test_uiautomator2_driver_context_launch_kill_and_artifacts() -> None:
     assert device.calls == [
         ("app_start", "com.example.app", {}),
         ("app_stop", "com.example.app"),
-        ("screenshot", "raw"),
+        ("screenshot", "pillow"),
         ("dump_hierarchy",),
     ]
 

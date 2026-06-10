@@ -1,3 +1,4 @@
+from io import BytesIO
 from typing import Any
 
 from fsq_agent.models import ConfigurationError
@@ -109,12 +110,14 @@ class UiAutomator2AndroidDriver:
         return self._configuration_error("assertWithAI is not implemented for the uiautomator2 backend yet.")
 
     def screenshot(self) -> bytes:
-        image = self.device.screenshot(format="raw")
+        image = self.device.screenshot(format="pillow")
         if isinstance(image, bytes):
             return image
         if isinstance(image, bytearray):
             return bytes(image)
-        raise RuntimeError("uiautomator2 screenshot did not return bytes.")
+        output = BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
 
     def ui_tree(self) -> dict[str, object]:
         return {"xml": self.device.dump_hierarchy()}
