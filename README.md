@@ -18,7 +18,7 @@ fsq-agent run --config config.example.yaml --task examples/tasks/add-bookmark.co
 fsq-agent run-goal --config config.example.yaml --goal "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page."
 ```
 
-Set `AZURE_OPENAI_API_KEY` in `.env` before enabling the OpenAI Agents SDK runtime. For Android harness runs, also set `ANDROID_HOME` and `CAPABILITIES_CONFIG` in `.env` or the process environment; `CAPABILITIES_CONFIG` must point to the Appium capabilities JSON file. The Azure OpenAI base URL should use the `/openai/v1/` form and the model value is the deployment name, for example `gpt-5.4`. Existing process environment variables take precedence over `.env` values.
+Set `AZURE_OPENAI_API_KEY` in `.env` before enabling the OpenAI Agents SDK runtime. The Azure OpenAI base URL should use the `/openai/v1/` form and the model value is the deployment name, for example `gpt-5.4`. Existing process environment variables take precedence over `.env` values.
 
 Final verification strictness is configured with `verification.mode`. The default `normal` verifies the case goal and assertion key actions, `strict` verifies the goal plus every key action including operations, and `goal` verifies only the case goal. Execution still receives the full key-action flow in every mode.
 

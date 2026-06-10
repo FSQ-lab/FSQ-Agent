@@ -11,9 +11,6 @@ from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._verification_task import VerificationEvidenceBuilder
 from fsq_agent.config import Settings
 from fsq_agent.models import (
-    ConfigurationError,
-    HarnessPlatformSettings,
-    HarnessSettings,
     KnowledgeBundle,
     LocalToolOutputSettings,
     MCPToolValidationSettings,
@@ -33,11 +30,6 @@ class _EmptyToolFactory:
 class _FailingMCPFactory:
     async def enter_servers(self, _stack: AsyncExitStack) -> tuple[list[Any], list[Any]]:
         raise RuntimeError("MCP startup failed")
-
-
-class _EmptyMCPFactory:
-    async def enter_servers(self, _stack: AsyncExitStack) -> tuple[list[Any], list[Any]]:
-        return [], []
 
 
 class _DiagnosticMCPFactory:
@@ -70,76 +62,6 @@ async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPat
     assert results[0].status == "failed"
     assert results[0].tool_name == "openai_agents.runner"
     assert "MCP startup failed" in str(results[0].error)
-
-
-@pytest.mark.asyncio
-async def test_runtime_tears_down_harness_when_runner_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agents
-    import openai
-
-    class _FakeClient:
-        def __init__(self, **_kwargs: Any) -> None:
-            pass
-
-        async def close(self) -> None:
-            pass
-
-    class _FakeRunConfig:
-        def __init__(self, **_kwargs: Any) -> None:
-            pass
-
-    class _FakeToolOutputTrimmer:
-        def __init__(self, **_kwargs: Any) -> None:
-            pass
-
-    class _FailingStream:
-        final_output = None
-
-        async def stream_events(self):
-            raise RuntimeError("runner failed")
-            yield None
-
-    class _FakeRunner:
-        @staticmethod
-        def run_streamed(*_args: Any, **_kwargs: Any) -> _FailingStream:
-            return _FailingStream()
-
-    class _FakeHarness:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        async def run_setup(self) -> None:
-            self.calls.append("run_setup")
-
-        async def case_setup(self, _task: Task) -> None:
-            self.calls.append("case_setup")
-
-        async def case_teardown(self, _task: Task) -> None:
-            self.calls.append("case_teardown")
-
-        async def run_teardown(self) -> None:
-            self.calls.append("run_teardown")
-
-        def runtime_policy(self) -> list[str]:
-            return []
-
-    fake_harness = _FakeHarness()
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
-    monkeypatch.setattr(openai, "AsyncOpenAI", _FakeClient)
-    monkeypatch.setattr(agents, "OpenAIProvider", lambda **_kwargs: object())
-    monkeypatch.setattr(agents, "RunConfig", _FakeRunConfig)
-    monkeypatch.setattr(agents, "Runner", _FakeRunner)
-    monkeypatch.setattr(agents, "set_tracing_disabled", lambda _value: None)
-    monkeypatch.setattr("agents.extensions.ToolOutputTrimmer", _FakeToolOutputTrimmer)
-    monkeypatch.setattr("fsq_agent.agent._openai_runtime.HarnessFactory.create", lambda *_args, **_kwargs: fake_harness)
-
-    settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _EmptyMCPFactory())
-
-    results = await runtime.run_task(Task(id="runner-fails", description="Run."), KnowledgeBundle(), [], "run-1")
-
-    assert results[0].status == "failed"
-    assert fake_harness.calls == ["run_setup", "case_setup", "case_teardown", "run_teardown"]
 
 
 def test_runtime_builds_step_results_from_structured_pre_plan() -> None:
@@ -467,53 +389,6 @@ def test_runtime_builds_github_copilot_client() -> None:
     assert client == "client"
     build_client.assert_called_once_with(object, settings.workspace.root_dir)
     assert runtime._use_responses_api() is True
-
-
-def test_runtime_android_backend_env_requires_android_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    capabilities_path = tmp_path / "capabilities.json"
-    capabilities_path.write_text(json.dumps({"android": {"appium:appPackage": "com.example.app"}}), encoding="utf-8")
-    monkeypatch.delenv("ANDROID_HOME", raising=False)
-    monkeypatch.setenv("CAPABILITIES_CONFIG", str(capabilities_path))
-    settings = Settings(harness=HarnessSettings(name="android", platform=HarnessPlatformSettings(type="android", automation="appium")))
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
-
-    with pytest.raises(ConfigurationError, match="ANDROID_HOME"):
-        runtime._android_backend_env()
-
-
-def test_runtime_android_backend_env_requires_capabilities_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    android_home = tmp_path / "android-sdk"
-    android_home.mkdir()
-    monkeypatch.setenv("ANDROID_HOME", str(android_home))
-    monkeypatch.delenv("CAPABILITIES_CONFIG", raising=False)
-    settings = Settings(harness=HarnessSettings(name="android", platform=HarnessPlatformSettings(type="android", automation="appium")))
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
-
-    with pytest.raises(ConfigurationError, match="CAPABILITIES_CONFIG"):
-        runtime._android_backend_env()
-
-
-def test_runtime_android_backend_env_uses_explicit_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    android_home = tmp_path / "android-sdk"
-    android_home.mkdir()
-    capabilities_path = tmp_path / "capabilities.json"
-    capabilities_path.write_text(json.dumps({"android": {"appium:appPackage": "com.example.app"}}), encoding="utf-8")
-    monkeypatch.setenv("ANDROID_HOME", str(android_home))
-    monkeypatch.setenv("CAPABILITIES_CONFIG", str(capabilities_path))
-    monkeypatch.delenv("NO_UI", raising=False)
-    monkeypatch.delenv("SCREENSHOTS_DIR", raising=False)
-    settings = Settings(
-        harness=HarnessSettings(name="android", platform=HarnessPlatformSettings(type="android", automation="appium")),
-        output=OutputSettings(root_dir=tmp_path / "output", runs_dir=tmp_path / "output" / "runs"),
-    )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
-
-    env = runtime._android_backend_env()
-
-    assert env["ANDROID_HOME"] == str(android_home)
-    assert env["CAPABILITIES_CONFIG"] == str(capabilities_path)
-    assert env["NO_UI"] == "true"
-    assert env["SCREENSHOTS_DIR"] == str((settings.output.root_dir / "appium-screenshots").resolve())
 
 
 def test_runtime_tool_count_filter_keeps_recent_outputs_and_trims_history() -> None:

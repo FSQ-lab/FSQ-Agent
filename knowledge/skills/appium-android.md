@@ -1,36 +1,30 @@
-# Android Platform Action Skill
+# Appium Android MCP Skill
 
 ## Scope
 
-Use this skill when the configured harness is Android with Appium automation. Treat it as runtime guidance for FSQ Android platform actions, not as backend transport guidance.
+Use this skill only when the configured MCP server is Appium for Android. Treat it as runtime tool guidance for the current MCP configuration, not as a permanent FSQ DSL rule or cross-platform assumption.
 
-## Action Selection
+## Tool Selection
 
-| FSQ semantic action | Preferred platform action | Notes |
+| FSQ semantic action | Preferred Appium MCP path | Notes |
 |---|---|---|
-| Find visible UI | `android_find_element` | Prefer `strategy` + `selector` or known `element_id`; use `target` only as a convenience fallback. |
-| Tap element | `android_tap` | Prefer direct `element_id` or `strategy` + `selector`; do not call `android_find_element` first unless you need the id for multiple follow-up reads/actions. |
-| Scroll until visible | `android_scroll_to_element` | Use this instead of repeated find/screenshot/manual scroll loops. |
-| Read current UI tree | `android_page_source` | Use sparingly for targeted diagnosis when locators are unclear; it returns bounded XML text. |
-| Read element state | `android_get_text` / `android_get_attribute` | Use this for text, enabled, displayed, checked, clickable, content-desc, resource-id, and class checks. |
-| Enter text | `android_input_text` | Prefer direct `element_id` or `strategy` + `selector`; use `w3c_actions` only for the focused control. |
-| Press key | `android_press_key` | Use one clear semantic key per call, such as Back or Enter. |
-| Wait / pause | `wait_ms` or `android_wait` | Use a pure wait for FSQ pause and page-load waits. Do not use gestures as a wait substitute. |
-| Screenshot evidence | `android_screenshot` | Capture concise evidence for important assertions. |
-| AI visual assertion | `android_screenshot` then `submit_visual_assertion` | Capture a fresh screenshot after the relevant wait/state change, then submit that screenshot path with the assertion prompt. |
+| Find visible UI | `appium_find_element`, `appium_get_text`, `appium_get_page_source` | Prefer resource id or accessibility id, then xpath. |
+| Tap element | `appium_gesture` with `action=tap` and a fresh element UUID | Re-find stale elements before retrying. |
+| Enter text | `appium_set_value` | Verify the target field before setting text. |
+| Press key | `appium_mobile_press_key` | For each call choose exactly one key identity: either `key` or `keyCode`. Never merge examples for different keys. |
+| Wait / pause | `wait_ms` | Use this for FSQ `performActions` pause and page-load waits. Do not use scroll, long_press, or any gesture as a wait substitute. |
+| Screenshot evidence | `appium_screenshot` | Capture concise evidence for important assertions. |
+| AI visual assertion | `appium_screenshot` then `submit_visual_assertion` | For `assertWithAI`, capture a fresh screenshot after the relevant wait/state change, then submit that screenshot path with the assertion prompt. |
 
 ## Argument Rules
 
-- Do not manage Android automation sessions from the agent loop; session and app lifecycle are harness responsibilities.
-- Do not call lifecycle-only actions directly. The harness owns app activation, app termination, keyboard cleanup, alert cleanup, session creation, and session deletion.
-- Prefer exact locator arguments in this order: `element_id` from a fresh result, `strategy` + `selector`, then `target` fallback. For Android, prefer accessibility id, then resource id, then `-android uiautomator`; use xpath only as a last resort.
-- Use action composition inside platform actions. For example, call `android_tap` with `strategy` + `selector` directly instead of doing `android_find_element` and then `android_tap` unless the same element id will be reused.
-- Do not invent coordinate fields for `android_tap`; it is an element/locator tap action.
-- If an element may be off-screen, call `android_scroll_to_element` with the best locator rather than repeated failed finds.
-- Do not use keyboard cleanup as a Back or Enter substitute.
+- Always pass the runtime-provided non-empty `sessionId` when the tool schema exposes it.
+- Do not call session management from the agent loop; session ownership belongs to runtime lifecycle.
+- Do not use `appium_mobile_keyboard` as a Back or Enter substitute. It only hides or queries the software keyboard.
 - Do not use gestures, close buttons, or app lifecycle cleanup as proof that a required `pressKey` action succeeded.
-- Do not use gestures as waits. For FSQ `performActions` pause or page-load delays, call `wait_ms` or `android_wait` so waiting does not scroll, tap, long-press, or otherwise change UI state.
-- Treat platform action output as the executed action evidence. If a key action returns output for a different key than requested, do not count it as satisfying the original key action.
+- Do not use gestures as waits. For FSQ `performActions` pause or page-load delays, call `wait_ms` with the required duration so waiting does not scroll, tap, long-press, or otherwise change UI state.
+- For `appium_mobile_press_key`, do not send both `key` and `keyCode` in the same call. If one identity is present, omit the other field entirely.
+- Treat the tool output text as the executed key. If the output says `Successfully pressed key "BACK" on Android.`, the executed key was Back even if the request also contained `keyCode: 66`.
 
 ## Correct Key Examples
 
@@ -38,25 +32,45 @@ Use one payload from the matching semantic action below. Do not combine fields a
 
 ### `pressKey: Back`
 
+Use this payload:
+
 ```json
 {
-	"key": "Back"
+	"keyCode": 4,
+	"sessionId": "<runtime-session-id>"
 }
 ```
 
 ### `pressKey: Enter`
 
+Use this payload:
+
 ```json
 {
-	"key": "Enter"
+	"keyCode": 66,
+	"sessionId": "<runtime-session-id>"
 }
 ```
 
-## Action Error Recovery
+## Invalid Mixed Key Calls
 
-- If `android_press_key` returns an argument validation error, rebuild the payload from the semantic action and send only the matching key.
-- If a `pressKey: Enter` step returns output for Back, do not count it as Enter. Retry Enter with a clear Enter key payload.
-- If a `pressKey: Back` step returns output for Enter, do not count it as Back. Retry Back with a clear Back key payload.
-- After retrying a key action, verify the resulting UI state with a fresh observation such as visible text, element lookup, or screenshot evidence.
-- Before `assertWithAI`, use `wait_ms` or `android_wait` for any required pause and keep the page at the intended visual assertion state. Do not scroll or long-press merely to wait before taking the visual assertion screenshot.
-- For `assertWithAI`, do not claim the visual assertion is satisfied from a screenshot path alone. Capture a fresh screenshot with `android_screenshot`, then call `submit_visual_assertion` with the ordered key action id or label, the assertion prompt, and the fresh screenshot path before deciding whether the visual assertion is satisfied.
+Do not call `appium_mobile_press_key` with conflicting identities:
+
+
+```json
+{
+	"key": "BACK",
+	"keyCode": 66,
+	"sessionId": "<runtime-session-id>"
+}
+```
+
+## Tool Usage Error Recovery
+
+- If `appium_mobile_press_key` returns an argument validation error, rebuild the payload from the semantic action and send only the matching `keyCode` plus `sessionId`.
+- If a `pressKey: Enter` step accidentally returns output for Back, do not count it as Enter. Retry Enter with `keyCode: 66` and no `key` field.
+- If a `pressKey: Back` step accidentally returns output for Enter, do not count it as Back. Retry Back with `keyCode: 4` and no `key` field.
+- After retrying a key action, verify the resulting UI state with a fresh observation such as page source, visible text, or screenshot evidence.
+- Before `assertWithAI`, use `wait_ms` for any required pause and keep the page at the intended visual assertion state. Do not scroll or long-press merely to wait before taking the visual assertion screenshot.
+- For `assertWithAI`, do not claim the visual assertion is satisfied from a screenshot path alone. Capture a fresh screenshot with `appium_screenshot`, then call `submit_visual_assertion` with the ordered key action id or label, the assertion prompt, and the fresh screenshot path before deciding whether the visual assertion is satisfied.
+

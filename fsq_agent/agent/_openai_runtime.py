@@ -11,7 +11,7 @@ from typing import Any
 
 from fsq_agent.config import Settings, validate_runtime_settings
 from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, KnowledgeBundle, PlanningError, RunEvent, RunEventSink, SkillBundle, StepResult, Task
-from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory, HarnessFactory
+from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory, LifecycleControllerFactory, MCPToolCaller
 from fsq_agent.tools._tool_artifacts import ToolArtifactStore
 
 from fsq_agent.agent._copilot_provider import build_copilot_async_openai_client
@@ -247,15 +247,9 @@ class OpenAIAgentsRuntime:
             try:
                 async with AsyncExitStack() as stack:
                     mcp_servers, hosted_tools = await self.mcp_factory.enter_servers(stack)
-                    platform_backend = await self._enter_harness_backend(stack)
-                    harness = HarnessFactory.create(
-                        self.settings.harness,
-                        event_sink=event_sink,
-                        run_id=run_id,
-                        task_id=task.id,
-                        platform_backend=platform_backend,
-                    )
-                    harness_setup_completed = False
+                    lifecycle_controller = LifecycleControllerFactory.create(self.settings.lifecycle)
+                    lifecycle_caller = MCPToolCaller(mcp_servers, run_id, task.id, event_sink)
+                    lifecycle_setup_completed = False
                     validation_steps = self._build_mcp_validation_steps()
                     for step in validation_steps:
                         await self._emit(
@@ -271,14 +265,14 @@ class OpenAIAgentsRuntime:
                             ),
                         )
                     try:
-                        await harness.run_setup()
-                        harness_setup_completed = True
-                        await harness.case_setup(task)
+                        await lifecycle_controller.batch_setup(lifecycle_caller)
+                        lifecycle_setup_completed = True
+                        await lifecycle_controller.case_setup(lifecycle_caller, task)
                         agent = Agent(
                             name=self.settings.agent.name,
                             model=self.settings.openai_agents.model,
                             instructions=self._build_instructions(knowledge, skills),
-                            tools=[*self.tool_factory.build_tools(skills, run_id=run_id, task_id=task.id, event_sink=event_sink, harness=harness), *hosted_tools],
+                            tools=[*self.tool_factory.build_tools(skills, run_id=run_id, task_id=task.id, event_sink=event_sink), *hosted_tools],
                             mcp_servers=mcp_servers,
                             mcp_config=self._build_mcp_config(),
                             output_type=AgentFinalOutput,
@@ -295,7 +289,7 @@ class OpenAIAgentsRuntime:
                         )
                         result = Runner.run_streamed(
                             agent,
-                            input=self._build_task_input(task, harness.runtime_policy()),
+                            input=self._build_task_input(task, lifecycle_controller.runtime_policy()),
                             max_turns=self.settings.openai_agents.max_turns,
                             run_config=self._build_run_config(RunConfig, ToolOutputTrimmer, provider, run_id),
                         )
@@ -304,9 +298,9 @@ class OpenAIAgentsRuntime:
                             if run_event:
                                 await self._emit(event_sink, run_event)
                     finally:
-                        if harness_setup_completed:
-                            await harness.case_teardown(task)
-                            await harness.run_teardown()
+                        if lifecycle_setup_completed:
+                            await lifecycle_controller.case_teardown(lifecycle_caller, task)
+                            await lifecycle_controller.batch_teardown(lifecycle_caller)
             except Exception as exc:
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 await self._emit(
@@ -632,44 +626,6 @@ class OpenAIAgentsRuntime:
 
     def _build_mcp_config(self) -> dict[str, Any]:
         return {"convert_schemas_to_strict": self.settings.mcp_tool_validation.strict_schema}
-
-    async def _enter_harness_backend(self, stack: AsyncExitStack) -> Any:
-        if self.settings.harness.name not in {"android", "AndroidHarness"}:
-            return None
-        from fsq_agent.tools._android_harness import AndroidAppiumMCPBackend
-
-        return await AndroidAppiumMCPBackend.enter(stack, env=self._android_backend_env())
-
-    def _android_backend_env(self) -> dict[str, str]:
-        capabilities_env_name = self.settings.harness.platform.capabilities_config_env
-        required_env_names = ["ANDROID_HOME", capabilities_env_name]
-        missing = [name for name in required_env_names if not os.environ.get(name)]
-        if missing:
-            raise ConfigurationError(
-                "Android harness requires environment variable(s): " + ", ".join(missing) + ". Configure them in .env or the process environment."
-            )
-
-        android_home = Path(os.environ["ANDROID_HOME"])
-        if not android_home.is_dir():
-            raise ConfigurationError(f"Android harness requires ANDROID_HOME to point to an existing Android SDK directory: {android_home}")
-
-        capabilities_path = Path(os.environ[capabilities_env_name])
-        if not capabilities_path.is_file():
-            raise ConfigurationError(
-                f"Android harness requires {capabilities_env_name} to point to an existing Appium capabilities JSON file: {capabilities_path}"
-            )
-
-        env: dict[str, str] = {
-            "ANDROID_HOME": os.environ["ANDROID_HOME"],
-            capabilities_env_name: os.environ[capabilities_env_name],
-        }
-        for name in {"NO_UI", "SCREENSHOTS_DIR"}:
-            value = os.environ.get(name)
-            if value is not None:
-                env[name] = value
-        env.setdefault("NO_UI", "true")
-        env.setdefault("SCREENSHOTS_DIR", str((self.settings.output.root_dir / "appium-screenshots").resolve()))
-        return env
 
     def _map_stream_event(self, event: Any, run_id: str, task_id: str) -> RunEvent | None:
         event_type = getattr(event, "type", "")

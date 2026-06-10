@@ -268,33 +268,7 @@ openai_agents:
     assert settings.openai_agents.local_tool_output.full_output_max_chars == 40000
 
 
-def test_load_settings_accepts_harness(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        _base_config(
-            tmp_path,
-            """
-harness:
-  name: android
-  options: {}
-  platform:
-    type: android
-    automation: appium
-    capabilities_config_env: CAPABILITIES_CONFIG
-""",
-        ),
-        encoding="utf-8",
-    )
-
-    settings = load_settings(config_path)
-
-    assert settings.harness.name == "android"
-    assert settings.harness.options == {}
-    assert settings.harness.platform.type == "android"
-    assert settings.harness.platform.automation == "appium"
-
-
-def test_load_settings_rejects_removed_lifecycle_config(tmp_path: Path) -> None:
+def test_load_settings_accepts_lifecycle_controller(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
@@ -308,8 +282,10 @@ lifecycle:
         encoding="utf-8",
     )
 
-    with pytest.raises(ConfigurationError, match="Invalid configuration"):
-        load_settings(config_path)
+    settings = load_settings(config_path)
+
+    assert settings.lifecycle.controller == "appium_android"
+    assert settings.lifecycle.options == {}
 
 
 def test_validate_runtime_settings_requires_api_key_when_enabled(tmp_path: Path) -> None:

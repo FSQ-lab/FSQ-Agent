@@ -20,10 +20,6 @@ Current `__init__.py` exports via `__all__`:
 - `AgentPlanItem`: Pydantic model for one planned or adjusted agent step in final output.
 - `AgentFinalOutput`: Pydantic model for the OpenAI Agents SDK structured final output contract. It contains schema version, task status, summary, pre-plan, plan updates, satisfied/unmet criteria, evidence, and errors.
 - `ToolCallRecord`: Pydantic model for a normalized real tool invocation reconstructed from run events, including true tool name, origin, arguments, output preview, artifact reference, status, timing, and error fields.
-- `PlatformActionVisibility`: Literal value describing whether a registered platform action is available to the LLM, to the future deterministic runner only, or to harness lifecycle code only.
-- `PlatformFailureCategory`: Literal value for normalized harness/platform failures: `configuration_error`, `lifecycle_error`, `unsupported_action`, `action_error`, `observation_error`, `timeout_error`, `backend_error`, or `unknown_error`.
-- `PlatformActionDefinition`: Pydantic model describing one FSQ-owned platform action, including name, description, JSON input schema, visibility, idempotence, timeout, and evidence policy metadata.
-- `PlatformActionResult`: Pydantic model describing one normalized platform action invocation result, including action name, status, duration, output, error, failure category, evidence references, and bounded backend debug metadata.
 - `FsqCaseConfig`: Pydantic model describing the metadata document from an FSQ AI Test DSL `.codex.yaml` case.
 - `FsqCase`: Pydantic model containing an FSQ case path, parsed metadata, and command list.
 - `ExecutionPlan`: Pydantic model containing ordered `ExecutionStep` items and planning rationale.
@@ -61,8 +57,7 @@ Current `__init__.py` exports via `__all__`:
 - `ContextTrimmingSettings`: Pydantic model controlling SDK model-input trimming for older large tool outputs, including recent turn retention, maximum inline tool output size, preview size, and optional trimmable tool names.
 - `LocalToolOutputSettings`: Pydantic model controlling how local SDK function tools write full outputs to per-run artifacts and decide whether model-facing responses contain full output or artifact references.
 - `RuntimeSecretSettings`: Pydantic model listing environment variable names that local SDK tools may reveal to the model during a run. Values are loaded through normal environment or `.env` loading but are never stored in YAML case files.
-- `HarnessPlatformSettings`: Pydantic model describing the selected platform family, automation technology, capabilities configuration environment variable, and platform startup retry policy without exposing backend server or tool names.
-- `HarnessSettings`: Pydantic model selecting the named harness implementation, passing lifecycle options, and nesting `HarnessPlatformSettings` for platform-action execution.
+- `LifecycleControllerSettings`: Pydantic model selecting the named setup/teardown controller implementation and passing implementation-specific options.
 - `MCPServerConfig`: Pydantic model for OpenAI Agents SDK MCP configuration. Supports `stdio`, `streamable_http`, `sse`, and `hosted` transports plus approval policy, headers, manual tool filters, and prompt loading policy.
 - `CLIToolConfig`: Pydantic model for configured CLI tools.
 - `SkillConfig`: Pydantic model for one configured automation skill source.
@@ -86,8 +81,8 @@ Current `__init__.py` exports via `__all__`:
 - `_agent_io.py`: Structured agent task input, final output, plan item, schema version, and normalized tool-call record models.
 - `_events.py`: Live run event model and event sink type alias.
 - `_fsq.py`: FSQ AI Test DSL case metadata and case models.
-- `_tools.py`: Tool metadata, tool call, tool result, MCP validation issue/settings, MCP config, CLI config, platform action definition, platform action result, and platform failure models.
-- `_settings.py`: Settings value models, including harness and platform settings.
+- `_tools.py`: Tool metadata, tool call, tool result, MCP validation issue/settings, MCP config, and CLI config models.
+- `_settings.py`: Settings value models.
 - `_skills.py`: Skill configuration and loaded skill bundle models.
 - `_report.py`: Report artifact and evidence models.
 - `_knowledge.py`: Knowledge bundle model.
@@ -114,9 +109,8 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Context and local tool output settings are GPT-5.4 tuned by default: recent small or moderate tool outputs remain inline for fewer extra tool turns, while older or very large outputs are written to artifacts and represented by bounded previews.
 - Runtime prompt text is template-owned through `OpenAIAgentPromptConfig`. The agent runtime assembles prompt models for knowledge, skills, task input, file-backed and inline custom instructions, and variables, then renders Jinja template files. Static behavioral text, headings, loops, and formatting should live in template files instead of hidden code paths or ad hoc string concatenation. Long operator instructions should live in a configured custom instructions file rather than inline YAML.
 - Runtime secrets are model-owned as an allowlist of environment variable names. This keeps credential values out of cases and config YAML while allowing the tools module to expose only explicitly approved values to the SDK runner. Secret values must be redacted from user-visible events, artifact output, and final reports.
-- Harness selection is model-owned through `HarnessSettings`. The setting stores a harness name, opaque harness lifecycle options, and semantic platform automation settings. Concrete harness and platform adapter behavior is implemented by the tools module so platform/backend-specific logic does not leak into config parsing.
-- Platform action definitions and results are model-owned so the current OpenAI Agents SDK tool path and the future deterministic StepRunner path use one shared action contract. Backend transport details may be stored only as bounded debug metadata and must not become model-facing operation contracts.
-- fsq-agent does not own native screenshot or UI tree capture settings outside the active harness/platform/tool integrations. Those observations are used only when supplied by configured harness platform actions or tools.
+- Setup and teardown lifecycle selection is model-owned through `LifecycleControllerSettings`. The setting stores a controller name and opaque options; concrete behavior is implemented by the tools module so platform/MCP-specific logic does not leak into config parsing.
+- fsq-agent does not own native screenshot or UI tree capture settings. Those observations are used only when supplied by configured MCP servers or tools.
 - Page knowledge is represented as a compact graph-like Markdown/JSON format owned by shared models so external generators can produce compatible files. `index.md` is a concise JSON index for page lookup; each `pages/*.md` file contains one JSON page node. Page identifiers are semantic descriptions without locators. Element locators are explicitly reference locators, not authoritative runtime truth.
 - Goal pre-planning is represented separately from execution results. It produces ordered key actions from a natural-language goal and loaded page knowledge, but it does not execute UI actions or verify runtime state.
 - OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration that `agent` and `tools` adapt into SDK `Agent`, `FunctionTool`, `MCPServer*`, and hosted tool objects. `OpenAIAgentsSettings.provider` is the serialized switch for choosing Azure OpenAI or GitHub Copilot provider construction at runtime.
