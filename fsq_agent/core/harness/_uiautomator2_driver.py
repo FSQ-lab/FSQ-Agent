@@ -6,6 +6,7 @@ from fsq_agent.models import ConfigurationError
 
 DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS = 10.0
 ANDROID_STATE_ASSERTION_FIELDS = ("enabled", "checked", "selected", "clickable", "focused")
+ANDROID_LOCATOR_FIELDS = ("resourceId", "accessibilityId", "text", "className", "xpath")
 
 
 class UiAutomator2AndroidDriver:
@@ -115,6 +116,8 @@ class UiAutomator2AndroidDriver:
             expected_states = self._expected_element_states(element)
             if expected_states:
                 return self._assert_element_states(selector, expected_states)
+            if self._has_locator(element):
+                return self._passed({"exists": True})
         return self._configuration_error("assert requires a text or supported element state assertion.")
 
     def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
@@ -261,6 +264,9 @@ class UiAutomator2AndroidDriver:
 
     def _expected_element_states(self, element: dict[str, object]) -> dict[str, bool]:
         return {field: value for field in ANDROID_STATE_ASSERTION_FIELDS if isinstance((value := element.get(field)), bool)}
+
+    def _has_locator(self, element: dict[str, object]) -> bool:
+        return any(isinstance(element.get(field), str) and element[field].strip() for field in ANDROID_LOCATOR_FIELDS)
 
     def _assert_element_states(self, selector: object, expected_states: dict[str, bool]) -> dict[str, object]:
         actual_states = self._selector_info(selector)

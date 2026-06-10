@@ -320,11 +320,33 @@ def test_uiautomator2_driver_reports_android_element_state_mismatch() -> None:
 def test_uiautomator2_driver_reports_unsupported_assertion_shape() -> None:
     driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=FakeDevice())
 
-    result = driver.assert_state({"element": {"resourceId": "item"}})
+    result = driver.assert_state({"element": {}})
 
     assert result["status"] == "failed"
     assert result["failure_category"] == "configuration_error"
     assert "text or supported element state assertion" in str(result["error_message"])
+
+
+def test_uiautomator2_driver_asserts_element_existence_with_locator_only() -> None:
+    device = FakeDevice()
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.assert_state({"element": {"xpath": "//android.widget.EditText[@text='chinatravel.com']"}})
+
+    assert result == {"status": "passed", "output": {"exists": True}}
+    assert device.calls == [
+        ("xpath", "//android.widget.EditText[@text='chinatravel.com']"),
+        (
+            "xpath_wait",
+            {"xpath": "//android.widget.EditText[@text='chinatravel.com']"},
+            {"exists": True, "timeout": 10.0},
+        ),
+        (
+            "xpath_wait",
+            {"xpath": "//android.widget.EditText[@text='chinatravel.com']"},
+            {"timeout": 10.0},
+        ),
+    ]
 
 
 def test_uiautomator2_driver_reports_unimplemented_backend_operations() -> None:
