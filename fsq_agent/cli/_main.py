@@ -7,11 +7,14 @@ import click
 
 from fsq_agent.agent import FsqAgent
 from fsq_agent.cli._formatting import log_capabilities, log_result, log_run_event
+from fsq_agent.cli._core_execution import run_strict_fsq_core_case
 from fsq_agent.cli._logging import configure_cli_logging
 from fsq_agent.cli._pre_plan_formatting import log_pre_plan
-from fsq_agent.cli._task_loader import load_task, load_tasks
+from fsq_agent.cli._task_loader import _resolve_task_path, load_task, load_tasks
 from fsq_agent.config import load_settings, validate_runtime_settings
-from fsq_agent.models import FsqAgentError, Task, VerificationCriterion
+from fsq_agent.core import AndroidHarness, ArtifactStore, UiAutomator2AndroidDriver
+from fsq_agent.fsq import FsqCaseLoader
+from fsq_agent.models import ConfigurationError, FsqAgentError, Task, VerificationCriterion
 from fsq_agent.tools import CapabilityRegistry
 
 
@@ -98,6 +101,48 @@ def run_batch(
 
     try:
         asyncio.run(_run_all())
+    except FsqAgentError as exc:
+        logger.error("Error: %s", exc)
+        raise click.Abort() from exc
+
+
+@main.command("run-strict-core")
+@click.option("--config", "config_path", type=click.Path(exists=False, dir_okay=False), default=None)
+@click.option("--workspace", "workspace_path", type=click.Path(file_okay=False), default=None)
+@click.option("--task", "task_path", type=click.Path(exists=False, dir_okay=False), required=True)
+@click.option("--android-serial", required=True)
+@click.option("--app-id", default=None)
+@click.option("--run-id", default=None)
+def run_strict_core(
+    config_path: str | None,
+    workspace_path: str | None,
+    task_path: str,
+    android_serial: str,
+    app_id: str | None,
+    run_id: str | None,
+) -> None:
+    try:
+        settings = load_settings(config_path, workspace_path)
+        resolved_task_path = _resolve_task_path(task_path, settings.cases.dir)
+        case = FsqCaseLoader().load_case(resolved_task_path)
+        resolved_app_id = app_id or case.config.app_id
+        if not resolved_app_id:
+            raise ConfigurationError(
+                "Android app id is required for strict core runs.",
+                context={"task": str(resolved_task_path)},
+            )
+        resolved_run_id = run_id or case.id
+        run_dir = Path(settings.output.runs_dir) / resolved_run_id
+        driver = UiAutomator2AndroidDriver(app_id=resolved_app_id, serial=android_serial)
+        harness = AndroidHarness(driver=driver, artifact_store=ArtifactStore(run_dir=run_dir))
+        artifact = run_strict_fsq_core_case(
+            case_path=resolved_task_path,
+            harness=harness,
+            output_dir=run_dir,
+            run_id=resolved_run_id,
+        )
+        logger.info("Core report: %s", artifact.path)
+        logger.info("Evidence manifest: %s", artifact.evidence_manifest_path)
     except FsqAgentError as exc:
         logger.error("Error: %s", exc)
         raise click.Abort() from exc

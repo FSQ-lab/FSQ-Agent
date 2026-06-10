@@ -30,6 +30,7 @@ Current commands:
 - `fsq-agent capabilities --config PATH --workspace PATH`: Print discovered MCP, CLI, and file operation capabilities.
 - `fsq-agent report --run-id ID --format FORMAT --config PATH --workspace PATH`: Print a report from the configured workspace output runs directory.
 - `fsq-agent pre-plan --goal TEXT --config PATH --workspace PATH --format text|json --stream/--no-stream --stream-format rich|jsonl`: Generate an ordered key-action pre-plan from a natural-language goal using configured page knowledge. This command does not execute UI actions or generate a run report.
+- `fsq-agent run-strict-core --task PATH --android-serial SERIAL --app-id APP_ID? --run-id ID? --config PATH --workspace PATH`: Run one Android `.codex.yaml` FSQ case through the deterministic core strict path using `UiAutomator2AndroidDriver`, write `evidence-manifest.json`, generate `core-report.md/json`, and print the generated paths. Relative task paths resolve against `cases.dir` first. `appId` is read from the FSQ case unless `--app-id` is provided.
 
 Planned internal deterministic-core composition helper:
 
