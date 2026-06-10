@@ -27,6 +27,7 @@ Bug fixes that do not change public interfaces or intended behavior may skip the
 | fsq | fsq_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases and converts them into agent tasks. |
 | skills | fsq_agent/skills/SPEC.md | Loads automation skill instruction bundles and skill file metadata. |
 | report | fsq_agent/report/SPEC.md | Generates task reports and evidence manifests. |
+| core | fsq_agent/core/SPEC.md | Defines shared execution-core orchestration boundaries, StepRunner protocol, harness interface, and evidence coordination. |
 | agent | fsq_agent/agent/SPEC.md | Orchestrates planning, execution, verification, retry, and report generation. |
 | cli | fsq_agent/cli/SPEC.md | Exposes command line workflows for running tasks and inspecting capabilities. |
 
@@ -35,7 +36,9 @@ Bug fixes that do not change public interfaces or intended behavior may skip the
 ```mermaid
 flowchart TD
     CLI[cli] --> Agent[agent]
+    CLI --> Core[core]
     CLI --> FSQ[fsq]
+    Agent --> Core[core]
     Agent --> Config[config]
     Agent --> Models[models]
     Agent --> Tools[tools]
@@ -50,6 +53,7 @@ flowchart TD
     FSQ --> Models
     Skills --> Models
     Report --> Models
+    Core --> Models
 ```
 
 ## Development Rules
