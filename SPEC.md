@@ -1,8 +1,21 @@
-# fsq-agent Claude Instructions
+# fsq-agent Project Specification
 
-This repository uses Spec-Driven Development.
+This repository uses spec-driven development. Root `SPEC.md` is the project-level specification and module navigation source of truth. Each module also owns a module-level `SPEC.md`.
 
-Read root `SPEC.md` first. It is the project-level specification and module navigation source of truth. Before changing code, also read the relevant module-level `SPEC.md` files.
+## Spec-Driven Development Workflow
+
+For non-trivial development:
+
+1. Clarify requirements and produce a design document.
+2. Update or create relevant module `SPEC.md` files from that design.
+3. Get `SPEC.md` confirmation before implementation.
+4. Implement only against confirmed `SPEC.md`.
+5. If implementation reveals missing design, stop and update `SPEC.md` first.
+6. Before claiming completion, run independent diff-based SPEC implementation audit.
+
+Bug fixes that do not change public interfaces or intended behavior may skip the design document, but must still read relevant `SPEC.md` files and verify that the specs remain accurate.
+
+## Module Table
 
 | Module | SPEC | Purpose |
 |---|---|---|
@@ -14,7 +27,6 @@ Read root `SPEC.md` first. It is the project-level specification and module navi
 | fsq | fsq_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases and converts them into agent tasks. |
 | skills | fsq_agent/skills/SPEC.md | Loads automation skill instruction bundles and skill file metadata. |
 | report | fsq_agent/report/SPEC.md | Generates task reports and evidence manifests. |
-| core | fsq_agent/core/SPEC.md | Defines shared execution-core orchestration boundaries, StepRunner protocol, harness interface, and evidence coordination. |
 | agent | fsq_agent/agent/SPEC.md | Orchestrates planning, execution, verification, retry, and report generation. |
 | cli | fsq_agent/cli/SPEC.md | Exposes command line workflows for running tasks and inspecting capabilities. |
 
@@ -23,9 +35,7 @@ Read root `SPEC.md` first. It is the project-level specification and module navi
 ```mermaid
 flowchart TD
     CLI[cli] --> Agent[agent]
-    CLI --> Core[core]
     CLI --> FSQ[fsq]
-    Agent --> Core[core]
     Agent --> Config[config]
     Agent --> Models[models]
     Agent --> Tools[tools]
@@ -40,7 +50,6 @@ flowchart TD
     FSQ --> Models
     Skills --> Models
     Report --> Models
-    Core --> Models
 ```
 
 ## Development Rules
@@ -49,4 +58,5 @@ flowchart TD
 - Internal implementation files are prefixed with `_`.
 - Shared data structures and exceptions live only in the `models` module.
 - Module imports must follow the DAG in the architecture diagram.
-- Public interface changes require SPEC update and user confirmation before implementation.
+- Public interface changes require `SPEC.md` update and user confirmation before implementation.
+- `CLAUDE.md` and `AGENTS.md` are agent entry points only. They must point to this root `SPEC.md` and must not duplicate project specification content.
