@@ -476,3 +476,27 @@ Planner output / FSQ step
     -> EvidenceRecorder builds EvidenceBundle
 
   这是最接近 pytest 精髓的方式。
+
+  TODO: 进一步靠近 xUnit/pytest 的异常语义
+
+  当前 StepSequenceRunner 已经按 xUnit 风格处理 normal body 和 teardown：normal step 失败会停止后续业务步骤，但 teardown steps 必须执行。后续还需要评估是否把 Harness 层的失败表达从“返回 failed result”逐步升级为 typed exception。
+
+  目标方向：
+
+  - HarnessInterface.invoke_action 遇到目标找不到、断言失败、配置错误、超时等测试失败时，可以 raise typed HarnessActionError。
+  - StepRunner 作为异常边界，捕获 HarnessActionError，并转换成 HarnessActionResult、StepPhaseReport、RunnerStepResult。
+  - EvidenceBundle 和 report 继续消费结构化结果，不直接依赖 Python exception object。
+  - teardown/finalize 仍然必须在异常路径上执行。
+  - CLI 不应因为 testcase 失败直接 abort；失败 case 仍然要产出 evidence-manifest 和 core-report。
+
+  推荐分批：
+
+  1. 在 models 中定义 HarnessActionError 或等价 typed action exception，StepRunner 先兼容捕获它，同时继续支持现有 HarnessActionResult 返回值。
+  2. AndroidHarness 把 driver failed result 转换为 HarnessActionError，让 Harness 层更接近 xUnit 的“失败即异常”语义。
+  3. 最后再评估 AndroidDriverInterface 是否也改成异常式 API。这个影响用户自定义 driver，暂时不急。
+
+  暂不做的事情：
+
+  - 不让 typed exception 穿透到 CLI。
+  - 不用异常替代 EvidenceBundle 中的结构化 failure_category/error_message。
+  - 不因为 normal step 失败继续执行所有后续业务步骤。
