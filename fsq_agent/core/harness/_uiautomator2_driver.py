@@ -4,6 +4,9 @@ from typing import Any
 from fsq_agent.models import ConfigurationError
 
 
+DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS = 10.0
+
+
 class UiAutomator2AndroidDriver:
     def __init__(self, *, app_id: str, serial: str | None = None, device: object | None = None) -> None:
         self.app_id = app_id
@@ -35,14 +38,14 @@ class UiAutomator2AndroidDriver:
 
     def tap_on(self, params: dict[str, object]) -> dict[str, object]:
         selector = self._selector(params)
-        if not self._exists(selector):
+        if not self._wait_for_exists(selector):
             return self._target_missing(params)
         selector.click()
         return self._passed()
 
     def long_press_on(self, params: dict[str, object]) -> dict[str, object]:
         selector = self._selector(params)
-        if not self._exists(selector):
+        if not self._wait_for_exists(selector):
             return self._target_missing(params)
         selector.long_click()
         return self._passed()
@@ -52,7 +55,7 @@ class UiAutomator2AndroidDriver:
         if not isinstance(text, str):
             return self._configuration_error("inputText requires a string text parameter.")
         selector = self._selector(params)
-        if not self._exists(selector):
+        if not self._wait_for_exists(selector):
             return self._target_missing(params)
         selector.set_text(text)
         return self._passed()
@@ -80,7 +83,7 @@ class UiAutomator2AndroidDriver:
 
     def assert_visible(self, params: dict[str, object]) -> dict[str, object]:
         selector = self._selector(params)
-        if self._exists(selector):
+        if self._wait_for_exists(selector):
             return self._passed()
         return self._target_missing(params)
 
@@ -88,11 +91,13 @@ class UiAutomator2AndroidDriver:
         selector = self._selector(params)
         if not self._exists(selector):
             return self._passed()
+        if self._wait_for_not_exists(selector):
+            return self._passed()
         return self._failed("assertion_error", "Target is visible.")
 
     def assert_state(self, params: dict[str, object]) -> dict[str, object]:
         selector = self._selector(params, locator_key="element")
-        if not self._exists(selector):
+        if not self._wait_for_exists(selector):
             return self._target_missing(params)
         expected = params.get("text")
         if not isinstance(expected, dict):
@@ -158,6 +163,28 @@ class UiAutomator2AndroidDriver:
         if isinstance(locator.get("className"), str):
             query["className"] = locator["className"]
         return query
+
+    def _wait_for_exists(self, selector: object) -> bool:
+        wait = getattr(selector, "wait", None)
+        if callable(wait):
+            try:
+                return bool(wait(exists=True, timeout=DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS))
+            except TypeError:
+                return bool(wait(timeout=DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS))
+        return self._exists(selector)
+
+    def _wait_for_not_exists(self, selector: object) -> bool:
+        wait_gone = getattr(selector, "wait_gone", None)
+        if callable(wait_gone):
+            return bool(wait_gone(timeout=DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS))
+
+        wait = getattr(selector, "wait", None)
+        if callable(wait):
+            try:
+                return bool(wait(exists=False, timeout=DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS))
+            except TypeError:
+                pass
+        return not self._exists(selector)
 
     def _exists(self, selector: object) -> bool:
         exists = getattr(selector, "exists", False)

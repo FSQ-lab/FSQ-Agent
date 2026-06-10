@@ -14,6 +14,14 @@ class FakeSelector:
         self.query = query
         self.exists = device.exists if exists is None else exists
 
+    def wait(self, **kwargs: object) -> bool:
+        self.device.calls.append(("wait", self.query, kwargs))
+        return self.device.wait_result
+
+    def wait_gone(self, **kwargs: object) -> bool:
+        self.device.calls.append(("wait_gone", self.query, kwargs))
+        return self.device.wait_gone_result
+
     def click(self) -> None:
         self.device.calls.append(("click", self.query))
 
@@ -28,10 +36,27 @@ class FakeSelector:
         return self.device.text
 
 
+class FakeXPathSelector(FakeSelector):
+    def wait(self, **kwargs: object) -> bool:
+        self.device.calls.append(("xpath_wait", self.query, kwargs))
+        if "exists" in kwargs:
+            raise TypeError("xpath wait does not accept exists")
+        return self.device.wait_result
+
+
 class FakeDevice:
-    def __init__(self, *, exists: bool = True, text: str = "Loaded") -> None:
+    def __init__(
+        self,
+        *,
+        exists: bool = True,
+        text: str = "Loaded",
+        wait_result: bool = True,
+        wait_gone_result: bool = True,
+    ) -> None:
         self.exists = exists
         self.text = text
+        self.wait_result = wait_result
+        self.wait_gone_result = wait_gone_result
         self.calls: list[tuple[Any, ...]] = []
         self.info = {
             "displayWidth": 1080,
@@ -45,7 +70,7 @@ class FakeDevice:
 
     def xpath(self, value: str) -> FakeSelector:
         self.calls.append(("xpath", value))
-        return FakeSelector(self, {"xpath": value})
+        return FakeXPathSelector(self, {"xpath": value})
 
     def app_start(self, app_id: str, **options: object) -> None:
         self.calls.append(("app_start", app_id, options))
@@ -105,19 +130,90 @@ def test_uiautomator2_driver_actions_use_locator_selectors() -> None:
     assert driver.swipe({"direction": "up", "duration": 100})["status"] == "passed"
     assert driver.assert_state({"element": {"resourceId": "url"}, "text": {"contains": "bing"}})["status"] == "passed"
 
-    assert device.calls[:7] == [
+    assert device.calls[:10] == [
         ("select", {"resourceId": "login"}),
+        ("wait", {"resourceId": "login"}, {"exists": True, "timeout": 10.0}),
         ("click", {"resourceId": "login"}),
         ("select", {"description": "Menu"}),
+        ("wait", {"description": "Menu"}, {"exists": True, "timeout": 10.0}),
         ("long_click", {"description": "Menu"}),
         ("select", {"text": "Search"}),
+        ("wait", {"text": "Search"}, {"exists": True, "timeout": 10.0}),
         ("set_text", {"text": "Search"}, "hello"),
         ("press", "back"),
     ]
 
 
+def test_uiautomator2_driver_waits_for_targets_before_actions() -> None:
+    device = FakeDevice(wait_result=True)
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    assert driver.tap_on({"locator": {"resourceId": "login"}})["status"] == "passed"
+    assert driver.long_press_on({"locator": {"accessibilityId": "Menu"}})["status"] == "passed"
+    assert driver.input_text({"text": "hello", "locator": {"text": "Search"}})["status"] == "passed"
+
+    assert device.calls[:6] == [
+        ("select", {"resourceId": "login"}),
+        ("wait", {"resourceId": "login"}, {"exists": True, "timeout": 10.0}),
+        ("click", {"resourceId": "login"}),
+        ("select", {"description": "Menu"}),
+        ("wait", {"description": "Menu"}, {"exists": True, "timeout": 10.0}),
+        ("long_click", {"description": "Menu"}),
+    ]
+    assert ("wait", {"text": "Search"}, {"exists": True, "timeout": 10.0}) in device.calls
+
+
+def test_uiautomator2_driver_assert_visible_waits_before_missing_target() -> None:
+    device = FakeDevice(exists=False, wait_result=False)
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.assert_visible({"locator": {"text": "Missing"}})
+
+    assert result["status"] == "failed"
+    assert result["failure_category"] == "target_resolution_error"
+    assert device.calls == [
+        ("select", {"text": "Missing"}),
+        ("wait", {"text": "Missing"}, {"exists": True, "timeout": 10.0}),
+    ]
+
+
+def test_uiautomator2_driver_assert_not_visible_waits_for_visible_target_to_disappear() -> None:
+    device = FakeDevice(exists=True, wait_gone_result=True)
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.assert_not_visible({"locator": {"text": "Dialog"}})
+
+    assert result["status"] == "passed"
+    assert device.calls == [
+        ("select", {"text": "Dialog"}),
+        ("wait_gone", {"text": "Dialog"}, {"timeout": 10.0}),
+    ]
+
+
+def test_uiautomator2_driver_xpath_wait_retries_without_exists_argument() -> None:
+    device = FakeDevice(wait_result=True)
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.assert_visible({"locator": {"xpath": "//android.widget.TextView[@text='Browse InPrivate']"}})
+
+    assert result["status"] == "passed"
+    assert device.calls == [
+        ("xpath", "//android.widget.TextView[@text='Browse InPrivate']"),
+        (
+            "xpath_wait",
+            {"xpath": "//android.widget.TextView[@text='Browse InPrivate']"},
+            {"exists": True, "timeout": 10.0},
+        ),
+        (
+            "xpath_wait",
+            {"xpath": "//android.widget.TextView[@text='Browse InPrivate']"},
+            {"timeout": 10.0},
+        ),
+    ]
+
+
 def test_uiautomator2_driver_assertion_and_missing_target_results() -> None:
-    device = FakeDevice(exists=False)
+    device = FakeDevice(exists=False, wait_result=False)
     driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
 
     missing = driver.assert_visible({"locator": {"text": "Missing"}})

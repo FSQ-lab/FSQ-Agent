@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `tests/test_uiautomator2_android_driver.py`
 
-- [ ] **Step 1: Extend `FakeSelector` with wait hooks**
+- [x] **Step 1: Extend `FakeSelector` with wait hooks**
 
 Update the existing fake selector to record wait calls and allow wait return values:
 
@@ -62,7 +62,7 @@ class FakeDevice:
         self.calls: list[tuple[Any, ...]] = []
 ```
 
-- [ ] **Step 2: Add test for target actions using wait before operating**
+- [x] **Step 2: Add test for target actions using wait before operating**
 
 Add this test:
 
@@ -86,7 +86,7 @@ def test_uiautomator2_driver_waits_for_targets_before_actions() -> None:
     assert ("wait", {"text": "Search"}, {"exists": True, "timeout": 10.0}) in device.calls
 ```
 
-- [ ] **Step 3: Add test for assertion wait and timeout failure**
+- [x] **Step 3: Add test for assertion wait and timeout failure**
 
 Add this test:
 
@@ -105,7 +105,7 @@ def test_uiautomator2_driver_assert_visible_waits_before_missing_target() -> Non
     ]
 ```
 
-- [ ] **Step 4: Add test for `assert_not_visible` wait-gone behavior**
+- [x] **Step 4: Add test for `assert_not_visible` wait-gone behavior**
 
 Add this test:
 
@@ -123,7 +123,7 @@ def test_uiautomator2_driver_assert_not_visible_waits_for_visible_target_to_disa
     ]
 ```
 
-- [ ] **Step 5: Add test for XPath wait signature compatibility**
+- [x] **Step 5: Add test for XPath wait signature compatibility**
 
 Add a fake selector that raises `TypeError` when `exists=True` is passed, matching XPath wait signature behavior:
 
@@ -161,7 +161,7 @@ def test_uiautomator2_driver_xpath_wait_retries_without_exists_argument() -> Non
     ]
 ```
 
-- [ ] **Step 6: Verify red**
+- [x] **Step 6: Verify red**
 
 Run:
 
@@ -176,7 +176,7 @@ Expected: FAIL because `UiAutomator2AndroidDriver` still calls `_exists` directl
 **Files:**
 - Modify: `fsq_agent/core/harness/_uiautomator2_driver.py`
 
-- [ ] **Step 1: Add timeout constant**
+- [x] **Step 1: Add timeout constant**
 
 Add near the top of the file:
 
@@ -184,7 +184,7 @@ Add near the top of the file:
 DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS = 10.0
 ```
 
-- [ ] **Step 2: Add private wait helpers**
+- [x] **Step 2: Add private wait helpers**
 
 Add these methods below `_selector_query` and above `_exists`:
 
@@ -212,7 +212,7 @@ def _wait_for_not_exists(self, selector: object) -> bool:
     return not self._exists(selector)
 ```
 
-- [ ] **Step 3: Replace target-bearing `_exists` checks**
+- [x] **Step 3: Replace target-bearing `_exists` checks**
 
 Update these methods to call `_wait_for_exists(selector)` instead of `_exists(selector)`:
 
@@ -254,7 +254,7 @@ def assert_state(self, params: dict[str, object]) -> dict[str, object]:
     ...
 ```
 
-- [ ] **Step 4: Update `assert_not_visible`**
+- [x] **Step 4: Update `assert_not_visible`**
 
 Replace the method with:
 
@@ -270,7 +270,7 @@ def assert_not_visible(self, params: dict[str, object]) -> dict[str, object]:
 
 This preserves immediate pass for already-absent targets and waits only when the target is currently visible.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run:
 
@@ -285,7 +285,7 @@ Expected: PASS.
 **Files:**
 - Modified files from Tasks 1-2.
 
-- [ ] **Step 1: Run related tests**
+- [x] **Step 1: Run related tests**
 
 Run:
 
@@ -295,7 +295,7 @@ pytest tests/test_uiautomator2_android_driver.py tests/test_android_harness.py t
 
 Expected: PASS.
 
-- [ ] **Step 2: Run full suite and diff check**
+- [x] **Step 2: Run full suite and diff check**
 
 Run:
 
@@ -306,7 +306,7 @@ git diff --check
 
 Expected: `pytest` passes and `git diff --check` exits 0 with no output.
 
-- [ ] **Step 3: Re-run the real strict core CLI case when a device is connected**
+- [x] **Step 3: Re-run the real strict core CLI case when a device is connected**
 
 Run:
 
