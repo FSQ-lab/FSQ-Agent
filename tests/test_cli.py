@@ -218,11 +218,15 @@ output:
     def fake_run_strict_fsq_core_case(**kwargs):
         calls.append(kwargs)
         kwargs["output_dir"].mkdir(parents=True, exist_ok=True)
-        if kwargs["case_path"].name == "second.codex.yaml":
-            raise RuntimeError("simulated case failure")
         report_path = kwargs["output_dir"] / "core-report.md"
+        json_report_path = kwargs["output_dir"] / "core-report.json"
         manifest_path = kwargs["output_dir"] / "evidence-manifest.json"
+        case_status = "failed" if kwargs["case_path"].name == "second.codex.yaml" else "passed"
         report_path.write_text("report", encoding="utf-8")
+        json_report_path.write_text(
+            json.dumps({"summary": {"status": case_status, "failed_steps": 1 if case_status == "failed" else 0}}),
+            encoding="utf-8",
+        )
         manifest_path.write_text("{}", encoding="utf-8")
         return ReportArtifact(
             run_id=kwargs["run_id"],
@@ -260,7 +264,7 @@ output:
     assert summary["passed"] == 1
     assert summary["failed"] == 1
     assert [case["status"] for case in summary["cases"]] == ["passed", "failed"]
-    assert "simulated case failure" in summary["cases"][1]["error"]
+    assert "failed_steps=1" in summary["cases"][1]["error"]
     assert "first.codex.yaml" in markdown_path.read_text(encoding="utf-8")
 
 

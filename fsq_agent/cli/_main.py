@@ -213,17 +213,21 @@ def run_strict_core_batch(
                 output_dir=run_dir,
                 run_id=run_id,
             )
+            case_status, case_error = _strict_core_case_report_status(artifact.path)
             cases.append(
                 {
                     "case_path": str(resolved_case_path),
                     "run_id": run_id,
-                    "status": "passed",
+                    "status": case_status,
                     "report_path": str(artifact.path),
                     "evidence_manifest_path": str(artifact.evidence_manifest_path),
-                    "error": None,
+                    "error": case_error,
                 }
             )
-            logger.info("Strict core case passed: %s", resolved_case_path)
+            if case_status == "passed":
+                logger.info("Strict core case passed: %s", resolved_case_path)
+            else:
+                logger.error("Strict core case failed: %s: %s", resolved_case_path, case_error)
         except Exception as exc:
             cases.append(
                 {
@@ -362,6 +366,22 @@ def _strict_core_batch_summary(batch_id: str, batch_dir: Path, cases: list[dict[
         "failed": failed,
         "cases": cases,
     }
+
+
+def _strict_core_case_report_status(report_path: Path) -> tuple[str, str | None]:
+    json_report_path = report_path.with_suffix(".json")
+    try:
+        report = json.loads(json_report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return "failed", f"Unable to read core-report.json: {exc}"
+    summary = report.get("summary") if isinstance(report, dict) else None
+    status = summary.get("status") if isinstance(summary, dict) else None
+    if status == "passed":
+        return "passed", None
+    failed_steps = summary.get("failed_steps") if isinstance(summary, dict) else None
+    if isinstance(failed_steps, int):
+        return "failed", f"core-report summary status={status or 'unknown'} failed_steps={failed_steps}"
+    return "failed", f"core-report summary status={status or 'unknown'}"
 
 
 def _strict_core_batch_markdown(summary: dict[str, object]) -> str:
