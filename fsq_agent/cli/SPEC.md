@@ -46,6 +46,19 @@ This helper is not a public CLI command in the first batch. It exists to give fu
 
 The helper must not construct real platform drivers, choose Android backend settings, or add retry/report policy. Those remain future entry-layer responsibilities after the core execution contract is stable.
 
+Planned internal strict deterministic-core entry:
+
+```python
+artifact = run_strict_fsq_core_case(
+    case_path=Path("case.codex.yaml"),
+    harness=harness,
+    output_dir=Path("runs/run-1"),
+    run_id="run-1",
+)
+```
+
+This strict entry executes the YAML exactly as authored with the supplied harness, writes `evidence-manifest.json`, generates `core-report.md` and `core-report.json`, and returns the generated Markdown `ReportArtifact`. It must not enable locator fallback, AI recovery, testcase mutation, or platform-driver construction. Recovery execution should use a separate future entry so strict results remain auditable.
+
 ## Internal Structure
 
 - `__init__.py`: Public exports only.

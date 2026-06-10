@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fsq_agent.cli._core_execution import run_fsq_core_case
+from fsq_agent.cli._core_execution import run_fsq_core_case, run_strict_fsq_core_case
 from fsq_agent.models import (
     ExecutableStep,
     FailureCategory,
@@ -91,3 +91,29 @@ def test_run_fsq_core_case_writes_manifest_and_returns_bundle(tmp_path: Path) ->
     assert [step["step_id"] for step in manifest["steps"]] == ["core_cli-step-001", "core_cli-step-002"]
     assert [step["status"] for step in manifest["steps"]] == ["passed", "passed"]
     assert [event["event_type"] for event in manifest["events"]].count("step_start") == 2
+
+
+def test_run_strict_fsq_core_case_writes_evidence_and_core_report(tmp_path: Path) -> None:
+    case_path = tmp_path / "strict_core.codex.yaml"
+    case_path.write_text(FSQ_CASE, encoding="utf-8")
+    run_dir = tmp_path / "runs" / "strict-run-1"
+
+    artifact = run_strict_fsq_core_case(
+        case_path=case_path,
+        harness=CliCoreHarness(),
+        output_dir=run_dir,
+        run_id="strict-run-1",
+    )
+
+    assert artifact.run_id == "strict-run-1"
+    assert artifact.path == run_dir / "core-report.md"
+    assert artifact.evidence_manifest_path == run_dir / "evidence-manifest.json"
+    assert artifact.path.exists()
+    assert (run_dir / "core-report.json").exists()
+
+    report = artifact.path.read_text(encoding="utf-8")
+    assert "# Core Evidence Report: strict-run-1" in report
+    assert "Status: `passed`" in report
+
+    manifest = json.loads((run_dir / "evidence-manifest.json").read_text(encoding="utf-8"))
+    assert [step["status"] for step in manifest["steps"]] == ["passed", "passed"]
