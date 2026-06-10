@@ -199,6 +199,8 @@ Backend methods should return driver output dictionaries that `AndroidHarness` c
 
 `assert_with_ai` remains a placeholder backend assertion in phase 1. It should return a failed configuration result explaining that AI visual assertion is not implemented in the uiautomator2 backend yet; later visual-verification work should consume screenshots through FSQ-owned evidence and verification layers.
 
+Strict regression and recovery execution must remain explicit modes at the entry/regression orchestration layer. The default deterministic core path is strict: it executes `ExecutableStep` locator/action payloads as authored and records failures without AI, locator fallback, or testcase mutation. Recovery mode may later enable deterministic locator fallback or AI-assisted repair, but it must be invoked as a separate recovery run with separate evidence. `StepRunner`, `StepSequenceRunner`, `AndroidHarness`, and drivers must not silently convert a strict target miss into a recovered pass.
+
 ## Internal Structure
 
 Planned structure after the first implementation batch:
@@ -241,6 +243,7 @@ Runner phases should preserve failure boundaries:
 - FSQ should provide a built-in `AndroidHarness` for Android execution semantics. Extension users who want uiautomator2, Appium, MCP, or another backend should usually implement `AndroidDriverInterface`, not a full custom `HarnessInterface`.
 - Platform harnesses should remain FSQ-owned controlled adapters. They may handle platform action translation, context shaping, driver-result conversion, and failure-category mapping, but not runner ordering, retry policy, event emission, evidence manifest format, artifact path policy, case-level result aggregation, or report generation.
 - Driver interfaces should remain backend mechanics contracts. They may execute actions and expose raw observations, but not control when evidence is captured or how execution history is recorded.
+- Locator self-healing is not part of strict execution. Any deterministic fallback or AI-assisted repair must be represented as recovery execution so reports can compare strict truth with recovery outcome.
 - Direct custom `HarnessInterface` implementations should remain possible for advanced platform plugins, but they are not the preferred ordinary Android backend extension point.
 - `EvidenceRecorder` should consume shared runner events and result facts. It should not execute actions, retry steps, or decide case success.
 - The first `EvidenceRecorder` writes one manifest file and references artifact paths supplied by events/results. It does not copy binary artifacts or generate reports.

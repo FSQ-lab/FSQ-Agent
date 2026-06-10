@@ -24,12 +24,21 @@ Planned execution-core report support:
 - The first implementation should accept an existing manifest path so device-run evidence can be reported after the run without re-executing the case.
 - The existing `ReportGenerator` path for agent `StepResult` reports should remain intact until the core evidence report path is implemented and reviewed.
 
+Planned strict-regression and recovery report support:
+
+- Regression reporting must distinguish strict testcase truth from recovery attempts. A strict run executes the YAML exactly as authored, without AI, locator fallback, or testcase mutation. A recovery run is optional and may consume strict-run failure evidence to try deterministic locator fallback or later AI-assisted repair.
+- Reports should support both a single-run core evidence report and a comparison report. The single-run report summarizes one strict or recovery `evidence-manifest.json`. The comparison report combines strict evidence plus optional recovery evidence for the same testcase.
+- Comparison reports should classify outcomes as `strict_passed`, `strict_failed_recovery_passed`, `strict_failed_recovery_failed`, or `strict_failed_recovery_not_attempted`.
+- Recovery success must not rewrite the strict result into a normal pass. It should produce a recommendation such as updating the YAML locator, approving a deterministic fallback rule, investigating app behavior, or requiring manual review.
+- Recovery attempt details should be reportable: attempted strategy, original locator/action, candidate selector or action, selected repair, result, and linked evidence artifacts.
+
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
 - `_generator.py`: Markdown and JSON report generation with minimal JSON fallback, typed agent output rendering, execution/verification report shaping, and `ToolCallRecord` reconstruction from `events.jsonl`.
 - `_evidence.py`: Evidence manifest and bundle creation.
 - Future `_core_evidence_report.py`: Markdown and JSON report generation from `EvidenceBundle` or a core `evidence-manifest.json` path.
+- Future `_regression_report.py`: Strict-vs-recovery comparison report generation from one strict manifest and an optional recovery manifest.
 - `_failure_analysis.py`: Failure classification helpers.
 - `templates/`: Optional report templates.
 - `SPEC.md`: Module design.
@@ -46,3 +55,4 @@ If rich Markdown/JSON report generation fails after a task run, `ReportGenerator
 - HTML report generation is intentionally out of scope.
 - Failure analysis starts rule-assisted and can later include LLM-assisted explanations.
 - Deterministic core execution reports should be generated from persisted evidence manifests rather than live runner objects. This keeps report generation replayable and allows reports to be regenerated after real-device runs.
+- Regression comparison reports should be generated after execution from persisted strict and recovery manifests. This keeps self-healing auditable and prevents recovery from masking the original regression signal.
