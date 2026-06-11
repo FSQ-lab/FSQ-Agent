@@ -69,7 +69,14 @@ class StepRunner:
                 failure_category = action_result.failure_category
                 error_message = action_result.error_message
                 self._emit(run_id=run_id, event_type="step_error", step=step, phase="invoke")
-            phase_reports.append(StepPhaseReport(step_id=step.step_id, phase="invoke", status=action_result.status))
+            phase_reports.append(
+                StepPhaseReport(
+                    step_id=step.step_id,
+                    phase="invoke",
+                    status=action_result.status,
+                    artifact_refs=self._action_result_artifacts(run_id, step, action_result, "invoke"),
+                )
+            )
         except Exception as exc:  # noqa: BLE001 - runner converts phase exceptions into structured results.
             failure_category = self.harness.classify_error(exc, "invoke", step)
             error_message = str(exc)
@@ -219,6 +226,32 @@ class StepRunner:
             phase=phase,
             metadata=dict(ref.metadata),
         )
+
+    def _action_result_artifacts(
+        self,
+        run_id: str,
+        step: ExecutableStep,
+        action_result: HarnessActionResult,
+        phase: StepPhase,
+    ) -> list[EvidenceArtifactRef]:
+        refs: list[EvidenceArtifactRef] = []
+        for harness_ref in action_result.artifact_refs:
+            ref = self._to_evidence_artifact_ref(harness_ref, step.step_id, phase)
+            refs.append(ref)
+            self._emit(
+                run_id=run_id,
+                event_type="artifact_captured",
+                step=step,
+                phase=phase,
+                payload={
+                    "artifact_id": ref.artifact_id,
+                    "kind": ref.kind,
+                    "path": ref.path.as_posix(),
+                    "reason": "action-result",
+                    "phase": phase,
+                },
+            )
+        return refs
 
     def _is_failed_result(
         self,

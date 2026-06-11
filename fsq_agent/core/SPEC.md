@@ -52,17 +52,20 @@ The first sequence runner implementation exposes a narrow synchronous API:
 
 ```python
 runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
-result = runner.run_steps(run_id="run-1", steps=executable_steps)
+result = runner.run_steps(run_id="run-1", steps=executable_steps, teardown_steps=teardown_steps)
 ```
 
 `StepSequenceRunner` accepts only shared `ExecutableStep` records and must not import `fsq`, parse YAML, construct platform drivers, or generate reports. Its first behavior is intentionally small:
 
-- Run steps in list order by delegating each step to `StepRunner.run_step`.
+- Run normal steps in list order by delegating each step to `StepRunner.run_step`.
 - Record every event emitted by each `StepRunner` into the supplied `EvidenceRecorder`.
 - Record every `RunnerStepResult` into the supplied `EvidenceRecorder`.
-- Stop on the first step whose result status is `failed`, `cancelled`, or `skipped`.
+- Stop normal-step execution on the first step whose result status is `failed`, `cancelled`, or `skipped`.
+- Always execute supplied `teardown_steps` after normal execution stops or completes, including after failed, cancelled, skipped, or exception-converted normal steps.
 - Build and return the current `EvidenceBundle` after execution stops or all steps pass.
 - Leave manifest persistence to the caller by requiring an explicit `EvidenceRecorder.write_manifest()` call after `run_steps` when disk output is desired.
+
+The sequence runner should follow xUnit-style control flow internally: a normal-step failure is converted into an internal sequence failure that exits the normal body, while teardown execution is protected by `finally`-style logic. The internal failure mechanism must not leak out of the runner or replace structured evidence; it only controls execution order. Teardown results are recorded as ordinary `RunnerStepResult` facts so reports can show both the primary normal-step failure and any cleanup failure. A normal-step failure must not cause subsequent normal business steps to run, but it must not prevent teardown steps from running.
 
 The first sequence runner does not implement retry, timeout enforcement, optional/non-blocking semantics, manifest writing, CLI integration, report generation, or platform-driver construction. Those are later batches and should reuse the same shared events and evidence bundle contracts.
 
@@ -165,12 +168,12 @@ The phase-1 dispatch table is:
 | `tapOn` | `tap_on` | `{target, locator, timeout?}` |
 | `assertVisible` | `assert_visible` | `{target, locator, optional?, timeout?}` |
 | `performActions` | `perform_actions` | W3C actions array, passed as `{"actions": [...]}` |
-| `assert` | `assert_state` | `{element, text, optional}` |
+| `assert` | `assert_state` | `{element, text?, optional}` with text or Android element-state assertions |
 | `pressKey` | `press_key` | string shorthand normalized to `{"key": "Back"}` or object form |
 | `inputText` | `input_text` | `{text, target, locator}` |
 | `assertNotVisible` | `assert_not_visible` | `{target, locator, optional?}` |
 | `longPressOn` | `long_press_on` | `{target, locator}` |
-| `swipe` | `swipe` | `{direction, duration}` or future point form |
+| `swipe` | `swipe` | `{direction, duration}` or `{start: {x, y}, end: {x, y}, duration?}` |
 | `assertWithAI` | `assert_with_ai` | `{prompt, optional, timeout?}` |
 
 `AndroidHarness(driver=driver, artifact_store=store | None)` should satisfy `HarnessInterface`. Its first action dispatcher should support exactly the phase-1 FSQ action names above. Screenshot and UI-tree capture should be available through `capture_artifact`; when an `ArtifactStore` is provided, screenshots and UI trees should be written to the standard artifact directories and returned as `HarnessArtifactRef` values. `capture_artifact` must receive FSQ-owned evidence metadata such as `step_id` and `phase` from the caller and must not infer those values from Android session context. Unsupported actions from the complete command set should return a failed `HarnessActionResult` with `failure_category="configuration_error"` rather than calling the driver until their driver methods are specified and implemented.
@@ -197,7 +200,21 @@ The phase-1 `UiAutomator2AndroidDriver` should implement only the existing `Andr
 
 Backend methods should return driver output dictionaries that `AndroidHarness` can convert into `HarnessActionResult`. Target lookup failures should return `status="failed"`, `failure_category="target_resolution_error"`, and a concise error message. Unsupported or underspecified backend operations should return `status="failed"` with `failure_category="configuration_error"`. The driver should not raise for ordinary target/assertion misses, decide retry policy, write artifacts, emit runner events, or aggregate case results.
 
-`assert_with_ai` remains a placeholder backend assertion in phase 1. It should return a failed configuration result explaining that AI visual assertion is not implemented in the uiautomator2 backend yet; later visual-verification work should consume screenshots through FSQ-owned evidence and verification layers.
+`AndroidDriverInterface.assert_state` is the Android platform assertion contract for FSQ `assert`. It should accept an `element` object that may contain locator fields plus expected Android state fields. Locator fields are used only for target resolution; expected state fields are evaluated after the element is found. Phase-1 text assertions remain supported through `text.contains` and `text.equals`. Phase-1 Android element-state assertions must support these boolean fields when present under `element`: `enabled`, `checked`, `selected`, `clickable`, and `focused`. Phase-1 element existence assertions must pass when `element` contains only supported locator fields and the element is found. A state mismatch should return `failure_category="assertion_error"`; an unsupported assertion shape should return `failure_category="configuration_error"`; target lookup failure should return `failure_category="target_resolution_error"`.
+
+`UiAutomator2AndroidDriver.swipe` should support both direction-based and point-based FSQ payloads. Direction-based swipes compute points from the current screen size. Point-based swipes pass authored integer `start.x`, `start.y`, `end.x`, and `end.y` values directly to uiautomator2 with `duration` converted from milliseconds to seconds. Missing or malformed point payloads should return `configuration_error` rather than guessing coordinates.
+
+`UiAutomator2AndroidDriver.input_text` should use a user-like focused input sequence for target-bearing text entry: wait for the authored selector, click it to focus, clear existing text when the backend selector exposes `clear_text`, then call `set_text(text)`. The backend should not silently fall back to AI or alternate locators when this sequence fails.
+
+`UiAutomator2AndroidDriver` owns deterministic Android element wait policy for backend target resolution. FSQ YAML should not carry per-step wait durations for this phase-1 strict path; action payloads remain focused on user intent and locators. The first implementation should use a fixed internal default element wait timeout of `10.0` seconds and should prefer uiautomator2's built-in wait APIs over custom polling:
+
+- `UiObject.wait(exists=True, timeout=10.0)` for ordinary selector existence.
+- `UiObject.wait_gone(timeout=10.0)` for ordinary selector disappearance.
+- `DeviceXPathSelector.wait(timeout=10.0)` for XPath selector existence, because XPath wait does not accept `exists=True`.
+
+The first waiting behavior applies to target-bearing driver methods: `tap_on`, `long_press_on`, `input_text`, `assert_visible`, and `assert_state`. These methods should wait for the authored selector before returning `target_resolution_error`. `assert_not_visible` should pass immediately if the target is already absent, wait up to the same default timeout when the target is currently visible, and fail with `failure_category="assertion_error"` if the target remains visible. This wait policy is not locator fallback, self-healing, or AI recovery; it waits only for the same authored selector and preserves strict failure when the selector does not resolve within the driver timeout.
+
+`assertWithAI` is an explicit visual assertion step, not recovery. Strict execution may run `assertWithAI` when the YAML authored it, because strict means authored-step-only execution: no locator fallback, no action repair, and no testcase mutation. `UiAutomator2AndroidDriver.assert_with_ai` remains a placeholder because drivers must not call AI providers or decide visual verification. `AndroidHarness` may support `assertWithAI` by using an injected AI assertion evaluator, capturing screenshot and UI-tree evidence through `ArtifactStore`, and returning a structured `HarnessActionResult` with `metadata.assertion_engine="ai_visual"`, the prompt, verdict, reasoning, and artifact ids. If no evaluator or artifact store is configured, `assertWithAI` should fail with `failure_category="configuration_error"`.
 
 Strict regression and recovery execution must remain explicit modes at the entry/regression orchestration layer. The default deterministic core path is strict: it executes `ExecutableStep` locator/action payloads as authored and records failures without AI, locator fallback, or testcase mutation. Recovery mode may later enable deterministic locator fallback or AI-assisted repair, but it must be invoked as a separate recovery run with separate evidence. `StepRunner`, `StepSequenceRunner`, `AndroidHarness`, and drivers must not silently convert a strict target miss into a recovered pass.
 

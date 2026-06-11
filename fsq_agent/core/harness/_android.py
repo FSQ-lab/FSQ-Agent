@@ -1,4 +1,5 @@
 from fsq_agent.core.evidence import ArtifactStore
+from fsq_agent.core.harness._ai_assertion import AIAssertionEvaluator, normalize_ai_assertion_result
 from fsq_agent.core.harness._android_driver import AndroidDriverInterface
 from fsq_agent.models import (
     ExecutableStep,
@@ -37,12 +38,17 @@ class AndroidHarness:
         "assertNotVisible": "assert_not_visible",
         "longPressOn": "long_press_on",
         "swipe": "swipe",
-        "assertWithAI": "assert_with_ai",
     }
 
-    def __init__(self, driver: AndroidDriverInterface, artifact_store: ArtifactStore | None = None) -> None:
+    def __init__(
+        self,
+        driver: AndroidDriverInterface,
+        artifact_store: ArtifactStore | None = None,
+        ai_assertion_evaluator: AIAssertionEvaluator | None = None,
+    ) -> None:
         self.driver = driver
         self.artifact_store = artifact_store
+        self.ai_assertion_evaluator = ai_assertion_evaluator
 
     def get_context(self) -> HarnessContext:
         context = self.driver.context()
@@ -62,6 +68,8 @@ class AndroidHarness:
         return None
 
     def invoke_action(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
+        if step.action_name == "assertWithAI":
+            return self._assert_with_ai(step, context)
         method_name = self._ACTION_METHODS.get(step.action_name)
         if method_name is not None:
             driver_method = getattr(self.driver, method_name)
@@ -109,6 +117,96 @@ class AndroidHarness:
                 payload=self.driver.ui_tree(),
             )
         raise RuntimeError(f"Unsupported Android artifact kind: {kind}")
+
+    def _assert_with_ai(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
+        if self.ai_assertion_evaluator is None:
+            return HarnessActionResult(
+                status="failed",
+                action_name=step.action_name,
+                failure_category="configuration_error",
+                error_message="assertWithAI requires an AI assertion evaluator.",
+            )
+        if self.artifact_store is None:
+            return HarnessActionResult(
+                status="failed",
+                action_name=step.action_name,
+                failure_category="configuration_error",
+                error_message="assertWithAI requires an ArtifactStore for screenshot evidence.",
+            )
+
+        prompt = step.params.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            return HarnessActionResult(
+                status="failed",
+                action_name=step.action_name,
+                failure_category="configuration_error",
+                error_message="assertWithAI requires a prompt.",
+            )
+
+        screenshot = self.driver.screenshot()
+        ui_tree = self.driver.ui_tree()
+        screenshot_ref = self.artifact_store.write_bytes(
+            kind="screenshot",
+            step_id=step.step_id,
+            phase="invoke",
+            name="ai-assertion",
+            data=screenshot,
+        )
+        ui_tree_ref = self.artifact_store.write_json(
+            kind="ui_tree",
+            step_id=step.step_id,
+            phase="invoke",
+            name="ai-assertion-ui-tree",
+            payload=ui_tree,
+        )
+        output = normalize_ai_assertion_result(
+            self.ai_assertion_evaluator.evaluate(
+                prompt=prompt.strip(),
+                screenshot=screenshot,
+                ui_tree=ui_tree,
+                metadata={
+                    "step_id": step.step_id,
+                    "session_id": context.session_id,
+                    "screenshot_artifact_id": screenshot_ref.artifact_id,
+                    "ui_tree_artifact_id": ui_tree_ref.artifact_id,
+                },
+            )
+        )
+        verdict = output["verdict"]
+        status = "passed" if verdict == "passed" else "failed"
+        return HarnessActionResult(
+            status=status,
+            action_name=step.action_name,
+            output=output,
+            artifact_refs=[
+                HarnessArtifactRef(
+                    artifact_id=screenshot_ref.artifact_id,
+                    kind=screenshot_ref.kind,
+                    path=screenshot_ref.path,
+                    mime_type=screenshot_ref.mime_type,
+                    created_at=screenshot_ref.created_at,
+                    metadata=dict(screenshot_ref.metadata),
+                ),
+                HarnessArtifactRef(
+                    artifact_id=ui_tree_ref.artifact_id,
+                    kind=ui_tree_ref.kind,
+                    path=ui_tree_ref.path,
+                    mime_type=ui_tree_ref.mime_type,
+                    created_at=ui_tree_ref.created_at,
+                    metadata=dict(ui_tree_ref.metadata),
+                ),
+            ],
+            failure_category="assertion_error" if status == "failed" else None,
+            error_message=None if status == "passed" else str(output.get("reasoning") or "AI assertion failed."),
+            metadata={
+                "assertion_engine": "ai_visual",
+                "prompt": prompt.strip(),
+                "verdict": verdict,
+                "reasoning": output.get("reasoning"),
+                "screenshot_artifact_id": screenshot_ref.artifact_id,
+                "ui_tree_artifact_id": ui_tree_ref.artifact_id,
+            },
+        )
 
     def classify_error(self, error: BaseException, phase: StepPhase, step: ExecutableStep) -> FailureCategory:
         return "harness_error"

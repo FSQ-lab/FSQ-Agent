@@ -20,6 +20,7 @@ Current `__init__.py` exports via `__all__`:
 
 - `FsqAgent`: Main orchestration class.
 - `OpenAIAgentsRuntime`: Builds and runs an OpenAI Agents SDK `Agent` with Azure OpenAI configuration, tools, MCP servers, skills, turn limits, and tracing policy.
+- `OpenAIAssertionEvaluator`: Synchronous evaluator for authored core `assertWithAI` steps. It uses the configured OpenAI-compatible provider directly, receives screenshot bytes and UI-tree context from a harness, and returns a structured visual assertion verdict without owning platform execution.
 - `GoalPrePlanner`: Uses the OpenAI Agents SDK with read-only knowledge lookup tools to convert a natural-language goal plus page knowledge into an ordered key-action pre-plan.
 - `Verifier`: Parses structured verifier-agent or runner final output and converts task status, satisfied criteria, unmet criteria, evidence, diagnostics, and configured verification mode into a `VerificationResult`.
 
@@ -31,6 +32,7 @@ Planned signatures:
 - `FsqAgent.pre_plan_goal(goal: str, event_sink: RunEventSink | None = None) -> GoalPrePlan`
 - `OpenAIAgentsRuntime.run_task(task: Task, knowledge: KnowledgeBundle, skills: list[SkillBundle], run_id: str, event_sink: RunEventSink | None = None) -> list[StepResult]`
 - `OpenAIAgentsRuntime.run_pre_plan(goal: str, knowledge: KnowledgeBundle, skills: list[SkillBundle], run_id: str, event_sink: RunEventSink | None = None) -> GoalPrePlan`
+- `OpenAIAssertionEvaluator(settings: Settings).evaluate(prompt: str, screenshot: bytes, ui_tree: dict[str, object] | None, metadata: dict[str, object]) -> dict[str, object]`
 - `Verifier.verify(task: Task, results: list[StepResult], events_path: Path | None = None, mode: VerificationMode = "normal") -> VerificationResult`
 
 ## Internal Structure
@@ -39,6 +41,7 @@ Planned signatures:
 - `_core.py`: `FsqAgent` orchestration and lifecycle.
 - `_events.py`: Run event emission, sequencing, persistence fan-out, and user-sink dispatch.
 - `_openai_runtime.py`: OpenAI Agents SDK client/provider setup, lifecycle setup/teardown invocation, agent construction, MCP context management, MCP validation diagnostic step injection, `Runner.run_streamed` invocation, and SDK stream event mapping.
+- `_ai_assertion.py`: OpenAI-compatible visual assertion evaluator used by strict core entrypoints only when explicitly enabled.
 - `_pre_plan.py`: Prompt instructions and helpers for goal-only pre-planning from page knowledge.
 - `_prompt.py`: Prompt model construction and template rendering for agent instructions and task input.
 - `_structured_output.py`: Shared coercion helpers for SDK final output values and compatibility parsing of legacy/raw final JSON strings.
@@ -92,4 +95,5 @@ During `FsqAgent.run`, a task with no ordered key actions is treated as a goal-o
 - Final result judgment is performed by a separate evidence-based verification agent task after the main automation run. The verification task has no MCP servers, no lifecycle controller, no external action tools, and no image inputs; it receives the authoritative task/case intent, the main agent's structured claims when available, execution records, normalized event/tool-call records, and persisted artifact excerpts. The verification agent must decide success, failure, or inconclusive from supplied execution evidence only.
 - Final verification applies `verification.mode` after the main automation run. In `strict` mode, success requires the goal plus all required assertion and operation criteria. In `normal` mode, success requires the goal plus required assertion criteria, while operation criteria are retained as evidence and diagnostics but do not block success. In `goal` mode, success requires only goal criteria. A criterion excluded by mode must not appear as an unmet blocking criterion in the final `VerificationResult`.
 - Visual assertions such as FSQ `assertWithAI` are judged during the main execution loop: the runner captures a screenshot, calls `submit_visual_assertion`, and receives the screenshot as a model-visible image on the next model turn. The verification task does not re-inspect screenshot pixels. It verifies that the execution stage completed the visual assertion submission, that the main agent's structured output reports the corresponding visual assertion result, and that no supplied evidence contradicts that result.
+- In deterministic strict-core execution, authored `assertWithAI` steps use `OpenAIAssertionEvaluator` only when the entrypoint explicitly enables AI assertions. The evaluator is injected into `AndroidHarness` from the CLI/entry layer, not from `core`. It must return one of `passed`, `failed`, or `inconclusive` plus concise reasoning, and must not perform locator fallback, action repair, testcase mutation, or case-level recovery.
 - The local `Verifier` does not hard-code FSQ key-action formats or Appium command semantics as the final arbiter. It treats a parseable verification-agent status as authoritative, preserving the agent's success, failed, or inconclusive conclusion without local status downgrades. If the verification task is unavailable, it uses parseable runner output as the fallback conclusion; if no agent conclusion is parseable, it falls back to failed-step or inconclusive diagnostics.

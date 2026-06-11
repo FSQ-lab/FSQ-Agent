@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fsq_agent.core import EvidenceRecorder, HarnessInterface, StepSequenceRunner
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import EvidenceBundle, ReportArtifact, ReportGenerationError
+from fsq_agent.models import EvidenceBundle, ExecutableStep, ReportArtifact, ReportGenerationError
 from fsq_agent.report import CoreEvidenceReportGenerator
 
 
@@ -15,10 +15,22 @@ def run_fsq_core_case(
 ) -> EvidenceBundle:
     case = FsqCaseLoader().load_case(Path(case_path))
     steps = FsqExecutableStepAdapter().to_executable_steps(case)
+    normal_steps, teardown_steps = _split_trailing_teardown_steps(steps)
     recorder = EvidenceRecorder(run_id=run_id, output_dir=Path(output_dir))
-    bundle = StepSequenceRunner(harness=harness, evidence_recorder=recorder).run_steps(run_id=run_id, steps=steps)
+    bundle = StepSequenceRunner(harness=harness, evidence_recorder=recorder).run_steps(
+        run_id=run_id,
+        steps=normal_steps,
+        teardown_steps=teardown_steps,
+    )
     manifest_path = recorder.write_manifest()
     return bundle.model_copy(update={"manifest_path": manifest_path})
+
+
+def _split_trailing_teardown_steps(steps: list[ExecutableStep]) -> tuple[list[ExecutableStep], list[ExecutableStep]]:
+    split_at = len(steps)
+    while split_at > 0 and steps[split_at - 1].kind == "teardown":
+        split_at -= 1
+    return steps[:split_at], steps[split_at:]
 
 
 def run_strict_fsq_core_case(

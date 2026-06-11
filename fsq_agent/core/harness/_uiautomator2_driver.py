@@ -4,6 +4,11 @@ from typing import Any
 from fsq_agent.models import ConfigurationError
 
 
+DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS = 10.0
+ANDROID_STATE_ASSERTION_FIELDS = ("enabled", "checked", "selected", "clickable", "focused")
+ANDROID_LOCATOR_FIELDS = ("resourceId", "accessibilityId", "text", "className", "xpath")
+
+
 class UiAutomator2AndroidDriver:
     def __init__(self, *, app_id: str, serial: str | None = None, device: object | None = None) -> None:
         self.app_id = app_id
@@ -35,14 +40,14 @@ class UiAutomator2AndroidDriver:
 
     def tap_on(self, params: dict[str, object]) -> dict[str, object]:
         selector = self._selector(params)
-        if not self._exists(selector):
+        if not self._wait_for_exists(selector):
             return self._target_missing(params)
         selector.click()
         return self._passed()
 
     def long_press_on(self, params: dict[str, object]) -> dict[str, object]:
         selector = self._selector(params)
-        if not self._exists(selector):
+        if not self._wait_for_exists(selector):
             return self._target_missing(params)
         selector.long_click()
         return self._passed()
@@ -52,8 +57,12 @@ class UiAutomator2AndroidDriver:
         if not isinstance(text, str):
             return self._configuration_error("inputText requires a string text parameter.")
         selector = self._selector(params)
-        if not self._exists(selector):
+        if not self._wait_for_exists(selector):
             return self._target_missing(params)
+        selector.click()
+        clear_text = getattr(selector, "clear_text", None)
+        if callable(clear_text):
+            clear_text()
         selector.set_text(text)
         return self._passed()
 
@@ -66,11 +75,18 @@ class UiAutomator2AndroidDriver:
 
     def swipe(self, params: dict[str, object]) -> dict[str, object]:
         direction = params.get("direction")
+        if "start" in params or "end" in params:
+            points = self._swipe_point_payload(params)
+            if points is None:
+                return self._configuration_error("swipe point payload requires integer start.x, start.y, end.x, and end.y parameters.")
+            sx, sy, ex, ey = points
+            duration = self._duration_seconds(params)
+            self.device.swipe(sx, sy, ex, ey, duration)
+            return self._passed({"start": {"x": sx, "y": sy}, "end": {"x": ex, "y": ey}})
         if not isinstance(direction, str):
             return self._configuration_error("swipe requires a direction parameter.")
         width, height = self._screen_size()
-        duration_ms = params.get("duration") if isinstance(params.get("duration"), int) else 200
-        duration = max(duration_ms, 1) / 1000
+        duration = self._duration_seconds(params)
         sx, sy, ex, ey = self._swipe_points(direction, width, height)
         self.device.swipe(sx, sy, ex, ey, duration)
         return self._passed({"direction": direction})
@@ -80,7 +96,7 @@ class UiAutomator2AndroidDriver:
 
     def assert_visible(self, params: dict[str, object]) -> dict[str, object]:
         selector = self._selector(params)
-        if self._exists(selector):
+        if self._wait_for_exists(selector):
             return self._passed()
         return self._target_missing(params)
 
@@ -88,23 +104,25 @@ class UiAutomator2AndroidDriver:
         selector = self._selector(params)
         if not self._exists(selector):
             return self._passed()
+        if self._wait_for_not_exists(selector):
+            return self._passed()
         return self._failed("assertion_error", "Target is visible.")
 
     def assert_state(self, params: dict[str, object]) -> dict[str, object]:
         selector = self._selector(params, locator_key="element")
-        if not self._exists(selector):
+        if not self._wait_for_exists(selector):
             return self._target_missing(params)
         expected = params.get("text")
-        if not isinstance(expected, dict):
-            return self._configuration_error("assert requires a text assertion object.")
-        actual = selector.get_text()
-        contains = expected.get("contains")
-        if isinstance(contains, str) and contains in actual:
-            return self._passed({"text": actual})
-        equals = expected.get("equals")
-        if isinstance(equals, str) and equals == actual:
-            return self._passed({"text": actual})
-        return self._failed("assertion_error", "Text assertion failed.", output={"text": actual})
+        if isinstance(expected, dict):
+            return self._assert_text_state(selector, expected)
+        element = params.get("element")
+        if isinstance(element, dict):
+            expected_states = self._expected_element_states(element)
+            if expected_states:
+                return self._assert_element_states(selector, expected_states)
+            if self._has_locator(element):
+                return self._passed({"exists": True})
+        return self._configuration_error("assert requires a text or supported element state assertion.")
 
     def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
         return self._configuration_error("assertWithAI is not implemented for the uiautomator2 backend yet.")
@@ -159,6 +177,28 @@ class UiAutomator2AndroidDriver:
             query["className"] = locator["className"]
         return query
 
+    def _wait_for_exists(self, selector: object) -> bool:
+        wait = getattr(selector, "wait", None)
+        if callable(wait):
+            try:
+                return bool(wait(exists=True, timeout=DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS))
+            except TypeError:
+                return bool(wait(timeout=DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS))
+        return self._exists(selector)
+
+    def _wait_for_not_exists(self, selector: object) -> bool:
+        wait_gone = getattr(selector, "wait_gone", None)
+        if callable(wait_gone):
+            return bool(wait_gone(timeout=DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS))
+
+        wait = getattr(selector, "wait", None)
+        if callable(wait):
+            try:
+                return bool(wait(exists=False, timeout=DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS))
+            except TypeError:
+                pass
+        return not self._exists(selector)
+
     def _exists(self, selector: object) -> bool:
         exists = getattr(selector, "exists", False)
         return bool(exists() if callable(exists) else exists)
@@ -198,6 +238,59 @@ class UiAutomator2AndroidDriver:
         if normalized == "right":
             return int(width * 0.25), mid_y, int(width * 0.75), mid_y
         return mid_x, int(height * 0.75), mid_x, int(height * 0.25)
+
+    def _swipe_point_payload(self, params: dict[str, object]) -> tuple[int, int, int, int] | None:
+        start = params.get("start")
+        end = params.get("end")
+        if not isinstance(start, dict) or not isinstance(end, dict):
+            return None
+        sx = start.get("x")
+        sy = start.get("y")
+        ex = end.get("x")
+        ey = end.get("y")
+        if not all(isinstance(value, int) for value in [sx, sy, ex, ey]):
+            return None
+        return sx, sy, ex, ey
+
+    def _duration_seconds(self, params: dict[str, object]) -> float:
+        duration_ms = params.get("duration") if isinstance(params.get("duration"), int) else 200
+        return max(duration_ms, 1) / 1000
+
+    def _assert_text_state(self, selector: object, expected: dict[str, object]) -> dict[str, object]:
+        actual = selector.get_text()
+        contains = expected.get("contains")
+        if isinstance(contains, str) and contains in actual:
+            return self._passed({"text": actual})
+        equals = expected.get("equals")
+        if isinstance(equals, str) and equals == actual:
+            return self._passed({"text": actual})
+        return self._failed("assertion_error", "Text assertion failed.", output={"text": actual})
+
+    def _expected_element_states(self, element: dict[str, object]) -> dict[str, bool]:
+        return {field: value for field in ANDROID_STATE_ASSERTION_FIELDS if isinstance((value := element.get(field)), bool)}
+
+    def _has_locator(self, element: dict[str, object]) -> bool:
+        return any(isinstance(element.get(field), str) and element[field].strip() for field in ANDROID_LOCATOR_FIELDS)
+
+    def _assert_element_states(self, selector: object, expected_states: dict[str, bool]) -> dict[str, object]:
+        actual_states = self._selector_info(selector)
+        passed: dict[str, bool] = {}
+        for field, expected in expected_states.items():
+            actual = actual_states.get(field)
+            if actual != expected:
+                return self._failed(
+                    "assertion_error",
+                    "Element state assertion failed.",
+                    output={"field": field, "expected": expected, "actual": actual},
+                )
+            passed[field] = expected
+        return self._passed(passed)
+
+    def _selector_info(self, selector: object) -> dict[str, object]:
+        info = getattr(selector, "info", {})
+        if callable(info):
+            info = info()
+        return info if isinstance(info, dict) else {}
 
     def _target_missing(self, params: dict[str, object]) -> dict[str, object]:
         return self._failed("target_resolution_error", "Target was not found.", metadata={"params": params})

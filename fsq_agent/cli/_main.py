@@ -1,11 +1,13 @@
 import asyncio
+import json
 import logging
 from pathlib import Path
 import re
+import time
 
 import click
 
-from fsq_agent.agent import FsqAgent
+from fsq_agent.agent import FsqAgent, OpenAIAssertionEvaluator
 from fsq_agent.cli._formatting import log_capabilities, log_result, log_run_event
 from fsq_agent.cli._core_execution import run_strict_fsq_core_case
 from fsq_agent.cli._logging import configure_cli_logging
@@ -113,6 +115,7 @@ def run_batch(
 @click.option("--android-serial", required=True)
 @click.option("--app-id", default=None)
 @click.option("--run-id", default=None)
+@click.option("--enable-ai-assertions", is_flag=True, default=False, show_default=True)
 def run_strict_core(
     config_path: str | None,
     workspace_path: str | None,
@@ -120,6 +123,7 @@ def run_strict_core(
     android_serial: str,
     app_id: str | None,
     run_id: str | None,
+    enable_ai_assertions: bool,
 ) -> None:
     try:
         settings = load_settings(config_path, workspace_path)
@@ -134,7 +138,15 @@ def run_strict_core(
         resolved_run_id = run_id or case.id
         run_dir = Path(settings.output.runs_dir) / resolved_run_id
         driver = UiAutomator2AndroidDriver(app_id=resolved_app_id, serial=android_serial)
-        harness = AndroidHarness(driver=driver, artifact_store=ArtifactStore(run_dir=run_dir))
+        ai_assertion_evaluator = None
+        if enable_ai_assertions:
+            validate_runtime_settings(settings)
+            ai_assertion_evaluator = OpenAIAssertionEvaluator(settings)
+        harness = AndroidHarness(
+            driver=driver,
+            artifact_store=ArtifactStore(run_dir=run_dir),
+            ai_assertion_evaluator=ai_assertion_evaluator,
+        )
         artifact = run_strict_fsq_core_case(
             case_path=resolved_task_path,
             harness=harness,
@@ -146,6 +158,98 @@ def run_strict_core(
     except FsqAgentError as exc:
         logger.error("Error: %s", exc)
         raise click.Abort() from exc
+
+
+@main.command("run-strict-core-batch")
+@click.option("--config", "config_path", type=click.Path(exists=False, dir_okay=False), default=None)
+@click.option("--workspace", "workspace_path", type=click.Path(file_okay=False), default=None)
+@click.option("--tasks", "tasks_path", type=click.Path(exists=False), default=None)
+@click.option("--android-serial", required=True)
+@click.option("--app-id", default=None)
+@click.option("--run-prefix", default=None)
+@click.option("--enable-ai-assertions", is_flag=True, default=False, show_default=True)
+def run_strict_core_batch(
+    config_path: str | None,
+    workspace_path: str | None,
+    tasks_path: str | None,
+    android_serial: str,
+    app_id: str | None,
+    run_prefix: str | None,
+    enable_ai_assertions: bool,
+) -> None:
+    settings = load_settings(config_path, workspace_path)
+    task_root = Path(tasks_path) if tasks_path else Path(settings.cases.dir)
+    case_paths = sorted(task_root.rglob("*.codex.yaml")) if task_root.is_dir() else [task_root]
+    batch_id = run_prefix or f"strict-core-batch-{time.strftime('%Y-%m-%d_%H-%M-%S')}"
+    batch_dir = Path(settings.output.runs_dir) / batch_id
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    ai_assertion_evaluator = None
+    if enable_ai_assertions:
+        validate_runtime_settings(settings)
+        ai_assertion_evaluator = OpenAIAssertionEvaluator(settings)
+
+    cases: list[dict[str, object]] = []
+    for index, case_path in enumerate(case_paths, start=1):
+        resolved_case_path = _resolve_task_path(str(case_path), settings.cases.dir)
+        run_id = f"{batch_id}-{_case_run_slug(resolved_case_path, index)}"
+        run_dir = Path(settings.output.runs_dir) / run_id
+        try:
+            case = FsqCaseLoader().load_case(resolved_case_path)
+            resolved_app_id = app_id or case.config.app_id
+            if not resolved_app_id:
+                raise ConfigurationError(
+                    "Android app id is required for strict core batch runs.",
+                    context={"task": str(resolved_case_path)},
+                )
+            driver = UiAutomator2AndroidDriver(app_id=resolved_app_id, serial=android_serial)
+            harness = AndroidHarness(
+                driver=driver,
+                artifact_store=ArtifactStore(run_dir=run_dir),
+                ai_assertion_evaluator=ai_assertion_evaluator,
+            )
+            artifact = run_strict_fsq_core_case(
+                case_path=resolved_case_path,
+                harness=harness,
+                output_dir=run_dir,
+                run_id=run_id,
+            )
+            case_status, case_error = _strict_core_case_report_status(artifact.path)
+            cases.append(
+                {
+                    "case_path": str(resolved_case_path),
+                    "run_id": run_id,
+                    "status": case_status,
+                    "report_path": str(artifact.path),
+                    "evidence_manifest_path": str(artifact.evidence_manifest_path),
+                    "error": case_error,
+                }
+            )
+            if case_status == "passed":
+                logger.info("Strict core case passed: %s", resolved_case_path)
+            else:
+                logger.error("Strict core case failed: %s: %s", resolved_case_path, case_error)
+        except Exception as exc:
+            cases.append(
+                {
+                    "case_path": str(resolved_case_path),
+                    "run_id": run_id,
+                    "status": "failed",
+                    "report_path": None,
+                    "evidence_manifest_path": None,
+                    "error": str(exc),
+                }
+            )
+            logger.error("Strict core case failed: %s: %s", resolved_case_path, exc)
+
+    summary = _strict_core_batch_summary(batch_id, batch_dir, cases)
+    summary_json_path = batch_dir / "strict-core-batch-summary.json"
+    summary_md_path = batch_dir / "strict-core-batch-summary.md"
+    summary_json_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    summary_md_path.write_text(_strict_core_batch_markdown(summary), encoding="utf-8")
+    logger.info("Strict core batch summary: %s", summary_json_path)
+    logger.info("Strict core batch report: %s", summary_md_path)
+    if summary["failed"]:
+        raise click.exceptions.Exit(1)
 
 
 @main.command("pre-plan")
@@ -243,3 +347,63 @@ def _task_from_goal(goal: str) -> Task:
 def _goal_task_id(goal: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", goal.casefold()).strip("-")
     return slug[:80] or "goal-task"
+
+
+def _case_run_slug(case_path: Path, index: int) -> str:
+    stem = case_path.name.removesuffix(".codex.yaml")
+    slug = re.sub(r"[^a-z0-9]+", "-", stem.casefold()).strip("-")
+    return f"{index:03d}-{slug[:80] or 'case'}"
+
+
+def _strict_core_batch_summary(batch_id: str, batch_dir: Path, cases: list[dict[str, object]]) -> dict[str, object]:
+    passed = sum(1 for case in cases if case["status"] == "passed")
+    failed = sum(1 for case in cases if case["status"] == "failed")
+    return {
+        "batch_id": batch_id,
+        "batch_dir": str(batch_dir),
+        "total": len(cases),
+        "passed": passed,
+        "failed": failed,
+        "cases": cases,
+    }
+
+
+def _strict_core_case_report_status(report_path: Path) -> tuple[str, str | None]:
+    json_report_path = report_path.with_suffix(".json")
+    try:
+        report = json.loads(json_report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return "failed", f"Unable to read core-report.json: {exc}"
+    summary = report.get("summary") if isinstance(report, dict) else None
+    status = summary.get("status") if isinstance(summary, dict) else None
+    if status == "passed":
+        return "passed", None
+    failed_steps = summary.get("failed_steps") if isinstance(summary, dict) else None
+    if isinstance(failed_steps, int):
+        return "failed", f"core-report summary status={status or 'unknown'} failed_steps={failed_steps}"
+    return "failed", f"core-report summary status={status or 'unknown'}"
+
+
+def _strict_core_batch_markdown(summary: dict[str, object]) -> str:
+    lines = [
+        f"# Strict Core Batch: {summary['batch_id']}",
+        "",
+        f"Total: `{summary['total']}`",
+        f"Passed: `{summary['passed']}`",
+        f"Failed: `{summary['failed']}`",
+        "",
+        "| Status | Case | Run | Error |",
+        "|---|---|---|---|",
+    ]
+    for case in summary["cases"]:
+        if not isinstance(case, dict):
+            continue
+        lines.append(
+            "| {status} | {case_path} | {run_id} | {error} |".format(
+                status=case.get("status", ""),
+                case_path=case.get("case_path", ""),
+                run_id=case.get("run_id", ""),
+                error=str(case.get("error") or "").replace("|", "\\|"),
+            )
+        )
+    return "\n".join(lines) + "\n"

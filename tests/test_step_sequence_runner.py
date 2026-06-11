@@ -90,3 +90,44 @@ def test_step_sequence_runner_stops_after_first_failed_step(tmp_path: Path) -> N
     assert [step.step_id for step in bundle.steps] == ["step-1"]
     assert bundle.steps[0].status == "failed"
     assert "before:step-2" not in harness.calls
+
+
+def test_step_sequence_runner_runs_teardown_after_failed_normal_step(tmp_path: Path) -> None:
+    harness = SequenceHarness(fail_action="tapOn")
+    recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
+    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+
+    bundle = runner.run_steps(
+        run_id="run-1",
+        steps=[_step("step-1", "tapOn"), _step("step-2", "inputText")],
+        teardown_steps=[_step("teardown-1", "killApp")],
+    )
+
+    assert [step.step_id for step in bundle.steps] == ["step-1", "teardown-1"]
+    assert [step.status for step in bundle.steps] == ["failed", "passed"]
+    assert "before:step-2" not in harness.calls
+    assert harness.calls == [
+        "get_context",
+        "before:step-1",
+        "invoke:step-1",
+        "after:step-1:failed",
+        "get_context",
+        "before:teardown-1",
+        "invoke:teardown-1",
+        "after:teardown-1:passed",
+    ]
+
+
+def test_step_sequence_runner_runs_teardown_after_successful_normal_steps(tmp_path: Path) -> None:
+    harness = SequenceHarness()
+    recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
+    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+
+    bundle = runner.run_steps(
+        run_id="run-1",
+        steps=[_step("step-1", "tapOn")],
+        teardown_steps=[_step("teardown-1", "killApp")],
+    )
+
+    assert [step.step_id for step in bundle.steps] == ["step-1", "teardown-1"]
+    assert [step.status for step in bundle.steps] == ["passed", "passed"]
