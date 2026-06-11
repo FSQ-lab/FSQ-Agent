@@ -1,45 +1,60 @@
 from typing import Protocol, runtime_checkable
 
+from fsq_agent.models import (
+    AndroidAssertNotVisibleParams,
+    AndroidAssertStateParams,
+    AndroidAssertVisibleParams,
+    AndroidAssertWithAIParams,
+    AndroidInputTextParams,
+    AndroidKillAppParams,
+    AndroidLaunchAppParams,
+    AndroidLongPressOnParams,
+    AndroidPerformActionsParams,
+    AndroidPressKeyParams,
+    AndroidSwipeParams,
+    AndroidTapOnParams,
+)
+
 
 @runtime_checkable
 class AndroidDriverInterface(Protocol):
     def context(self) -> dict[str, object]:
         ...
 
-    def launch_app(self, params: dict[str, object]) -> dict[str, object]:
+    def launch_app(self, params: AndroidLaunchAppParams) -> dict[str, object]:
         ...
 
-    def kill_app(self, params: dict[str, object]) -> dict[str, object]:
+    def kill_app(self, params: AndroidKillAppParams) -> dict[str, object]:
         ...
 
-    def tap_on(self, params: dict[str, object]) -> dict[str, object]:
+    def tap_on(self, params: AndroidTapOnParams) -> dict[str, object]:
         ...
 
-    def long_press_on(self, params: dict[str, object]) -> dict[str, object]:
+    def long_press_on(self, params: AndroidLongPressOnParams) -> dict[str, object]:
         ...
 
-    def input_text(self, params: dict[str, object]) -> dict[str, object]:
+    def input_text(self, params: AndroidInputTextParams) -> dict[str, object]:
         ...
 
-    def press_key(self, params: dict[str, object]) -> dict[str, object]:
+    def press_key(self, params: AndroidPressKeyParams) -> dict[str, object]:
         ...
 
-    def swipe(self, params: dict[str, object]) -> dict[str, object]:
+    def swipe(self, params: AndroidSwipeParams) -> dict[str, object]:
         ...
 
-    def perform_actions(self, params: dict[str, object]) -> dict[str, object]:
+    def perform_actions(self, params: AndroidPerformActionsParams) -> dict[str, object]:
         ...
 
-    def assert_visible(self, params: dict[str, object]) -> dict[str, object]:
+    def assert_visible(self, params: AndroidAssertVisibleParams) -> dict[str, object]:
         ...
 
-    def assert_not_visible(self, params: dict[str, object]) -> dict[str, object]:
+    def assert_not_visible(self, params: AndroidAssertNotVisibleParams) -> dict[str, object]:
         ...
 
-    def assert_state(self, params: dict[str, object]) -> dict[str, object]:
+    def assert_state(self, params: AndroidAssertStateParams) -> dict[str, object]:
         ...
 
-    def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
+    def assert_with_ai(self, params: AndroidAssertWithAIParams) -> dict[str, object]:
         ...
 
     def screenshot(self) -> bytes:

@@ -50,7 +50,27 @@ Current `__init__.py` exports via `__all__`:
 - `ToolDefinition`: Pydantic model describing a discovered MCP, CLI, or file operation capability.
 - `ToolCall`: Pydantic model describing a tool invocation request.
 - `ToolResult`: Pydantic model describing a normalized tool invocation response.
-- Planned execution-core contract models: Pydantic models for StepRunner, HarnessInterface inputs/outputs, runner events, and EvidenceBundle manifests. These include `ExecutableStep`, `SourceRef`, `RetryPolicy`, `EvidencePolicy`, `StepCallInfo`, `StepPhaseReport`, core `StepResult` equivalent naming to be finalized before implementation, `RunnerEvent`, `HarnessContext`, `HarnessActionResult`, `HarnessArtifactRef`, `EvidenceBundle`, and `EvidenceManifest`. Exact public names must be confirmed before implementation to avoid ambiguity with the existing `StepResult` model.
+- Execution-core contract models: Pydantic models for StepRunner, HarnessInterface inputs/outputs, runner events, and EvidenceBundle manifests. These include `ExecutableStep`, `SourceRef`, `RetryPolicy`, `EvidencePolicy`, `StepCallInfo`, `StepPhaseReport`, `RunnerStepResult`, `RunnerEvent`, `HarnessContext`, `HarnessActionResult`, `HarnessArtifactRef`, `EvidenceBundle`, and `EvidenceManifest`.
+- `HarnessFunctionSchema`: Pydantic model describing one concrete platform driver method that can be exposed as an OpenAI-compatible function schema. It contains the driver method name, description, strict parameter JSON schema, platform, Python driver method name, optional FSQ action provenance, and backend metadata. It is serializable only; it must not hold OpenAI Agents SDK runtime objects.
+- `AndroidActionDefinition`: frozen dataclass for one Android FSQ action contract. It contains the FSQ action name, Python driver method name, shared Pydantic parameter model, and deterministic `ExecutableStep.kind`.
+- `ANDROID_ACTION_DEFINITIONS`: ordered tuple of phase-1 Android action definitions.
+- `ANDROID_ACTION_DEFINITIONS_BY_NAME`: lookup map from FSQ action name to `AndroidActionDefinition`. FSQ parsing, Android harness dispatch, and Android driver tool decoration must use this registry instead of maintaining separate hand-written action maps.
+- `AndroidLocator`: Pydantic model for Android target locators with optional `resourceId`, `accessibilityId`, `text`, `className`, and `xpath` fields.
+- `AndroidPoint`: Pydantic model for integer Android screen coordinates used by point-based swipes.
+- `AndroidLaunchAppParams`: Pydantic model for `launch_app` driver parameters, including optional `app_id`.
+- `AndroidKillAppParams`: Pydantic model for `kill_app` driver parameters, including optional `app_id`.
+- `AndroidTapOnParams`: Pydantic model for `tap_on` parameters. It requires either a `target` string or a non-empty `locator`.
+- `AndroidLongPressOnParams`: Pydantic model for `long_press_on` parameters. It uses the same target contract as `AndroidTapOnParams`.
+- `AndroidInputTextParams`: Pydantic model for `input_text` parameters. It requires `text` plus either a `target` or non-empty `locator`.
+- `AndroidPressKeyParams`: Pydantic model for `press_key` parameters with one normalized required key string.
+- `AndroidSwipeParams`: Pydantic model for `swipe` parameters. It accepts either a direction string or both `start` and `end` points, with optional duration in milliseconds.
+- `AndroidPerformActionsParams`: Pydantic model for `perform_actions` parameters that wraps a W3C actions array as `actions`.
+- `AndroidAssertVisibleParams`: Pydantic model for `assert_visible` parameters. It uses the Android target contract plus optional assertion metadata.
+- `AndroidAssertNotVisibleParams`: Pydantic model for `assert_not_visible` parameters. It uses the Android target contract plus optional assertion metadata.
+- `AndroidTextAssertion`: Pydantic model for text assertion predicates, supporting `contains` and `equals`.
+- `AndroidElementState`: Pydantic model for element locators plus expected boolean Android state fields `enabled`, `checked`, `selected`, `clickable`, and `focused`.
+- `AndroidAssertStateParams`: Pydantic model for FSQ `assert` driver parameters. It supports `element` existence/state assertions and optional `text` assertions.
+- `AndroidAssertWithAIParams`: Pydantic model for authored visual assertion parameters with a required prompt and optional assertion metadata. The concrete uiautomator2 backend must not expose this as a driver function schema unless it owns AI evaluation, but the harness may use it to validate authored strict-core steps.
 - `OpenAIAgentsSettings`: Pydantic model for OpenAI Agents SDK provider configuration, including provider selection (`azure_openai` or `github_copilot`), Azure OpenAI base URL, API key environment variable, model deployment/name, tracing policy, turn limits, file-based prompt template customization, context trimming policy, and local tool output artifact policy. GitHub Copilot OAuth token storage is runtime-owned under the configured workspace and is not exposed as a YAML token setting. The agent runtime uses the Responses API for configured model providers.
 - `PrePlanSettings`: Pydantic model for standalone goal pre-planning configuration, including the optional page-knowledge graph directory used instead of the normal task knowledge root.
 - `VerificationSettings`: Pydantic model for the final verification policy. The default mode is `normal`.
@@ -83,7 +103,7 @@ Current `__init__.py` exports via `__all__`:
 - `_events.py`: Live run event model and event sink type alias.
 - `_fsq.py`: FSQ AI Test DSL case metadata and case models.
 - `_tools.py`: Tool metadata, tool call, tool result, MCP validation issue/settings, MCP config, and CLI config models.
-- Planned `_core.py`: Shared execution-core contract models for executable steps, runner phases/events, harness context/results, artifact references, and evidence manifests. This file should be added only after `core` and `models` SPEC changes are reviewed and confirmed.
+- `_core.py`: Shared execution-core contract models for executable steps, runner phases/events, harness context/results, artifact references, evidence manifests, serializable harness function schemas, and Android driver parameter models used across `fsq` and `core`.
 - `_settings.py`: Settings value models.
 - `_skills.py`: Skill configuration and loaded skill bundle models.
 - `_report.py`: Report artifact and evidence models.
@@ -100,6 +120,10 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 
 - Centralizing types prevents circular imports and inconsistent result schemas.
 - New execution-core contracts must be added to this module rather than to `fsq_agent.core`, because cross-module data structures live only in `models`.
+- Shared platform action parameter contracts must live in this module when they are consumed by more than one project module. Android strict-core parameter models and the Android action registry are shared by `fsq` for YAML normalization/step kind classification and by `core` for harness dispatch and action-space schema generation.
+- `ANDROID_ACTION_DEFINITIONS_BY_NAME` is the single source of truth for phase-1 Android FSQ action name, driver method name, parameter model, and deterministic step kind. Modules must not maintain parallel handwritten maps for those fields.
+- `HarnessFunctionSchema` is deliberately serializable. It describes function-call compatibility but does not import or wrap OpenAI Agents SDK tool objects.
+- Android driver parameter models forbid unexpected fields and provide canonical `model_dump(mode="json", exclude_none=True)` output. Runtime-only step metadata such as evidence policy, timeout fields, source references, retry policy, and step identifiers stays on `ExecutableStep` rather than inside driver parameter models.
 - Pydantic is used at boundaries where external inputs, config files, agent output, and tool output enter the system.
 - The agent final output contract is model-owned. The runtime always uses the current `AgentFinalOutput` schema through OpenAI Agents SDK structured output. The schema version is emitted in the final output for traceability, but schema selection is not a user-facing configuration.
 - Task verification data is split from execution planning data as a breaking change. `key_actions` preserves every required ordered FSQ action for the execution agent, while `verification_criteria` records structured final-verification requirements. `acceptance_criteria` is no longer the primary contract for FSQ verification.

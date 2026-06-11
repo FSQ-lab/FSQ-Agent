@@ -1,7 +1,24 @@
 from io import BytesIO
 from typing import Any
 
-from fsq_agent.models import ConfigurationError
+from pydantic import BaseModel
+
+from fsq_agent.core.harness._driver_tools import _android_driver_tool
+from fsq_agent.models import (
+    AndroidAssertNotVisibleParams,
+    AndroidAssertStateParams,
+    AndroidAssertVisibleParams,
+    AndroidAssertWithAIParams,
+    AndroidInputTextParams,
+    AndroidKillAppParams,
+    AndroidLaunchAppParams,
+    AndroidLongPressOnParams,
+    AndroidPerformActionsParams,
+    AndroidPressKeyParams,
+    AndroidSwipeParams,
+    AndroidTapOnParams,
+    ConfigurationError,
+)
 
 
 DEFAULT_ELEMENT_WAIT_TIMEOUT_SECONDS = 10.0
@@ -10,6 +27,8 @@ ANDROID_LOCATOR_FIELDS = ("resourceId", "accessibilityId", "text", "className", 
 
 
 class UiAutomator2AndroidDriver:
+    backend = "uiautomator2"
+
     def __init__(self, *, app_id: str, serial: str | None = None, device: object | None = None) -> None:
         self.app_id = app_id
         self.serial = serial
@@ -29,36 +48,48 @@ class UiAutomator2AndroidDriver:
             },
         }
 
-    def launch_app(self, params: dict[str, object]) -> dict[str, object]:
-        options = {key: value for key, value in params.items() if key != "app_id"}
-        self.device.app_start(str(params.get("app_id") or self.app_id), **options)
-        return self._passed({"app_id": str(params.get("app_id") or self.app_id)})
+    @_android_driver_tool("launchApp", description="Launch the configured Android app.")
+    def launch_app(self, params: AndroidLaunchAppParams) -> dict[str, object]:
+        data = self._param_data(params)
+        app_id = str(data.get("app_id") or self.app_id)
+        options = {key: value for key, value in data.items() if key != "app_id"}
+        self.device.app_start(app_id, **options)
+        return self._passed({"app_id": app_id})
 
-    def kill_app(self, params: dict[str, object]) -> dict[str, object]:
-        self.device.app_stop(str(params.get("app_id") or self.app_id))
-        return self._passed({"app_id": str(params.get("app_id") or self.app_id)})
+    @_android_driver_tool("killApp", description="Stop the configured Android app.")
+    def kill_app(self, params: AndroidKillAppParams) -> dict[str, object]:
+        data = self._param_data(params)
+        app_id = str(data.get("app_id") or self.app_id)
+        self.device.app_stop(app_id)
+        return self._passed({"app_id": app_id})
 
-    def tap_on(self, params: dict[str, object]) -> dict[str, object]:
-        selector = self._selector(params)
+    @_android_driver_tool("tapOn", description="Tap an Android UI target.")
+    def tap_on(self, params: AndroidTapOnParams) -> dict[str, object]:
+        data = self._param_data(params)
+        selector = self._selector(data)
         if not self._wait_for_exists(selector):
-            return self._target_missing(params)
+            return self._target_missing(data)
         selector.click()
         return self._passed()
 
-    def long_press_on(self, params: dict[str, object]) -> dict[str, object]:
-        selector = self._selector(params)
+    @_android_driver_tool("longPressOn", description="Long press an Android UI target.")
+    def long_press_on(self, params: AndroidLongPressOnParams) -> dict[str, object]:
+        data = self._param_data(params)
+        selector = self._selector(data)
         if not self._wait_for_exists(selector):
-            return self._target_missing(params)
+            return self._target_missing(data)
         selector.long_click()
         return self._passed()
 
-    def input_text(self, params: dict[str, object]) -> dict[str, object]:
-        text = params.get("text")
+    @_android_driver_tool("inputText", description="Enter text into a focused Android UI target.")
+    def input_text(self, params: AndroidInputTextParams) -> dict[str, object]:
+        data = self._param_data(params)
+        text = data.get("text")
         if not isinstance(text, str):
             return self._configuration_error("inputText requires a string text parameter.")
-        selector = self._selector(params)
+        selector = self._selector(data)
         if not self._wait_for_exists(selector):
-            return self._target_missing(params)
+            return self._target_missing(data)
         selector.click()
         clear_text = getattr(selector, "clear_text", None)
         if callable(clear_text):
@@ -66,56 +97,66 @@ class UiAutomator2AndroidDriver:
         selector.set_text(text)
         return self._passed()
 
-    def press_key(self, params: dict[str, object]) -> dict[str, object]:
-        key = params.get("key") or params.get("value")
+    @_android_driver_tool("pressKey", description="Press an Android key.")
+    def press_key(self, params: AndroidPressKeyParams) -> dict[str, object]:
+        data = self._param_data(params)
+        key = data.get("key")
         if not isinstance(key, str) or not key.strip():
             return self._configuration_error("pressKey requires a key parameter.")
         self.device.press(key.strip().lower())
         return self._passed({"key": key.strip()})
 
-    def swipe(self, params: dict[str, object]) -> dict[str, object]:
-        direction = params.get("direction")
-        if "start" in params or "end" in params:
-            points = self._swipe_point_payload(params)
+    @_android_driver_tool("swipe", description="Swipe by direction or explicit Android screen coordinates.")
+    def swipe(self, params: AndroidSwipeParams) -> dict[str, object]:
+        data = self._param_data(params)
+        direction = data.get("direction")
+        if "start" in data or "end" in data:
+            points = self._swipe_point_payload(data)
             if points is None:
                 return self._configuration_error("swipe point payload requires integer start.x, start.y, end.x, and end.y parameters.")
             sx, sy, ex, ey = points
-            duration = self._duration_seconds(params)
+            duration = self._duration_seconds(data)
             self.device.swipe(sx, sy, ex, ey, duration)
             return self._passed({"start": {"x": sx, "y": sy}, "end": {"x": ex, "y": ey}})
         if not isinstance(direction, str):
             return self._configuration_error("swipe requires a direction parameter.")
         width, height = self._screen_size()
-        duration = self._duration_seconds(params)
+        duration = self._duration_seconds(data)
         sx, sy, ex, ey = self._swipe_points(direction, width, height)
         self.device.swipe(sx, sy, ex, ey, duration)
         return self._passed({"direction": direction})
 
-    def perform_actions(self, params: dict[str, object]) -> dict[str, object]:
+    def perform_actions(self, params: AndroidPerformActionsParams) -> dict[str, object]:
         return self._configuration_error("performActions is not implemented for the uiautomator2 backend yet.")
 
-    def assert_visible(self, params: dict[str, object]) -> dict[str, object]:
-        selector = self._selector(params)
+    @_android_driver_tool("assertVisible", description="Assert that an Android UI target is visible.")
+    def assert_visible(self, params: AndroidAssertVisibleParams) -> dict[str, object]:
+        data = self._param_data(params)
+        selector = self._selector(data)
         if self._wait_for_exists(selector):
             return self._passed()
-        return self._target_missing(params)
+        return self._target_missing(data)
 
-    def assert_not_visible(self, params: dict[str, object]) -> dict[str, object]:
-        selector = self._selector(params)
+    @_android_driver_tool("assertNotVisible", description="Assert that an Android UI target is not visible.")
+    def assert_not_visible(self, params: AndroidAssertNotVisibleParams) -> dict[str, object]:
+        data = self._param_data(params)
+        selector = self._selector(data)
         if not self._exists(selector):
             return self._passed()
         if self._wait_for_not_exists(selector):
             return self._passed()
         return self._failed("assertion_error", "Target is visible.")
 
-    def assert_state(self, params: dict[str, object]) -> dict[str, object]:
-        selector = self._selector(params, locator_key="element")
+    @_android_driver_tool("assert", description="Assert Android element existence, text, or state.")
+    def assert_state(self, params: AndroidAssertStateParams) -> dict[str, object]:
+        data = self._param_data(params)
+        selector = self._selector(data, locator_key="element")
         if not self._wait_for_exists(selector):
-            return self._target_missing(params)
-        expected = params.get("text")
+            return self._target_missing(data)
+        expected = data.get("text")
         if isinstance(expected, dict):
             return self._assert_text_state(selector, expected)
-        element = params.get("element")
+        element = data.get("element")
         if isinstance(element, dict):
             expected_states = self._expected_element_states(element)
             if expected_states:
@@ -124,7 +165,7 @@ class UiAutomator2AndroidDriver:
                 return self._passed({"exists": True})
         return self._configuration_error("assert requires a text or supported element state assertion.")
 
-    def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
+    def assert_with_ai(self, params: AndroidAssertWithAIParams) -> dict[str, object]:
         return self._configuration_error("assertWithAI is not implemented for the uiautomator2 backend yet.")
 
     def screenshot(self) -> bytes:
@@ -150,6 +191,11 @@ class UiAutomator2AndroidDriver:
             ) from exc
         return u2.connect(serial)
 
+    def _param_data(self, params: BaseModel | dict[str, object]) -> dict[str, object]:
+        if isinstance(params, BaseModel):
+            return params.model_dump(mode="json", exclude_none=True)
+        return dict(params)
+
     def _selector(self, params: dict[str, object], *, locator_key: str = "locator") -> object:
         locator = params.get(locator_key)
         if not isinstance(locator, dict):
@@ -160,7 +206,7 @@ class UiAutomator2AndroidDriver:
             query = self._selector_query(locator)
             if query:
                 return self.device(**query)
-        fallback = params.get("target") or params.get("value")
+        fallback = params.get("target")
         if isinstance(fallback, str) and fallback.strip():
             return self.device(text=fallback.strip())
         return self.device(**{})

@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface
+from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, UiAutomator2AndroidDriver
 from fsq_agent.models import ExecutableStep, HarnessContext
 
 
@@ -18,53 +18,49 @@ class FakeAndroidDriver:
             "screen_size": (1080, 2400),
         }
 
+    def _record(self, method_name: str, params: object) -> dict[str, object]:
+        if hasattr(params, "model_dump"):
+            recorded = params.model_dump(mode="json", exclude_none=True)
+        else:
+            recorded = params
+        self.calls.append((method_name, recorded))
+        return {method_name: True}
+
     def launch_app(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("launch_app", params))
-        return {"launched": True}
+        return self._record("launch_app", params)
 
     def kill_app(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("kill_app", params))
-        return {"killed": True}
+        return self._record("kill_app", params)
 
     def tap_on(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("tap_on", params))
-        return {"tapped": True}
+        return self._record("tap_on", params)
 
     def long_press_on(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("long_press_on", params))
-        return {"long_pressed": True}
+        return self._record("long_press_on", params)
 
     def input_text(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("input_text", params))
-        return {"input": True}
+        return self._record("input_text", params)
 
     def press_key(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("press_key", params))
-        return {"pressed": True}
+        return self._record("press_key", params)
 
     def swipe(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("swipe", params))
-        return {"swiped": True}
+        return self._record("swipe", params)
 
     def perform_actions(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("perform_actions", params))
-        return {"performed": True}
+        return self._record("perform_actions", params)
 
     def assert_visible(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("assert_visible", params))
-        return {"visible": True}
+        return self._record("assert_visible", params)
 
     def assert_not_visible(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("assert_not_visible", params))
-        return {"not_visible": True}
+        return self._record("assert_not_visible", params)
 
     def assert_state(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("assert_state", params))
-        return {"asserted": True}
+        return self._record("assert_state", params)
 
     def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
-        self.calls.append(("assert_with_ai", params))
-        return {"ai_asserted": True}
+        return self._record("assert_with_ai", params)
 
     def screenshot(self) -> bytes:
         self.calls.append(("screenshot", None))
@@ -105,7 +101,7 @@ def test_android_harness_dispatches_fsq_action_names_to_driver() -> None:
         ("killApp", {}, "kill_app"),
         ("tapOn", {"target": "Menu"}, "tap_on"),
         ("assertVisible", {"target": "Menu"}, "assert_visible"),
-        ("inputText", {"text": "bing.com"}, "input_text"),
+        ("inputText", {"text": "bing.com", "target": "Search box"}, "input_text"),
         ("longPressOn", {"target": "Address bar"}, "long_press_on"),
         ("swipe", {"direction": "up", "duration": 1000}, "swipe"),
         ("assertNotVisible", {"target": "Dialog"}, "assert_not_visible"),
@@ -129,25 +125,71 @@ def test_android_harness_dispatches_fsq_action_names_to_driver() -> None:
     ]
 
 
-def test_android_harness_normalizes_press_key_string_shorthand() -> None:
+def test_android_harness_accepts_structured_press_key_params() -> None:
     driver = FakeAndroidDriver()
     harness = AndroidHarness(driver=driver)
 
-    result = harness.invoke_action(_step("pressKey", {"value": "Back"}), harness.get_context())
+    result = harness.invoke_action(_step("pressKey", {"key": "Back"}), harness.get_context())
 
     assert result.status == "passed"
     assert driver.calls[-1] == ("press_key", {"key": "Back"})
 
 
-def test_android_harness_wraps_perform_actions_list() -> None:
+def test_android_harness_accepts_structured_perform_actions_params() -> None:
     driver = FakeAndroidDriver()
     harness = AndroidHarness(driver=driver)
     actions = [{"type": "none", "id": "wait", "actions": [{"type": "pause", "duration": 1}]}]
 
-    result = harness.invoke_action(_step("performActions", {"value": actions}), harness.get_context())
+    result = harness.invoke_action(_step("performActions", {"actions": actions}), harness.get_context())
 
     assert result.status == "passed"
     assert driver.calls[-1] == ("perform_actions", {"actions": actions})
+
+
+def test_android_harness_rejects_legacy_value_wrapped_known_params() -> None:
+    driver = FakeAndroidDriver()
+    harness = AndroidHarness(driver=driver)
+
+    result = harness.invoke_action(_step("pressKey", {"value": "Back"}), harness.get_context())
+
+    assert result.status == "failed"
+    assert result.failure_category == "configuration_error"
+    assert result.error_message == "Invalid Android parameters for pressKey."
+    assert result.metadata["validation_errors"]
+    assert driver.calls == [("context", None)]
+
+
+def test_android_harness_action_space_returns_decorated_driver_method_schemas() -> None:
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=object())
+    harness = AndroidHarness(driver=driver)
+
+    schemas = {schema.name: schema for schema in harness.action_space()}
+
+    assert "tap_on" in schemas
+    assert "perform_actions" not in schemas
+    assert "assert_with_ai" not in schemas
+    assert schemas["tap_on"].driver_method == "tap_on"
+    assert schemas["tap_on"].fsq_action_name == "tapOn"
+    assert schemas["tap_on"].platform == "android"
+    assert schemas["tap_on"].strict is True
+    assert schemas["tap_on"].metadata == {
+        "driver_class": "UiAutomator2AndroidDriver",
+        "backend": "uiautomator2",
+    }
+    assert "target" in schemas["tap_on"].params_json_schema["properties"]
+
+
+def test_android_harness_validation_failure_does_not_call_driver_method() -> None:
+    driver = FakeAndroidDriver()
+    harness = AndroidHarness(driver=driver)
+
+    result = harness.invoke_action(_step("tapOn", {"locator": {"unknown": "Login"}}), harness.get_context())
+
+    assert result.status == "failed"
+    assert result.failure_category == "configuration_error"
+    assert result.error_message == "Invalid Android parameters for tapOn."
+    assert result.metadata["validation_errors"]
+    assert driver.calls == [("context", None)]
 
 
 def test_android_harness_converts_driver_failure_result() -> None:

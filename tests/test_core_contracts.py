@@ -5,6 +5,11 @@ import pytest
 from pydantic import ValidationError
 
 from fsq_agent.models import (
+    ANDROID_ACTION_DEFINITIONS,
+    ANDROID_ACTION_DEFINITIONS_BY_NAME,
+    AndroidPressKeyParams,
+    AndroidSwipeParams,
+    AndroidTapOnParams,
     EvidenceArtifactRef,
     EvidenceBundle,
     EvidencePolicy,
@@ -12,6 +17,7 @@ from fsq_agent.models import (
     HarnessActionResult,
     HarnessArtifactRef,
     HarnessContext,
+    HarnessFunctionSchema,
     RetryPolicy,
     RunnerEvent,
     RunnerStepResult,
@@ -24,6 +30,14 @@ def test_core_exports_harness_interface() -> None:
     from fsq_agent.core import HarnessInterface
 
     assert HarnessInterface.__name__ == "HarnessInterface"
+
+
+def test_driver_tool_is_harness_subpackage_extension_point() -> None:
+    import fsq_agent.core as core
+    from fsq_agent.core.harness import driver_tool
+
+    assert callable(driver_tool)
+    assert not hasattr(core, "driver_tool")
 
 
 def test_fake_harness_satisfies_runtime_protocol() -> None:
@@ -64,6 +78,57 @@ def test_fake_harness_satisfies_runtime_protocol() -> None:
             return "unknown"
 
     assert isinstance(FakeHarness(), HarnessInterface)
+
+
+def test_harness_function_schema_is_serializable_contract() -> None:
+    schema = HarnessFunctionSchema(
+        name="tap_on",
+        description="Tap a target.",
+        params_json_schema=AndroidTapOnParams.model_json_schema(),
+        platform="android",
+        driver_method="tap_on",
+        fsq_action_name="tapOn",
+        metadata={"backend": "uiautomator2"},
+    )
+
+    dumped = schema.model_dump(mode="json")
+
+    assert dumped["name"] == "tap_on"
+    assert dumped["strict"] is True
+    assert dumped["params_json_schema"]["type"] == "object"
+    assert dumped["metadata"] == {"backend": "uiautomator2"}
+
+
+def test_android_parameter_models_produce_canonical_dumps_and_reject_extra_fields() -> None:
+    tap = AndroidTapOnParams.model_validate({"target": "Login"})
+    swipe = AndroidSwipeParams.model_validate(
+        {"start": {"x": 800, "y": 1900}, "end": {"x": 200, "y": 1900}, "duration": 1000}
+    )
+
+    assert tap.model_dump(mode="json", exclude_none=True) == {"target": "Login"}
+    assert swipe.model_dump(mode="json", exclude_none=True) == {
+        "start": {"x": 800, "y": 1900},
+        "end": {"x": 200, "y": 1900},
+        "duration": 1000,
+    }
+    with pytest.raises(ValidationError):
+        AndroidTapOnParams.model_validate({"locator": {"unknown": "Login"}})
+    with pytest.raises(ValidationError):
+        AndroidTapOnParams.model_validate({"value": "Login"})
+
+
+def test_android_action_definitions_are_single_source_for_android_contract() -> None:
+    action_names = [definition.fsq_action_name for definition in ANDROID_ACTION_DEFINITIONS]
+
+    assert len(action_names) == len(set(action_names))
+    assert set(ANDROID_ACTION_DEFINITIONS_BY_NAME) == set(action_names)
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["tapOn"].driver_method == "tap_on"
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["tapOn"].params_model is AndroidTapOnParams
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["tapOn"].step_kind == "action"
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["pressKey"].driver_method == "press_key"
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["pressKey"].params_model is AndroidPressKeyParams
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].driver_method == "assert_with_ai"
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].step_kind == "assertion"
 
 
 def test_executable_step_accepts_contract_fields() -> None:

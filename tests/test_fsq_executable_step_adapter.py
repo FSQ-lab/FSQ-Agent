@@ -22,20 +22,18 @@ tags:
     locator:
       accessibilityId: Account menu
     optional: false
-- tapOn: Search box in NTP page
+- tapOn:
+    target: Search box in NTP page
 - inputText:
     text: bing.com
     target: Search box
     locator:
       resourceId: com.microsoft.emmx:id/url_bar
     timeout: 10000
-- pressKey: Enter
+- pressKey:
+    key: Enter
 - performActions:
-  - type: none
-    id: wait-page-load
-    actions:
-    - type: pause
-      duration: 3000
+    actions: [{"type": "none", "id": "wait-page-load", "actions": [{"type": "pause", "duration": 3000}]}]
 - assert:
     element:
       resourceId: com.microsoft.emmx:id/url_bar
@@ -92,17 +90,16 @@ def test_fsq_executable_step_adapter_normalizes_params_and_source_refs(tmp_path:
     steps = FsqExecutableStepAdapter().to_executable_steps(case)
 
     assert steps[0].params == {}
-    assert steps[2].params == {"value": "Search box in NTP page"}
+    assert steps[2].params == {"target": "Search box in NTP page"}
     assert steps[3].params == {
         "text": "bing.com",
         "target": "Search box",
         "locator": {"resourceId": "com.microsoft.emmx:id/url_bar"},
-        "timeout": 10000,
     }
     assert steps[3].timeout_ms == 10000
-    assert steps[4].params == {"value": "Enter"}
+    assert steps[4].params == {"key": "Enter"}
     assert steps[5].params == {
-        "value": [{"type": "none", "id": "wait-page-load", "actions": [{"type": "pause", "duration": 3000}]}]
+        "actions": [{"type": "none", "id": "wait-page-load", "actions": [{"type": "pause", "duration": 3000}]}]
     }
 
     assert steps[1].source_ref is not None
@@ -137,6 +134,54 @@ platform: android
 
     assert exc_info.value.context["path"] == str(case_path)
     assert exc_info.value.context["step_index"] == 0
+
+
+def test_fsq_executable_step_adapter_raises_for_invalid_android_payload(tmp_path: Path) -> None:
+    case_path = tmp_path / "bad_payload.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Bad Payload
+platform: android
+---
+- tapOn:
+    locator:
+      unknown: Login
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        FsqExecutableStepAdapter().to_executable_steps(case)
+
+    assert exc_info.value.context["path"] == str(case_path)
+    assert exc_info.value.context["step_index"] == 0
+    assert exc_info.value.context["action_name"] == "tapOn"
+    assert exc_info.value.context["validation_errors"]
+
+
+def test_fsq_executable_step_adapter_rejects_legacy_scalar_android_payload(tmp_path: Path) -> None:
+    case_path = tmp_path / "legacy_scalar.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Legacy Scalar
+platform: android
+---
+- pressKey: Enter
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        FsqExecutableStepAdapter().to_executable_steps(case)
+
+    assert exc_info.value.context["path"] == str(case_path)
+    assert exc_info.value.context["step_index"] == 0
+    assert exc_info.value.context["action_name"] == "pressKey"
+    assert exc_info.value.context["validation_errors"]
 
 
 def test_fsq_executable_step_adapter_returns_no_steps_for_goal_only_case(tmp_path: Path) -> None:

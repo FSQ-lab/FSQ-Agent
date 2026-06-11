@@ -1,10 +1,7 @@
 import json
 from typing import Any
 
-from fsq_agent.models import FsqCase, Task, VerificationCriterion, VerificationCriterionKind
-
-
-_SETUP_TEARDOWN_COMMANDS = {"launchApp", "killApp"}
+from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, FsqCase, Task, VerificationCriterion, VerificationCriterionKind
 
 
 class FsqTaskAdapter:
@@ -141,18 +138,22 @@ class FsqTaskAdapter:
 
     def _render_key_action(self, command: Any) -> str | None:
         if isinstance(command, str):
-            if command in _SETUP_TEARDOWN_COMMANDS:
+            if self._is_setup_or_teardown_action(command):
                 return None
             return command
         if not isinstance(command, dict) or len(command) != 1:
             return self._render_command(command)
 
         name, value = next(iter(command.items()))
-        if name in _SETUP_TEARDOWN_COMMANDS:
+        if self._is_setup_or_teardown_action(name):
             return None
         if isinstance(value, dict) and value.get("optional") is True:
             return None
         return self._format_key_action(name, value)
+
+    def _is_setup_or_teardown_action(self, action_name: str) -> bool:
+        action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(action_name)
+        return action_definition is not None and action_definition.step_kind in {"setup", "teardown"}
 
     def _command_name(self, command: Any) -> str:
         if isinstance(command, str):
@@ -171,7 +172,9 @@ class FsqTaskAdapter:
         target = value.get("target") or value.get("prompt") or value.get("text")
         if not target and isinstance(value.get("element"), dict):
             target = self._format_locator(value["element"])
-        if name == "inputText" and value.get("text") and value.get("target"):
+        if name == "pressKey" and value.get("key"):
+            action = f"{name}: {value['key']}"
+        elif name == "inputText" and value.get("text") and value.get("target"):
             action = f"{name} {value['text']} into {value['target']}"
         else:
             action = f"{name} {target}" if target else name

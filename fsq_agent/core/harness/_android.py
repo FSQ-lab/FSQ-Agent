@@ -1,12 +1,17 @@
+from pydantic import BaseModel, ValidationError
+
 from fsq_agent.core.evidence import ArtifactStore
 from fsq_agent.core.harness._ai_assertion import AIAssertionEvaluator, normalize_ai_assertion_result
 from fsq_agent.core.harness._android_driver import AndroidDriverInterface
+from fsq_agent.core.harness._driver_tools import _discover_driver_function_schemas
 from fsq_agent.models import (
+    ANDROID_ACTION_DEFINITIONS_BY_NAME,
     ExecutableStep,
     FailureCategory,
     HarnessActionResult,
     HarnessArtifactRef,
     HarnessContext,
+    HarnessFunctionSchema,
     StepPhase,
 )
 
@@ -25,19 +30,6 @@ class AndroidHarness:
         "harness_error",
         "cancelled",
         "unknown",
-    }
-    _ACTION_METHODS = {
-        "launchApp": "launch_app",
-        "killApp": "kill_app",
-        "tapOn": "tap_on",
-        "assertVisible": "assert_visible",
-        "performActions": "perform_actions",
-        "assert": "assert_state",
-        "pressKey": "press_key",
-        "inputText": "input_text",
-        "assertNotVisible": "assert_not_visible",
-        "longPressOn": "long_press_on",
-        "swipe": "swipe",
     }
 
     def __init__(
@@ -61,8 +53,16 @@ class AndroidHarness:
             metadata=self._dict_value(context.get("metadata")),
         )
 
-    def action_space(self) -> dict[str, object]:
-        return {action_name: {"driver_method": method_name} for action_name, method_name in self._ACTION_METHODS.items()}
+    def action_space(self) -> list[HarnessFunctionSchema]:
+        metadata: dict[str, object] = {"driver_class": type(self.driver).__name__}
+        backend = getattr(self.driver, "backend", None)
+        if isinstance(backend, str):
+            metadata["backend"] = backend
+        return _discover_driver_function_schemas(
+            self.driver,
+            platform="android",
+            metadata=metadata,
+        )
 
     def before_action(self, step: ExecutableStep, context: HarnessContext) -> None:
         return None
@@ -70,10 +70,13 @@ class AndroidHarness:
     def invoke_action(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
         if step.action_name == "assertWithAI":
             return self._assert_with_ai(step, context)
-        method_name = self._ACTION_METHODS.get(step.action_name)
-        if method_name is not None:
-            driver_method = getattr(self.driver, method_name)
-            output = driver_method(self._normalize_params(step))
+        action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(step.action_name)
+        if action_definition is not None:
+            params = self._validate_params(step, action_definition.params_model)
+            if isinstance(params, HarnessActionResult):
+                return params
+            driver_method = getattr(self.driver, action_definition.driver_method)
+            output = driver_method(params)
             return self._result_from_driver_output(step.action_name, output)
         return HarnessActionResult(
             status="failed",
@@ -119,6 +122,10 @@ class AndroidHarness:
         raise RuntimeError(f"Unsupported Android artifact kind: {kind}")
 
     def _assert_with_ai(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
+        action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"]
+        params = self._validate_params(step, action_definition.params_model)
+        if isinstance(params, HarnessActionResult):
+            return params
         if self.ai_assertion_evaluator is None:
             return HarnessActionResult(
                 status="failed",
@@ -134,14 +141,7 @@ class AndroidHarness:
                 error_message="assertWithAI requires an ArtifactStore for screenshot evidence.",
             )
 
-        prompt = step.params.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            return HarnessActionResult(
-                status="failed",
-                action_name=step.action_name,
-                failure_category="configuration_error",
-                error_message="assertWithAI requires a prompt.",
-            )
+        prompt = params.prompt.strip()
 
         screenshot = self.driver.screenshot()
         ui_tree = self.driver.ui_tree()
@@ -212,13 +212,25 @@ class AndroidHarness:
         return "harness_error"
 
     def _normalize_params(self, step: ExecutableStep) -> dict[str, object]:
-        if step.action_name in {"launchApp", "killApp"}:
-            return {}
-        if step.action_name == "pressKey" and "value" in step.params:
-            return {"key": step.params["value"]}
-        if step.action_name == "performActions" and "value" in step.params:
-            return {"actions": step.params["value"]}
         return step.params
+
+    def _validate_params(self, step: ExecutableStep, params_model: type[BaseModel]) -> BaseModel | HarnessActionResult:
+        try:
+            return params_model.model_validate(self._normalize_params(step))
+        except ValidationError as exc:
+            return HarnessActionResult(
+                status="failed",
+                action_name=step.action_name,
+                failure_category="configuration_error",
+                error_message=f"Invalid Android parameters for {step.action_name}.",
+                metadata={"validation_errors": self._validation_errors(exc)},
+            )
+
+    def _validation_errors(self, error: ValidationError) -> list[dict[str, object]]:
+        try:
+            return error.errors(include_url=False, include_context=False)
+        except TypeError:
+            return error.errors()
 
     def _result_from_driver_output(self, action_name: str, output: object) -> HarnessActionResult:
         if not isinstance(output, dict) or "status" not in output:

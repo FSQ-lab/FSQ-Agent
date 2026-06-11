@@ -6,7 +6,7 @@ Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository and conv
 
 ## Dependencies
 
-- `models`: Uses `FsqCase`, `FsqCaseConfig`, `Task`, shared configuration errors, and execution-core contracts such as `ExecutableStep`, `SourceRef`, and `EvidencePolicy`.
+- `models`: Uses `FsqCase`, `FsqCaseConfig`, `Task`, shared configuration errors, execution-core contracts such as `ExecutableStep`, `SourceRef`, and `EvidencePolicy`, and the shared Android action registry for deterministic Android command payload normalization and step kind classification.
 
 ## Public Interface
 
@@ -26,19 +26,26 @@ steps = adapter.to_executable_steps(case)
 
 `FsqExecutableStepAdapter` preserves FSQ action names exactly in `ExecutableStep.action_name`, including names such as `tapOn`, `inputText`, `pressKey`, `assertVisible`, `assert`, and `performActions`. It should not translate action names into platform driver method names; platform harnesses own that mapping.
 
-The adapter should normalize each YAML command into `ExecutableStep.params` using these first-batch rules:
+The adapter should normalize each known Android YAML command into `ExecutableStep.params` by looking up the action in `ANDROID_ACTION_DEFINITIONS_BY_NAME`, validating object-shaped payloads against the registry's shared parameter model, then storing `model_dump(mode="json", exclude_none=True)`. Known Android action payloads should be authored in the same field shape as their parameter models rather than relying on action-specific scalar shorthand. The first-batch canonical forms are:
 
 | FSQ command shape | `action_name` | `params` |
 |---|---|---|
 | `launchApp` | `launchApp` | `{}` |
 | `killApp` | `killApp` | `{}` |
-| `pressKey: Enter` | `pressKey` | `{"value": "Enter"}` |
-| `tapOn: Login` | `tapOn` | `{"value": "Login"}` |
-| `performActions: [...]` | `performActions` | `{"value": [...]}` |
-| `inputText: {text: bing.com, ...}` | `inputText` | original object payload |
-| `assert: {element: ..., text: ...}` | `assert` | original object payload |
+| `pressKey: {key: Enter}` | `pressKey` | `{"key": "Enter"}` |
+| `tapOn: {target: Login}` | `tapOn` | `{"target": "Login"}` |
+| `performActions: {actions: [...]}` | `performActions` | `{"actions": [...]}` |
+| `inputText: {text: bing.com, ...}` | `inputText` | validated `AndroidInputTextParams` dump |
+| `assertVisible: {...}` | `assertVisible` | validated `AndroidAssertVisibleParams` dump |
+| `assertNotVisible: {...}` | `assertNotVisible` | validated `AndroidAssertNotVisibleParams` dump |
+| `longPressOn: {...}` | `longPressOn` | validated `AndroidLongPressOnParams` dump |
+| `swipe: {...}` | `swipe` | validated `AndroidSwipeParams` dump |
+| `assert: {element: ..., text: ...}` | `assert` | validated `AndroidAssertStateParams` dump |
+| `assertWithAI: {prompt: ...}` | `assertWithAI` | validated `AndroidAssertWithAIParams` dump |
 
-The first-batch step kind mapping is:
+Runner-owned metadata such as valid `timeout` values should be extracted before driver parameter validation and stored in `ExecutableStep.timeout_ms`, not passed through to driver parameter models. The original raw command remains available in `ExecutableStep.metadata` for evidence and debugging.
+
+The first-batch step kind mapping for known Android actions is owned by the same Android action registry:
 
 | FSQ action | `ExecutableStep.kind` |
 |---|---|
@@ -56,7 +63,7 @@ Each generated step should include:
 - `timeout_ms`: copied from command object `timeout` when present and valid.
 - `evidence_policy`: default shared model policy for now. Rich FSQ evidence controls are a later batch.
 
-Malformed command entries that cannot be reduced to one FSQ action must raise `ConfigurationError` with the case path and command index. Optional commands are still converted into executable steps; optional/non-blocking execution semantics belong to the core runner or a later policy layer, not this adapter.
+Malformed command entries that cannot be reduced to one FSQ action must raise `ConfigurationError` with the case path and command index. Known Android command payloads that fail shared parameter model validation, including legacy scalar shorthand such as `pressKey: Enter` or `performActions: [...]`, must also raise `ConfigurationError` before execution starts, with enough context to identify the case path, command index, action name, and validation problem. Optional commands are still converted into executable steps; optional/non-blocking execution semantics belong to the core runner or a later policy layer, not this adapter.
 
 ## Internal Structure
 
@@ -77,6 +84,7 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Unsupported 
 - Configured `cases.dir` is treated as read-only input. Task execution may read FSQ case files from it, but generated files and evidence must be written under the output root.
 - Markdown conversion reports are intentionally ignored and are not loaded as task inputs.
 - FSQ commands are reference flow hints for agent tasks, and deterministic ordered input for the core execution path when converted by `FsqExecutableStepAdapter`.
+- Deterministic Android command payload normalization uses the shared Android action registry from `models`. Authored Android command payloads use the same object field names as the registry's parameter models, which keeps case parsing, future case generation, harness dispatch, and function-call schemas aligned to one payload contract while preserving FSQ action names in `ExecutableStep.action_name`.
 - Required executable and assertion commands are extracted as ordered key actions. The execution agent always receives the full ordered key-action list regardless of final verification mode. Key actions represent the goal's necessary path and must be attempted in the same relative order, but transient dialogs, waits, screenshots, diagnostics, and recovery steps may be inserted between them.
 - Required ordered key actions are also classified into final verification criteria. Assertion commands such as `assert`, `assertVisible`, and `assertWithAI` are `assertion` criteria. Operation commands such as taps, typing, key presses, scrolls, swipes, waits, and navigation are `operation` criteria. The case goal is represented as a `goal` criterion.
 - `assertWithAI` commands are preserved as required ordered visual assertions when not optional. FSQ does not evaluate the image itself; it carries the assertion prompt into the task so the agent can collect screenshot evidence and the verification layer can judge the visual claim.

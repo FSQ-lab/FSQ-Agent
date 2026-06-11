@@ -1,8 +1,9 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 StepPhase: TypeAlias = Literal["prepare", "invoke", "finalize"]
@@ -35,6 +36,7 @@ RunnerEventType: TypeAlias = Literal[
 ]
 EvidenceArtifactKind: TypeAlias = Literal["screenshot", "ui_tree", "tool_call", "log", "json", "text", "other"]
 HarnessPlatform: TypeAlias = Literal["android", "ios", "macos", "windows", "web"]
+AndroidSwipeDirection: TypeAlias = Literal["up", "down", "left", "right"]
 
 
 class SourceRef(BaseModel):
@@ -114,6 +116,207 @@ class HarnessActionResult(BaseModel):
     error_message: str | None = None
     failure_category: FailureCategory | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HarnessFunctionSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str = ""
+    params_json_schema: dict[str, Any] = Field(default_factory=dict)
+    strict: bool = True
+    platform: HarnessPlatform
+    driver_method: str
+    fsq_action_name: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AndroidLocator(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resourceId: str | None = None
+    accessibilityId: str | None = None
+    text: str | None = None
+    className: str | None = None
+    xpath: str | None = None
+
+    def has_value(self) -> bool:
+        return any(isinstance(value, str) and value.strip() for value in self.model_dump().values())
+
+
+class AndroidPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: int
+    y: int
+
+
+class _AndroidTargetParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str | None = None
+    locator: AndroidLocator | None = None
+
+    @model_validator(mode="after")
+    def _require_target(self) -> "_AndroidTargetParams":
+        if self._has_target_value():
+            return self
+        raise ValueError("requires target or non-empty locator")
+
+    def _has_target_value(self) -> bool:
+        if isinstance(self.target, str) and self.target.strip():
+            return True
+        return self.locator is not None and self.locator.has_value()
+
+
+class AndroidLaunchAppParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    app_id: str | None = None
+
+
+class AndroidKillAppParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    app_id: str | None = None
+
+
+class AndroidTapOnParams(_AndroidTargetParams):
+    pass
+
+
+class AndroidLongPressOnParams(_AndroidTargetParams):
+    pass
+
+
+class AndroidInputTextParams(_AndroidTargetParams):
+    text: str
+
+
+class AndroidPressKeyParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+
+    @model_validator(mode="after")
+    def _require_key(self) -> "AndroidPressKeyParams":
+        if self.key.strip():
+            return self
+        raise ValueError("requires non-empty key")
+
+
+class AndroidSwipeParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    direction: AndroidSwipeDirection | None = None
+    start: AndroidPoint | None = None
+    end: AndroidPoint | None = None
+    duration: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _require_direction_or_points(self) -> "AndroidSwipeParams":
+        has_direction = self.direction is not None
+        has_points = self.start is not None and self.end is not None
+        if has_direction or has_points:
+            return self
+        raise ValueError("requires direction or both start and end points")
+
+
+class AndroidPerformActionsParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actions: list[dict[str, Any]]
+
+
+class AndroidAssertVisibleParams(_AndroidTargetParams):
+    optional: bool | None = None
+
+
+class AndroidAssertNotVisibleParams(_AndroidTargetParams):
+    optional: bool | None = None
+
+
+class AndroidTextAssertion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contains: str | None = None
+    equals: str | None = None
+
+    @model_validator(mode="after")
+    def _require_text_assertion(self) -> "AndroidTextAssertion":
+        if isinstance(self.contains, str) or isinstance(self.equals, str):
+            return self
+        raise ValueError("requires contains or equals")
+
+
+class AndroidElementState(AndroidLocator):
+    enabled: bool | None = None
+    checked: bool | None = None
+    selected: bool | None = None
+    clickable: bool | None = None
+    focused: bool | None = None
+
+    def has_state_assertion(self) -> bool:
+        return any(
+            value is not None
+            for value in [self.enabled, self.checked, self.selected, self.clickable, self.focused]
+        )
+
+
+class AndroidAssertStateParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    element: AndroidElementState | None = None
+    text: AndroidTextAssertion | None = None
+    optional: bool | None = None
+
+    @model_validator(mode="after")
+    def _require_assertion(self) -> "AndroidAssertStateParams":
+        if self.text is not None:
+            return self
+        if self.element is not None and (self.element.has_value() or self.element.has_state_assertion()):
+            return self
+        raise ValueError("requires text assertion or element locator/state assertion")
+
+
+class AndroidAssertWithAIParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str
+    optional: bool | None = None
+
+    @model_validator(mode="after")
+    def _require_prompt(self) -> "AndroidAssertWithAIParams":
+        if self.prompt.strip():
+            return self
+        raise ValueError("requires non-empty prompt")
+
+
+@dataclass(frozen=True)
+class AndroidActionDefinition:
+    fsq_action_name: str
+    driver_method: str
+    params_model: type[BaseModel]
+    step_kind: ExecutableStepKind
+
+
+ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
+    AndroidActionDefinition("launchApp", "launch_app", AndroidLaunchAppParams, "setup"),
+    AndroidActionDefinition("killApp", "kill_app", AndroidKillAppParams, "teardown"),
+    AndroidActionDefinition("tapOn", "tap_on", AndroidTapOnParams, "action"),
+    AndroidActionDefinition("assertVisible", "assert_visible", AndroidAssertVisibleParams, "assertion"),
+    AndroidActionDefinition("performActions", "perform_actions", AndroidPerformActionsParams, "action"),
+    AndroidActionDefinition("assert", "assert_state", AndroidAssertStateParams, "assertion"),
+    AndroidActionDefinition("pressKey", "press_key", AndroidPressKeyParams, "action"),
+    AndroidActionDefinition("inputText", "input_text", AndroidInputTextParams, "action"),
+    AndroidActionDefinition("assertNotVisible", "assert_not_visible", AndroidAssertNotVisibleParams, "assertion"),
+    AndroidActionDefinition("longPressOn", "long_press_on", AndroidLongPressOnParams, "action"),
+    AndroidActionDefinition("swipe", "swipe", AndroidSwipeParams, "action"),
+    AndroidActionDefinition("assertWithAI", "assert_with_ai", AndroidAssertWithAIParams, "assertion"),
+)
+ANDROID_ACTION_DEFINITIONS_BY_NAME: dict[str, AndroidActionDefinition] = {
+    definition.fsq_action_name: definition for definition in ANDROID_ACTION_DEFINITIONS
+}
 
 
 class StepCallInfo(BaseModel):

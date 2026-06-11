@@ -30,7 +30,7 @@ Use this skill only when the configured MCP server is Appium for Android. Treat 
 
 Use one payload from the matching semantic action below. Do not combine fields across examples.
 
-### `pressKey: Back`
+### `pressKey: {key: Back}`
 
 Use this payload:
 
@@ -41,7 +41,7 @@ Use this payload:
 }
 ```
 
-### `pressKey: Enter`
+### `pressKey: {key: Enter}`
 
 Use this payload:
 
@@ -68,8 +68,8 @@ Do not call `appium_mobile_press_key` with conflicting identities:
 ## Tool Usage Error Recovery
 
 - If `appium_mobile_press_key` returns an argument validation error, rebuild the payload from the semantic action and send only the matching `keyCode` plus `sessionId`.
-- If a `pressKey: Enter` step accidentally returns output for Back, do not count it as Enter. Retry Enter with `keyCode: 66` and no `key` field.
-- If a `pressKey: Back` step accidentally returns output for Enter, do not count it as Back. Retry Back with `keyCode: 4` and no `key` field.
+- If a `pressKey` step with `key: Enter` accidentally returns output for Back, do not count it as Enter. Retry Enter with `keyCode: 66` and no `key` field.
+- If a `pressKey` step with `key: Back` accidentally returns output for Enter, do not count it as Back. Retry Back with `keyCode: 4` and no `key` field.
 - After retrying a key action, verify the resulting UI state with a fresh observation such as page source, visible text, or screenshot evidence.
 - Before `assertWithAI`, use `wait_ms` for any required pause and keep the page at the intended visual assertion state. Do not scroll or long-press merely to wait before taking the visual assertion screenshot.
 - For `assertWithAI`, do not claim the visual assertion is satisfied from a screenshot path alone. Capture a fresh screenshot with `appium_screenshot`, then call `submit_visual_assertion` with the ordered key action id or label, the assertion prompt, and the fresh screenshot path before deciding whether the visual assertion is satisfied.

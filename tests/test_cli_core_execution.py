@@ -20,7 +20,8 @@ platform: android
 appId: com.microsoft.emmx
 ---
 - launchApp
-- tapOn: Search box
+- tapOn:
+    target: Search box
 """
 
 
@@ -31,7 +32,8 @@ platform: android
 appId: com.microsoft.emmx
 ---
 - launchApp
-- tapOn: Search box
+- tapOn:
+    target: Search box
 - inputText:
     text: skipped
     target: Search box

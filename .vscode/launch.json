@@ -78,18 +78,20 @@
       "envFile": "${workspaceFolder}/.env"
     },
     {
-      "name": "fsq-agent: android rerun non-success",
+      "name": "fsq-agent: android strict core",
       "type": "debugpy",
       "request": "launch",
       "module": "fsq_agent.cli",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}",
       "args": [
-        "run-batch",
+        "run-strict-core",
         "--config",
         "config.local.yaml",
-        "--tasks",
-        ".fsq-agent-workspace/rerun/android-non-success-2026-05-14"
+        "--task",
+        "fsq-testcases/android/bottom_bar/open_new_inprivate_tab_through_overflow_menu.codex.yaml",
+        "--android-serial",
+        "b3f60dc6"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,

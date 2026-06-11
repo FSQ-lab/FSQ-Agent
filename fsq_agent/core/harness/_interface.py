@@ -1,4 +1,4 @@
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from fsq_agent.models import (
     ExecutableStep,
@@ -6,6 +6,7 @@ from fsq_agent.models import (
     HarnessActionResult,
     HarnessArtifactRef,
     HarnessContext,
+    HarnessFunctionSchema,
     StepPhase,
 )
 
@@ -15,7 +16,7 @@ class HarnessInterface(Protocol):
     def get_context(self) -> HarnessContext:
         ...
 
-    def action_space(self) -> dict[str, Any]:
+    def action_space(self) -> list[HarnessFunctionSchema]:
         ...
 
     def before_action(self, step: ExecutableStep, context: HarnessContext) -> None:

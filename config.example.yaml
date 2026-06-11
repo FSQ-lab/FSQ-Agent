@@ -20,6 +20,7 @@ openai_agents:
   max_turns: 50
   tracing_enabled: false
   trace_include_sensitive_data: false
+  fail_without_api_key: true
   prompt:
     agent_template_path: ./fsq_agent/agent/templates/agent_instructions.j2
     task_template_path: ./fsq_agent/agent/templates/task_input.j2

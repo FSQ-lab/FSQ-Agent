@@ -32,7 +32,8 @@ tags:
     target: Search box
     locator:
       resourceId: com.microsoft.emmx:id/url_bar
-- pressKey: Enter
+- pressKey:
+    key: Enter
 - assertWithAI:
     prompt: Analyze the screenshot to verify bing webpage displayed normally.
     optional: false
