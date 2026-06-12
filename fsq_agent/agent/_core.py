@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fsq_agent.config import Settings, load_settings
 from fsq_agent.knowledge import PrivateKnowledgeLoader
-from fsq_agent.models import GoalPrePlan, KnowledgeBundle, RunEvent, RunEventSink, Task, TaskResult, VerificationCriterion
+from fsq_agent.models import KnowledgeBundle, RunEvent, RunEventSink, Task, TaskResult, VerificationCriterion
 from fsq_agent.observation import ExecutionLogger
 from fsq_agent.report import ReportGenerator
 from fsq_agent.skills import SkillLoader
@@ -129,51 +129,6 @@ class FsqAgent:
                     title="Run failed",
                     message=message,
                     duration_ms=duration_ms,
-                    payload={"exception_type": exc.__class__.__name__},
-                )
-            )
-            raise
-
-    async def pre_plan_goal(self, goal: str, event_sink: RunEventSink | None = None) -> GoalPrePlan:
-        run_id = f"pre-plan-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-        emitter = RunEventEmitter(self.event_logger, event_sink)
-        await emitter.emit(
-            RunEvent(run_id=run_id, task_id="pre-plan", type="run_started", title="Pre-plan run started", message=goal)
-        )
-        try:
-            knowledge = self._load_page_knowledge_index()
-            skills = self.skill_loader.load(self.settings.skills)
-            await emitter.emit(
-                RunEvent(
-                    run_id=run_id,
-                    task_id="pre-plan",
-                    type="agent_started",
-                    title="Pre-plan context loaded",
-                    message=f"Loaded {len(knowledge.items)} knowledge items and {len(skills)} skills.",
-                    payload={"knowledge_item_count": len(knowledge.items), "skill_count": len(skills)},
-                )
-            )
-            pre_plan = await self.runtime.run_pre_plan(goal, knowledge, skills, run_id, emitter.emit)
-            await emitter.emit(
-                RunEvent(
-                    run_id=run_id,
-                    task_id="pre-plan",
-                    type="run_completed",
-                    title="Pre-plan completed",
-                    message=pre_plan.summary or f"Generated {len(pre_plan.key_actions)} key actions.",
-                    payload={"key_action_count": len(pre_plan.key_actions), "relevant_page_ids": pre_plan.relevant_page_ids},
-                )
-            )
-            return pre_plan
-        except BaseException as exc:
-            message = str(exc) or exc.__class__.__name__
-            await emitter.emit(
-                RunEvent(
-                    run_id=run_id,
-                    task_id="pre-plan",
-                    type="run_failed",
-                    title="Pre-plan run failed",
-                    message=message,
                     payload={"exception_type": exc.__class__.__name__},
                 )
             )

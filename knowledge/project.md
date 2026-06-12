@@ -2,7 +2,7 @@
 
 This file is loaded for every normal goal-driven task as concise project and app knowledge.
 
-`knowledge/index.md` is reserved for the public page-knowledge graph index used by standalone goal pre-planning.
+`knowledge/index.md` is reserved for the page-knowledge graph index used by internal dynamic goal planning.
 
 ## Edge Android MSA Sign-In
 

@@ -12,10 +12,10 @@ See [docs/openai-agent-loop.md](docs/openai-agent-loop.md) for how task executio
 python -m pip install -e ".[dev,android]"
 copy .env.example .env
 fsq-agent init --config config.example.yaml
-fsq-agent capabilities --config config.example.yaml
-fsq-agent validate-config --config config.example.yaml
-fsq-agent run --config config.example.yaml --task examples/tasks/add-bookmark.codex.yaml
-fsq-agent run-goal --config config.example.yaml --goal "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page."
+fsq-agent run --config config.example.yaml --goal "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page."
+fsq-agent run --config config.example.yaml --case-yaml cases/android/example.codex.yaml
+fsq-agent run --config config.example.yaml --strict --case-yaml cases/android/example.codex.yaml
+fsq-agent report --config config.example.yaml --run-id RUN_ID --format markdown
 ```
 
 ## Runtime Configuration
@@ -34,10 +34,9 @@ harness:
 		backend: uiautomator2
 		app_id: com.microsoft.emmx
 		serial: null
-		enable_ai_assertions: false
 ```
 
-`app_id` is required for `run-goal` and any task that does not provide `appId` in FSQ case metadata. Set `serial` to an `adb devices` serial when more than one device is connected; otherwise leave it `null`.
+`app_id` is required for dynamic LLM runs and for strict cases that do not provide `appId` in FSQ case metadata. Set `serial` to an `adb devices` serial when more than one device is connected; otherwise leave it `null`.
 
 For account-dependent cases, put secret values in `.env` and allow only those names in config:
 
@@ -52,17 +51,31 @@ Existing process environment variables take precedence over `.env` values. Secre
 
 Final verification strictness is configured with `verification.mode`. The default `normal` verifies the case goal and assertion key actions, `strict` verifies the goal plus every key action including operations, and `goal` verifies only the case goal. Execution still receives the full key-action flow in every mode.
 
-## Goal-Driven Tasks
+## Running Tasks
 
-Use `run-goal` when you want the agent to start from a natural-language goal instead of an FSQ case with explicit key actions:
+Use `run --goal` when you want the agent to start from a natural-language goal:
 
 ```bash
-fsq-agent run-goal \
+fsq-agent run \
 	--config config.local.yaml \
 	--goal "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page."
 ```
 
-`run-goal` first runs the same goal pre-planner used by `pre-plan`, injects the generated key actions into the normal execution flow, then runs verification and report generation as one task run. The pre-plan phase is recorded in the task run timeline; it does not create a separate report.
+Use `run --case-yaml` or `run --case-dir` for dynamic LLM execution from FSQ YAML reference material. In this mode the CLI reads each `.codex.yaml` file as raw UTF-8 text; it does not parse YAML, extract key actions, or convert commands into local steps.
+
+```bash
+fsq-agent run --config config.local.yaml --case-yaml path/to/case.codex.yaml
+fsq-agent run --config config.local.yaml --case-dir path/to/cases
+```
+
+Use `run --strict` for deterministic strict-core execution of authored FSQ YAML. This path parses `.codex.yaml`, runs it through the configured Android driver, writes `evidence-manifest.json`, and generates `core-report.md/json` without LLM participation.
+
+```bash
+fsq-agent run --config config.local.yaml --strict --case-yaml path/to/case.codex.yaml
+fsq-agent run --config config.local.yaml --strict --case-dir path/to/cases
+```
+
+`init` initializes the workspace and reports readiness for both the default LLM run path and the strict-core path. Strict-only users do not need OpenAI credentials just to initialize or run `--strict` cases.
 
 You can also create goal-only `.codex.yaml` cases by providing only case metadata. The case name is the goal, and key actions are derived at runtime:
 
@@ -78,13 +91,7 @@ tags:
 Run it with the same command used for normal FSQ cases:
 
 ```bash
-fsq-agent run --config config.local.yaml --task path/to/goal-only.codex.yaml
-```
-
-Use `pre-plan` when you only want to inspect the generated key actions without executing UI automation, verification, or report generation:
-
-```bash
-fsq-agent pre-plan --config config.local.yaml --goal "Open Downloads from the New Tab Page" --format json
+fsq-agent run --config config.local.yaml --case-yaml path/to/goal-only.codex.yaml
 ```
 
 ## Current Scope

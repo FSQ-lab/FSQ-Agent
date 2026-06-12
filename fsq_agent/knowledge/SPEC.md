@@ -33,7 +33,7 @@ Missing optional knowledge references are recorded as agent context warnings. In
 - Knowledge is advisory context, not executable authority.
 - Knowledge loading is provider-based. `PrivateKnowledgeLoader` aggregates one or more `KnowledgeProvider` implementations so future upstreams can supply plain files, generated indexes, image manifests, databases, or service-backed knowledge without changing the agent runtime.
 - The default `DirectoryKnowledgeProvider` reads `project.md` automatically when present. `project.md` is the concise project-specific quick declaration and background note for normal goal-driven task execution, and it is included for every task under the key `project.md`.
-- `index.md` is reserved for the public page-knowledge graph index consumed by standalone goal pre-planning. It is not automatically loaded into normal task execution by `DirectoryKnowledgeProvider`.
+- `index.md` is reserved for the page-knowledge graph index consumed by internal dynamic goal planning. It is not automatically loaded into normal task execution by `DirectoryKnowledgeProvider`.
 - Task-specific `Task.knowledge_refs` remain supported and are resolved relative to the configured knowledge directory.
 - Plain text and Markdown are loaded as strings. JSON and YAML are parsed into structured values. Image files are discovered as assets for future providers, but this implementation does not attach image pixels to the model prompt.
 - Knowledge storage stays outside the package under top-level `knowledge/` so teams can version app-specific data separately from code.

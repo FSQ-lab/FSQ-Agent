@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Load configured automation skills from local Markdown files, directories, or inline descriptive bundles. Provide skill instructions and file metadata to the OpenAI Agents SDK runtime and optional ShellTool integration without coupling skill loading to private knowledge storage.
+Load configured automation skills from local Markdown files, directories, or inline descriptive bundles. Provide skill instructions and file metadata to the OpenAI Agents SDK runtime without coupling skill loading to private knowledge storage or granting command execution authority.
 
 ## Dependencies
 
@@ -30,5 +30,5 @@ Missing optional skill references are returned as skill warnings. Invalid or mis
 - Skills are advisory context, not executable authority.
 - Local Markdown skills are rendered into instructions/context.
 - Harness- or platform-specific skills should describe scope, action selection, argument rules, tool usage error recovery, semantic fidelity rules, and evidence rules. They guide the generic agent for the configured runtime without turning the agent runtime into a platform-specific implementation.
-- When shell execution is enabled, file-backed skills can be attached to the SDK `ShellTool` local environment as descriptive skill metadata; commands still execute only through configured CLI tools or shell policy.
+- Skills do not attach command execution tools. Any future command capability requires its own SPEC update outside the skills module.
 - Skill models remain centralized in `models` so runtime, tools, and configuration share the same serializable contracts.

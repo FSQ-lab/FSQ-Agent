@@ -1,10 +1,10 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
 from fsq_agent.cli._main import _task_from_goal, main
-from fsq_agent.models import ReportArtifact
+from fsq_agent.models import ReportArtifact, Task, TaskResult, VerificationResult
 
 
 FSQ_CASE = """
@@ -17,27 +17,10 @@ appId: com.microsoft.emmx
 """
 
 
-def test_run_goal_command_is_registered() -> None:
-    assert "run-goal" in main.commands
-
-
-def test_run_strict_core_command_is_registered() -> None:
-    assert "run-strict-core" in main.commands
-
-
-def test_run_strict_core_batch_command_is_registered() -> None:
-    assert "run-strict-core-batch" in main.commands
-
-
-def test_run_strict_core_command_builds_android_harness_and_reports_paths(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
+def _config(tmp_path: Path, body: str = "") -> Path:
     workspace = tmp_path / "workspace"
     cases_dir = tmp_path / "cases"
-    cases_dir.mkdir()
-    case_path = cases_dir / "strict_cli.codex.yaml"
-    case_path.write_text(FSQ_CASE, encoding="utf-8")
+    cases_dir.mkdir(exist_ok=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         f"""
@@ -48,13 +31,88 @@ cases:
 output:
   root_dir: output
   runs_dir: runs
+{body}
 """,
         encoding="utf-8",
     )
+    return config_path
+
+
+def test_only_public_commands_are_registered() -> None:
+    assert set(main.commands) == {"init", "run", "report"}
+
+
+def test_run_rejects_missing_or_conflicting_sources(tmp_path: Path) -> None:
+    config_path = _config(tmp_path)
+    runner = CliRunner()
+
+    missing = runner.invoke(main, ["run", "--config", str(config_path)])
+    conflicting = runner.invoke(main, ["run", "--config", str(config_path), "--goal", "Do it", "--case-yaml", "case.codex.yaml"])
+    strict_goal = runner.invoke(main, ["run", "--config", str(config_path), "--strict", "--goal", "Do it"])
+
+    assert missing.exit_code != 0
+    assert "Exactly one" in missing.output
+    assert conflicting.exit_code != 0
+    assert strict_goal.exit_code != 0
+
+
+def test_run_case_yaml_uses_raw_file_content_without_fsq_parsing(tmp_path: Path, monkeypatch) -> None:
+    config_path = _config(tmp_path)
+    case_path = tmp_path / "cases" / "raw.codex.yaml"
+    raw_content = "not: [valid yaml"
+    case_path.write_text(raw_content, encoding="utf-8")
+    captured: dict[str, Task] = {}
+
+    class FakeAgent:
+        async def run(self, task: Task, event_sink=None) -> TaskResult:
+            captured["task"] = task
+            return TaskResult(
+                task_id=task.id,
+                status="success",
+                steps=[],
+                verification=VerificationResult(status="success", summary="ok"),
+                report=ReportArtifact(run_id="raw-run", path=tmp_path / "report.md"),
+            )
+
+    class RaisingLoader:
+        def __init__(self) -> None:
+            raise AssertionError("dynamic case-yaml must not construct FsqCaseLoader")
+
+    monkeypatch.setattr("fsq_agent.cli._main.FsqAgent.from_settings", lambda _settings: FakeAgent())
+    monkeypatch.setattr("fsq_agent.cli._main.FsqCaseLoader", RaisingLoader)
+
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--case-yaml", "raw.codex.yaml", "--no-stream"])
+
+    assert result.exit_code == 0, result.output
+    task = captured["task"]
+    assert task.name == "Case reference: raw.codex.yaml"
+    assert raw_content in task.description
+    assert "The CLI has not parsed" in task.description
+    assert task.key_actions == []
+
+
+def test_run_strict_case_builds_android_harness_from_config_and_reports_paths(tmp_path: Path, monkeypatch) -> None:
+    config_path = _config(
+        tmp_path,
+        """
+harness:
+  platform: android
+  android:
+    backend: uiautomator2
+    app_id: com.example.config
+    serial: device-1
+openai_agents:
+  api_key_env: FSQ_AGENT_MISSING_KEY
+""",
+    )
+    case_path = tmp_path / "cases" / "strict_cli.codex.yaml"
+    case_path.write_text(FSQ_CASE, encoding="utf-8")
     calls = {}
 
     class FakeDriver:
-        def __init__(self, *, app_id: str, serial: str) -> None:
+        def __init__(self, *, app_id: str, serial: str | None) -> None:
+            self.app_id = app_id
+            self.serial = serial
             calls["driver"] = {"app_id": app_id, "serial": serial}
 
     def fake_run_strict_fsq_core_case(**kwargs):
@@ -64,156 +122,94 @@ output:
         kwargs["output_dir"].mkdir(parents=True, exist_ok=True)
         report_path.write_text("report", encoding="utf-8")
         manifest_path.write_text("{}", encoding="utf-8")
-        return ReportArtifact(
-            run_id=kwargs["run_id"],
-            path=report_path,
-            evidence_manifest_path=manifest_path,
-        )
+        return ReportArtifact(run_id=kwargs["run_id"], path=report_path, evidence_manifest_path=manifest_path)
 
     monkeypatch.setattr("fsq_agent.cli._main.UiAutomator2AndroidDriver", FakeDriver)
     monkeypatch.setattr("fsq_agent.cli._main.run_strict_fsq_core_case", fake_run_strict_fsq_core_case)
 
-    result = CliRunner().invoke(
-        main,
-        [
-            "run-strict-core",
-            "--config",
-            str(config_path),
-            "--task",
-            "strict_cli.codex.yaml",
-            "--android-serial",
-            "device-1",
-            "--run-id",
-            "strict-run-1",
-        ],
-    )
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--strict", "--case-yaml", "strict_cli.codex.yaml"])
 
     assert result.exit_code == 0, result.output
-    assert calls["driver"] == {"app_id": "com.microsoft.emmx", "serial": "device-1"}
+    assert calls["driver"] == {"app_id": "com.example.config", "serial": "device-1"}
     assert calls["strict"]["case_path"] == case_path.resolve()
-    assert calls["strict"]["run_id"] == "strict-run-1"
-    assert calls["strict"]["output_dir"] == workspace / "output" / "runs" / "strict-run-1"
+    assert calls["strict"]["run_id"] == "strict_cli"
+    assert calls["strict"]["output_dir"] == tmp_path / "workspace" / "output" / "runs" / "strict_cli"
     assert "core-report.md" in result.output
     assert "evidence-manifest.json" in result.output
 
 
-def test_run_strict_core_command_can_enable_ai_assertion_evaluator(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    workspace = tmp_path / "workspace"
-    cases_dir = tmp_path / "cases"
-    cases_dir.mkdir()
-    case_path = cases_dir / "strict_cli_ai.codex.yaml"
-    case_path.write_text(FSQ_CASE, encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        f"""
-workspace:
-  root_dir: {workspace.as_posix()}
-cases:
-  dir: {cases_dir.as_posix()}
-output:
-  root_dir: output
-  runs_dir: runs
-openai_agents:
-  provider: azure_openai
-  api_key_env: TEST_OPENAI_API_KEY
-  model: gpt-test
+def test_run_strict_case_falls_back_to_case_app_id(tmp_path: Path, monkeypatch) -> None:
+    config_path = _config(
+        tmp_path,
+        """
+harness:
+  platform: android
+  android:
+    backend: uiautomator2
+    serial: device-1
 """,
-        encoding="utf-8",
     )
-    monkeypatch.setenv("TEST_OPENAI_API_KEY", "dummy")
+    case_path = tmp_path / "cases" / "strict_cli.codex.yaml"
+    case_path.write_text(FSQ_CASE, encoding="utf-8")
     calls = {}
 
     class FakeDriver:
-        def __init__(self, *, app_id: str, serial: str) -> None:
+        def __init__(self, *, app_id: str, serial: str | None) -> None:
             calls["driver"] = {"app_id": app_id, "serial": serial}
 
-    class FakeEvaluator:
-        def __init__(self, settings) -> None:
-            calls["evaluator_settings"] = settings
-
-    class CapturingHarness:
-        def __init__(self, *, driver, artifact_store, ai_assertion_evaluator=None) -> None:
-            calls["harness"] = {
-                "driver": driver,
-                "artifact_store": artifact_store,
-                "ai_assertion_evaluator": ai_assertion_evaluator,
-            }
-
     def fake_run_strict_fsq_core_case(**kwargs):
-        calls["strict"] = kwargs
+        kwargs["output_dir"].mkdir(parents=True, exist_ok=True)
         report_path = kwargs["output_dir"] / "core-report.md"
         manifest_path = kwargs["output_dir"] / "evidence-manifest.json"
-        kwargs["output_dir"].mkdir(parents=True, exist_ok=True)
         report_path.write_text("report", encoding="utf-8")
         manifest_path.write_text("{}", encoding="utf-8")
-        return ReportArtifact(
-            run_id=kwargs["run_id"],
-            path=report_path,
-            evidence_manifest_path=manifest_path,
-        )
+        return ReportArtifact(run_id=kwargs["run_id"], path=report_path, evidence_manifest_path=manifest_path)
 
     monkeypatch.setattr("fsq_agent.cli._main.UiAutomator2AndroidDriver", FakeDriver)
-    monkeypatch.setattr("fsq_agent.cli._main.OpenAIAssertionEvaluator", FakeEvaluator)
-    monkeypatch.setattr("fsq_agent.cli._main.AndroidHarness", CapturingHarness)
     monkeypatch.setattr("fsq_agent.cli._main.run_strict_fsq_core_case", fake_run_strict_fsq_core_case)
 
-    result = CliRunner().invoke(
-        main,
-        [
-            "run-strict-core",
-            "--config",
-            str(config_path),
-            "--task",
-            "strict_cli_ai.codex.yaml",
-            "--android-serial",
-            "device-1",
-            "--run-id",
-            "strict-run-ai",
-            "--enable-ai-assertions",
-        ],
-    )
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--strict", "--case-yaml", str(case_path)])
 
     assert result.exit_code == 0, result.output
-    assert calls["evaluator_settings"].openai_agents.model == "gpt-test"
-    assert isinstance(calls["harness"]["ai_assertion_evaluator"], FakeEvaluator)
+    assert calls["driver"] == {"app_id": "com.microsoft.emmx", "serial": "device-1"}
 
 
-def test_run_strict_core_batch_continues_and_writes_summary(tmp_path: Path, monkeypatch) -> None:
-    workspace = tmp_path / "workspace"
-    cases_dir = tmp_path / "cases"
-    cases_dir.mkdir()
-    first_case = cases_dir / "first.codex.yaml"
-    second_case = cases_dir / "second.codex.yaml"
-    first_case.write_text(FSQ_CASE.replace("Strict CLI Case", "First Case"), encoding="utf-8")
-    second_case.write_text(FSQ_CASE.replace("Strict CLI Case", "Second Case"), encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        f"""
-workspace:
-  root_dir: {workspace.as_posix()}
-cases:
-  dir: {cases_dir.as_posix()}
-output:
-  root_dir: output
-  runs_dir: runs
+def test_run_strict_case_requires_config_or_case_app_id_before_driver_construction(tmp_path: Path, monkeypatch) -> None:
+    config_path = _config(tmp_path)
+    case_path = tmp_path / "cases" / "missing_app.codex.yaml"
+    case_path.write_text(FSQ_CASE.replace("appId: com.microsoft.emmx\n", ""), encoding="utf-8")
+
+    def fail_driver(**_kwargs):
+        raise AssertionError("driver should not be constructed")
+
+    monkeypatch.setattr("fsq_agent.cli._main.UiAutomator2AndroidDriver", fail_driver)
+
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--strict", "--case-yaml", str(case_path)])
+
+    assert result.exit_code != 0
+
+
+def test_run_strict_case_dir_continues_and_writes_summary(tmp_path: Path, monkeypatch) -> None:
+    config_path = _config(
+        tmp_path,
+        """
+harness:
+  platform: android
+  android:
+    backend: uiautomator2
+    app_id: com.example.config
+    serial: device-1
 """,
-        encoding="utf-8",
     )
+    cases_dir = tmp_path / "cases"
+    (cases_dir / "first.codex.yaml").write_text(FSQ_CASE.replace("Strict CLI Case", "First Case"), encoding="utf-8")
+    (cases_dir / "second.codex.yaml").write_text(FSQ_CASE.replace("Strict CLI Case", "Second Case"), encoding="utf-8")
     calls = []
 
     class FakeDriver:
-        def __init__(self, *, app_id: str, serial: str) -> None:
+        def __init__(self, *, app_id: str, serial: str | None) -> None:
             self.app_id = app_id
             self.serial = serial
-
-    class CapturingHarness:
-        def __init__(self, *, driver, artifact_store, ai_assertion_evaluator=None) -> None:
-            self.driver = driver
-            self.artifact_store = artifact_store
-            self.ai_assertion_evaluator = ai_assertion_evaluator
 
     def fake_run_strict_fsq_core_case(**kwargs):
         calls.append(kwargs)
@@ -228,37 +224,19 @@ output:
             encoding="utf-8",
         )
         manifest_path.write_text("{}", encoding="utf-8")
-        return ReportArtifact(
-            run_id=kwargs["run_id"],
-            path=report_path,
-            evidence_manifest_path=manifest_path,
-        )
+        return ReportArtifact(run_id=kwargs["run_id"], path=report_path, evidence_manifest_path=manifest_path)
 
     monkeypatch.setattr("fsq_agent.cli._main.UiAutomator2AndroidDriver", FakeDriver)
-    monkeypatch.setattr("fsq_agent.cli._main.AndroidHarness", CapturingHarness)
     monkeypatch.setattr("fsq_agent.cli._main.run_strict_fsq_core_case", fake_run_strict_fsq_core_case)
 
-    result = CliRunner().invoke(
-        main,
-        [
-            "run-strict-core-batch",
-            "--config",
-            str(config_path),
-            "--tasks",
-            str(cases_dir),
-            "--android-serial",
-            "device-1",
-            "--run-prefix",
-            "batch-test",
-        ],
-    )
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--strict", "--case-dir", str(cases_dir)])
 
     assert result.exit_code == 1, result.output
     assert [call["case_path"].name for call in calls] == ["first.codex.yaml", "second.codex.yaml"]
-    summary_path = workspace / "output" / "runs" / "batch-test" / "strict-core-batch-summary.json"
-    markdown_path = workspace / "output" / "runs" / "batch-test" / "strict-core-batch-summary.md"
-    assert summary_path.exists()
-    assert markdown_path.exists()
+    summary_paths = list((tmp_path / "workspace" / "output" / "runs").glob("strict-core-batch-*/strict-core-batch-summary.json"))
+    assert len(summary_paths) == 1
+    summary_path = summary_paths[0]
+    markdown_path = summary_path.with_suffix(".md")
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["total"] == 2
     assert summary["passed"] == 1
@@ -266,6 +244,29 @@ output:
     assert [case["status"] for case in summary["cases"]] == ["passed", "failed"]
     assert "failed_steps=1" in summary["cases"][1]["error"]
     assert "first.codex.yaml" in markdown_path.read_text(encoding="utf-8")
+
+
+def test_report_command_resolves_llm_and_strict_reports(tmp_path: Path) -> None:
+    config_path = _config(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / ".fsq-agent-workspace").write_text("fsq-agent workspace\n", encoding="utf-8")
+    runs_dir = tmp_path / "workspace" / "output" / "runs"
+    llm_dir = runs_dir / "llm-run"
+    strict_dir = runs_dir / "strict-run"
+    llm_dir.mkdir(parents=True)
+    strict_dir.mkdir(parents=True)
+    (llm_dir / "report.md").write_text("llm report", encoding="utf-8")
+    (strict_dir / "core-report.md").write_text("strict report", encoding="utf-8")
+    runner = CliRunner()
+
+    llm_result = runner.invoke(main, ["report", "--config", str(config_path), "--run-id", "llm-run"])
+    strict_result = runner.invoke(main, ["report", "--config", str(config_path), "--run-id", "strict-run"])
+
+    assert llm_result.exit_code == 0, llm_result.output
+    assert "llm report" in llm_result.output
+    assert strict_result.exit_code == 0, strict_result.output
+    assert "strict report" in strict_result.output
 
 
 def test_task_from_goal_creates_goal_only_task() -> None:

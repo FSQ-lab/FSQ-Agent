@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from fsq_agent.models import GoalPrePlan, KnowledgeBundle, RunEventSink, SkillBundle
+from fsq_agent.models import GoalPrePlan, KnowledgeBundle, SkillBundle
 
 
 PRE_PLAN_AGENT_INSTRUCTIONS = """
@@ -97,18 +97,3 @@ def safe_page_relative_path(value: str) -> Path | None:
     if path.parts and path.parts[0] == "pages":
         return path
     return Path("pages") / path
-
-
-class GoalPrePlanner:
-    def __init__(self, runtime: Any) -> None:
-        self.runtime = runtime
-
-    async def plan(
-        self,
-        goal: str,
-        knowledge: KnowledgeBundle,
-        skills: list[SkillBundle],
-        run_id: str,
-        event_sink: RunEventSink | None = None,
-    ) -> GoalPrePlan:
-        return await self.runtime.run_pre_plan(goal, knowledge, skills, run_id, event_sink)

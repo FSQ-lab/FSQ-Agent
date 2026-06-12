@@ -71,7 +71,6 @@ class AndroidHarnessSettings(BaseModel):
     backend: Literal["uiautomator2"] = "uiautomator2"
     app_id: str | None = None
     serial: str | None = None
-    enable_ai_assertions: bool = False
 
 
 class HarnessSettings(BaseModel):

@@ -106,6 +106,16 @@ def _normalize_openai_provider_settings(settings: Settings) -> None:
 
 
 def validate_runtime_settings(settings: Settings) -> None:
+    _validate_openai_provider_settings(settings)
+    _validate_android_harness_settings(settings)
+    _validate_shell_settings(settings)
+
+
+def validate_strict_core_settings(settings: Settings) -> None:
+    _validate_android_harness_settings(settings)
+
+
+def _validate_openai_provider_settings(settings: Settings) -> None:
     if not settings.openai_agents.model.strip():
         raise ConfigurationError("OpenAI Agents SDK model deployment name is required.")
     if settings.openai_agents.provider == "azure_openai" and not settings.openai_agents.base_url.endswith("/openai/v1/"):
@@ -129,6 +139,9 @@ def validate_runtime_settings(settings: Settings) -> None:
             "Azure OpenAI API key environment variable still contains a placeholder value.",
             context={"api_key_env": settings.openai_agents.api_key_env},
         )
+
+
+def _validate_android_harness_settings(settings: Settings) -> None:
     if settings.harness.platform != "android":
         raise ConfigurationError(
             "Unsupported harness platform.",
@@ -139,6 +152,9 @@ def validate_runtime_settings(settings: Settings) -> None:
             "Unsupported Android harness backend.",
             context={"backend": settings.harness.android.backend, "supported": ["uiautomator2"]},
         )
+
+
+def _validate_shell_settings(settings: Settings) -> None:
     if settings.shell.enabled:
         if settings.shell.mode == "allowlist" and not settings.shell.command_allowlist:
             raise ConfigurationError("Shell command allowlist cannot be empty when shell mode is allowlist.")

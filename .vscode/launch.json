@@ -2,39 +2,16 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "fsq-agent: android single",
+      "name": "fsq-agent: init local",
       "type": "debugpy",
       "request": "launch",
       "module": "fsq_agent.cli",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}",
       "args": [
-        "run",
+        "init",
         "--config",
-        "config.local.yaml",
-        "--task",
-        "fsq-testcases/android/settings/verify_that_each_item_in_the_first_part_of_l1_page_is_accessible.codex.yaml"
-      ],
-      "console": "integratedTerminal",
-      "justMyCode": false,
-      "envFile": "${workspaceFolder}/.env"
-    },
-    {
-      "name": "fsq-agent: pre-plan",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "fsq_agent.cli",
-      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
-      "cwd": "${workspaceFolder}",
-      "args": [
-        "pre-plan",
-        "--config",
-        "config.local.yaml",
-        "--goal",
-        "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page.",
-        "--format",
-        "json",
-        "--no-stream"
+        "config.local.yaml"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -48,11 +25,11 @@
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}",
       "args": [
-        "run-goal",
+        "run",
         "--config",
         "config.local.yaml",
         "--goal",
-        "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page.",
+        "${input:goal}",
         "--stream-format",
         "jsonl"
       ],
@@ -61,42 +38,143 @@
       "envFile": "${workspaceFolder}/.env"
     },
     {
-      "name": "fsq-agent: android batch",
+      "name": "fsq-agent: run case yaml (LLM raw)",
       "type": "debugpy",
       "request": "launch",
       "module": "fsq_agent.cli",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}",
       "args": [
-        "run-batch",
+        "run",
         "--config",
         "config.local.yaml",
-        "--tasks",
-        "fsq-testcases\\android"
+        "--case-yaml",
+        "${input:caseYaml}",
+        "--stream-format",
+        "jsonl"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
       "envFile": "${workspaceFolder}/.env"
     },
     {
-      "name": "fsq-agent: android strict core",
+      "name": "fsq-agent: run case dir (LLM raw)",
       "type": "debugpy",
       "request": "launch",
       "module": "fsq_agent.cli",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
       "cwd": "${workspaceFolder}",
       "args": [
-        "run-strict-core",
+        "run",
         "--config",
         "config.local.yaml",
-        "--task",
-        "fsq-testcases/android/bottom_bar/open_new_inprivate_tab_through_overflow_menu.codex.yaml",
-        "--android-serial",
-        "b3f60dc6"
+        "--case-dir",
+        "${input:caseDir}",
+        "--stream-format",
+        "jsonl"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
       "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "fsq-agent: run strict case yaml",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "fsq_agent.cli",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "run",
+        "--config",
+        "config.local.yaml",
+        "--strict",
+        "--case-yaml",
+        "${input:strictCaseYaml}"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "fsq-agent: run strict case dir",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "fsq_agent.cli",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "run",
+        "--config",
+        "config.local.yaml",
+        "--strict",
+        "--case-dir",
+        "${input:caseDir}"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "fsq-agent: report",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "fsq_agent.cli",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "report",
+        "--config",
+        "config.local.yaml",
+        "--run-id",
+        "${input:runId}",
+        "--format",
+        "${input:reportFormat}"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "goal",
+      "type": "promptString",
+      "description": "Goal for dynamic LLM execution",
+      "default": "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page."
+    },
+    {
+      "id": "caseYaml",
+      "type": "promptString",
+      "description": "Case YAML path, resolved against cases.dir first",
+      "default": "fsq-testcases/android/settings/verify_that_each_item_in_the_first_part_of_l1_page_is_accessible.codex.yaml"
+    },
+    {
+      "id": "strictCaseYaml",
+      "type": "promptString",
+      "description": "Strict-core case YAML path, resolved against cases.dir first",
+      "default": "fsq-testcases/android/bottom_bar/open_new_inprivate_tab_through_overflow_menu.codex.yaml"
+    },
+    {
+      "id": "caseDir",
+      "type": "promptString",
+      "description": "Case directory path, resolved against cases.dir first",
+      "default": "fsq-testcases/android"
+    },
+    {
+      "id": "runId",
+      "type": "promptString",
+      "description": "Run id to print a stored report"
+    },
+    {
+      "id": "reportFormat",
+      "type": "pickString",
+      "description": "Report output format",
+      "options": [
+        "markdown",
+        "json"
+      ],
+      "default": "markdown"
     }
   ]
 }

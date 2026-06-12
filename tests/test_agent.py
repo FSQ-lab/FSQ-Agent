@@ -135,34 +135,6 @@ class _CancelledRuntime:
         raise asyncio.CancelledError()
 
 
-class _PrePlanRuntime:
-    def __init__(self) -> None:
-        self.loaded_knowledge: KnowledgeBundle | None = None
-
-    async def run_pre_plan(
-        self,
-        goal: str,
-        knowledge: KnowledgeBundle,
-        skills: list[object],
-        run_id: str,
-        event_sink: object | None = None,
-    ) -> GoalPrePlan:
-        self.loaded_knowledge = knowledge
-        return GoalPrePlan(
-            goal=goal,
-            summary="Generated a plan.",
-            relevant_page_ids=["edge_android_new_tab_page"],
-            key_actions=[
-                {
-                    "step_id": 1,
-                    "action": "Verify the New Tab Page.",
-                    "source_page_ids": ["edge_android_new_tab_page"],
-                    "notes": "Use page identifiers.",
-                }
-            ],
-        )
-
-
 class _FakeArtifactStore:
     def __init__(self) -> None:
         self.writes: list[tuple[str, str, dict[str, Any]]] = []
@@ -319,57 +291,6 @@ async def test_agent_run_preplans_goal_only_task_before_execution(tmp_path: Path
     ]
     assert [criterion.text for criterion in runtime.last_task.verification_criteria] == ["Goal completed: Access Downloads"]
     assert any(event.title == "Goal pre-plan injected" for event in events)
-
-
-@pytest.mark.asyncio
-async def test_agent_pre_plan_goal_loads_index_only_before_runtime_loop(tmp_path: Path) -> None:
-    knowledge_dir = tmp_path / "knowledge"
-    pages_dir = knowledge_dir / "pages"
-    pages_dir.mkdir(parents=True)
-    (knowledge_dir / "index.md").write_text("# Knowledge Index", encoding="utf-8")
-    (pages_dir / "edge_android_new_tab_page.md").write_text("# New Tab Page", encoding="utf-8")
-    runtime = _PrePlanRuntime()
-    events: list[RunEvent] = []
-    agent = FsqAgent(
-        Settings(knowledge_dir=knowledge_dir),
-        verifier=Verifier(),
-        reporter=_Reporter(),  # type: ignore[arg-type]
-        knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
-        skill_loader=_SkillLoader(),  # type: ignore[arg-type]
-        runtime=runtime,  # type: ignore[arg-type]
-    )
-
-    plan = await agent.pre_plan_goal("Open downloads", event_sink=events.append)
-
-    assert plan.goal == "Open downloads"
-    assert plan.key_actions[0].action == "Verify the New Tab Page."
-    assert runtime.loaded_knowledge is not None
-    assert sorted(runtime.loaded_knowledge.items) == ["index.md"]
-    assert [event.type for event in events] == ["run_started", "agent_started", "run_completed"]
-
-
-@pytest.mark.asyncio
-async def test_agent_pre_plan_goal_uses_pre_plan_knowledge_dir(tmp_path: Path) -> None:
-    private_knowledge_dir = tmp_path / "knowledge"
-    page_knowledge_dir = tmp_path / "knowledge" / "project_android_v1"
-    private_knowledge_dir.mkdir(parents=True)
-    page_knowledge_dir.mkdir(parents=True)
-    (private_knowledge_dir / "index.md").write_text("# Private Index", encoding="utf-8")
-    (page_knowledge_dir / "index.md").write_text("# Page Graph Index", encoding="utf-8")
-    runtime = _PrePlanRuntime()
-    agent = FsqAgent(
-        Settings(knowledge_dir=private_knowledge_dir, pre_plan={"knowledge_dir": page_knowledge_dir}),
-        verifier=Verifier(),
-        reporter=_Reporter(),  # type: ignore[arg-type]
-        knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
-        skill_loader=_SkillLoader(),  # type: ignore[arg-type]
-        runtime=runtime,  # type: ignore[arg-type]
-    )
-
-    await agent.pre_plan_goal("Open downloads")
-
-    assert runtime.loaded_knowledge is not None
-    assert runtime.loaded_knowledge.items["index.md"] == "# Page Graph Index"
 
 
 @pytest.mark.asyncio

@@ -1,19 +1,10 @@
 import json
 import logging
 
-from fsq_agent.models import RunEvent, TaskResult, ToolDefinition
+from fsq_agent.models import RunEvent, TaskResult
 
 
 logger = logging.getLogger(__name__)
-
-
-def log_capabilities(capabilities: list[ToolDefinition]) -> None:
-    rows = [("Name", "Kind", "Description"), *[(capability.name, capability.kind, capability.description) for capability in capabilities]]
-    widths = [max(len(str(row[index])) for row in rows) for index in range(3)]
-    separator = "-+-".join("-" * width for width in widths)
-    lines = ["Available Capabilities", _format_row(rows[0], widths), separator]
-    lines.extend(_format_row(row, widths) for row in rows[1:])
-    logger.info("\n".join(lines))
 
 
 def log_result(result: TaskResult) -> None:
@@ -51,7 +42,3 @@ def _compact(value: object, limit: int = 1000) -> str:
     text = json.dumps(value, ensure_ascii=False, default=str) if not isinstance(value, str) else value
     text = text.replace("\r", " ").replace("\n", " ")
     return text if len(text) <= limit else f"{text[:limit]}..."
-
-
-def _format_row(row: tuple[str, str, str], widths: list[int]) -> str:
-    return " | ".join(str(value).ljust(widths[index]) for index, value in enumerate(row))

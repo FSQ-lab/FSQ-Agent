@@ -71,16 +71,6 @@ class FakeAndroidDriver:
         return {"nodes": [{"text": "Login"}]}
 
 
-class FakeAIAssertionEvaluator:
-    def __init__(self, verdict: str = "passed") -> None:
-        self.verdict = verdict
-        self.calls: list[dict[str, object]] = []
-
-    def evaluate(self, **kwargs: object) -> dict[str, object]:
-        self.calls.append(dict(kwargs))
-        return {"verdict": self.verdict, "reasoning": "visual assertion matched"}
-
-
 def _step(action_name: str, params: dict[str, Any] | None = None) -> ExecutableStep:
     return ExecutableStep(
         step_id="step-1",
@@ -260,56 +250,19 @@ def test_android_harness_captures_screenshot_and_ui_tree_with_artifact_store(tmp
     ]
 
 
-def test_android_harness_assert_with_ai_uses_injected_evaluator_and_artifacts(tmp_path) -> None:
+def test_android_harness_assert_with_ai_fails_in_deterministic_core(tmp_path) -> None:
     driver = FakeAndroidDriver()
-    evaluator = FakeAIAssertionEvaluator()
-    harness = AndroidHarness(
-        driver=driver,
-        artifact_store=ArtifactStore(run_dir=tmp_path),
-        ai_assertion_evaluator=evaluator,
-    )
+    harness = AndroidHarness(driver=driver, artifact_store=ArtifactStore(run_dir=tmp_path))
     context = harness.get_context()
 
     result = harness.invoke_action(_step("assertWithAI", {"prompt": "Verify Bing homepage"}), context)
 
-    assert result.status == "passed"
+    assert result.status == "failed"
     assert result.action_name == "assertWithAI"
-    assert result.output == {"verdict": "passed", "reasoning": "visual assertion matched"}
-    assert result.metadata["assertion_engine"] == "ai_visual"
-    assert result.metadata["prompt"] == "Verify Bing homepage"
-    assert result.metadata["verdict"] == "passed"
-    assert [ref.kind for ref in result.artifact_refs] == ["screenshot", "ui_tree"]
-    assert (tmp_path / result.artifact_refs[0].path).read_bytes() == b"fake-png"
-    assert "Login" in (tmp_path / result.artifact_refs[1].path).read_text(encoding="utf-8")
-    assert evaluator.calls[0]["prompt"] == "Verify Bing homepage"
-    assert evaluator.calls[0]["screenshot"] == b"fake-png"
-    assert evaluator.calls[0]["ui_tree"] == {"nodes": [{"text": "Login"}]}
-    assert driver.calls == [
-        ("context", None),
-        ("screenshot", None),
-        ("ui_tree", None),
-    ]
-
-
-def test_android_harness_assert_with_ai_requires_evaluator_and_artifact_store(tmp_path) -> None:
-    driver = FakeAndroidDriver()
-    context = AndroidHarness(driver=driver).get_context()
-
-    no_evaluator = AndroidHarness(driver=driver, artifact_store=ArtifactStore(run_dir=tmp_path)).invoke_action(
-        _step("assertWithAI", {"prompt": "Verify Bing"}),
-        context,
-    )
-    no_store = AndroidHarness(driver=driver, ai_assertion_evaluator=FakeAIAssertionEvaluator()).invoke_action(
-        _step("assertWithAI", {"prompt": "Verify Bing"}),
-        context,
-    )
-
-    assert no_evaluator.status == "failed"
-    assert no_evaluator.failure_category == "configuration_error"
-    assert "AI assertion evaluator" in no_evaluator.error_message
-    assert no_store.status == "failed"
-    assert no_store.failure_category == "configuration_error"
-    assert "ArtifactStore" in no_store.error_message
+    assert result.failure_category == "configuration_error"
+    assert "deterministic strict-core" in result.error_message
+    assert result.artifact_refs == []
+    assert driver.calls == [("context", None)]
 
 
 def test_android_harness_requires_artifact_store_for_capture() -> None:

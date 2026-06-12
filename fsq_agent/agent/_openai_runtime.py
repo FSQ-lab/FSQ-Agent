@@ -11,7 +11,6 @@ from typing import Any
 
 from fsq_agent.config import Settings, validate_runtime_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, UiAutomator2AndroidDriver
-from fsq_agent.agent._ai_assertion import OpenAIAssertionEvaluator
 from fsq_agent.agent._harness_tools import HarnessToolAdapter
 from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, KnowledgeBundle, PlanningError, RunEvent, RunEventSink, SkillBundle, StepResult, Task
 from fsq_agent.tools import AgentsToolFactory
@@ -609,11 +608,9 @@ class OpenAIAgentsRuntime:
             if android.backend != "uiautomator2":
                 raise ConfigurationError("Unsupported Android harness backend.", context={"backend": android.backend})
             driver = UiAutomator2AndroidDriver(app_id=android.app_id or "", serial=android.serial)
-            evaluator = OpenAIAssertionEvaluator(self.settings) if android.enable_ai_assertions else None
             return AndroidHarness(
                 driver=driver,
                 artifact_store=ArtifactStore(self.settings.output.runs_dir / run_id),
-                ai_assertion_evaluator=evaluator,
             )
         raise ConfigurationError("Unsupported harness platform.", context={"platform": self.settings.harness.platform})
 

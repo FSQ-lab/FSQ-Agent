@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from fsq_agent.config import load_settings, validate_runtime_settings
+from fsq_agent.config import load_settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.models import ConfigurationError
 
 
@@ -70,7 +70,6 @@ harness:
     backend: uiautomator2
     app_id: com.example.app
     serial: emulator-5554
-    enable_ai_assertions: true
 """,
         ),
         encoding="utf-8",
@@ -82,7 +81,6 @@ harness:
     assert settings.harness.android.backend == "uiautomator2"
     assert settings.harness.android.app_id == "com.example.app"
     assert settings.harness.android.serial == "emulator-5554"
-    assert settings.harness.android.enable_ai_assertions is True
 
 
 def test_load_settings_accepts_runtime_secret_allowlist(tmp_path: Path) -> None:
@@ -314,6 +312,23 @@ openai_agents:
 
     with pytest.raises(ConfigurationError, match="API key"):
         validate_runtime_settings(settings)
+
+
+def test_validate_strict_core_settings_does_not_require_openai_api_key(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+openai_agents:
+  api_key_env: FSQ_AGENT_MISSING_KEY
+""",
+        ),
+        encoding="utf-8",
+    )
+    settings = load_settings(config_path)
+
+    validate_strict_core_settings(settings)
 
 
 def test_validate_runtime_settings_requires_shell_allowlist_when_enabled(

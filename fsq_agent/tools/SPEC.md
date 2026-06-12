@@ -2,53 +2,70 @@
 
 ## Purpose
 
-Expose configured local utility capabilities as OpenAI Agents SDK tools. The OpenAI Agents SDK runner owns the model tool loop; this module owns local command/file safety, runtime secret access controls, local SDK tool construction, artifact search/slice utilities, pure waits, visual assertion submission, and optional shell command execution. Platform action tools are generated from harness schemas by the `agent` module, not by `tools`.
+Expose cross-platform local utility capabilities through an SDK-neutral CommonTool interface, then adapt those capabilities into OpenAI Agents SDK `FunctionTool` objects for the dynamic runtime. This module owns scoped file read/write, allowlisted runtime secret reads, bounded run-artifact search and slice reads, pure waits, CommonTool result normalization, and CommonTool run-event metadata.
+
+The tools module does not own platform actions, AI assertions, runtime progress events, local CLI execution, or shell execution. Platform actions and `assertWithAI` are harness capabilities exposed by `core` and adapted by `agent`; progress events are runtime-internal events emitted by `agent`; provider-backed AI evaluation is owned by `providers` and injected into platform harnesses by entry-layer code.
 
 ## Dependencies
 
-- `models`: Uses `ToolDefinition`, `ToolCall`, `ToolResult`, `CLIToolConfig`, `ShellSettings`, `RuntimeSecretSettings`, `SkillBundle`, `Task`, `RunEvent`, and `ToolExecutionError`.
+- `models`: Uses `CommonToolDefinition`, `CommonToolCall`, `CommonToolResult`, `ToolDefinition`, `ToolCall`, `ToolResult`, `RuntimeSecretSettings`, `LocalToolOutputSettings`, `RunEvent`, and `ToolExecutionError`.
+
+The tools module must not depend on `agent`, `providers`, `core`, `cli`, `config`, `knowledge`, `skills`, `report`, or any OpenAI Agents SDK type at import time. The Agents SDK adapter may import SDK classes lazily or accept SDK classes through dependency injection when building runtime tools.
 
 ## Public Interface
 
 Target `__init__.py` exports via `__all__` after this change:
 
-- `CapabilityRegistry`: Maintains discovered local CLI and file operation capabilities for diagnostics and CLI display.
-- `CLIRunner`: Executes configured CLI commands asynchronously with timeout, output capture, and a configured workspace current working directory.
-- `FileOps`: Performs scoped file reads and writes. Read roots include configured case, knowledge, and output directories; writes are restricted to the configured output root.
-- `AgentsToolFactory`: Builds OpenAI Agents SDK `FunctionTool` objects for CLI and file operations, artifact search/slice operations, a progress publication tool for user-visible planning updates, a pure wait tool, an explicit visual assertion submission tool, a runtime secret lookup tool constrained by configuration, plus optional SDK `ShellTool` when configured.
-- `ShellCommandExecutor`: Executes SDK `ShellTool` command requests with configured `allowlist` or explicit `allow_all` command policy.
-- `ToolExecutor`: Compatibility adapter for direct tests and diagnostics; routes `ToolCall` requests to CLI or file operation backends and returns normalized `ToolResult` objects.
+- `CommonToolProvider`: Protocol for a provider of SDK-neutral common capabilities. It exposes serializable capability definitions and invokes one capability by name with JSON-like arguments.
+- `CommonToolRegistry`: Maintains the active CommonTool capability set and rejects duplicate tool names.
+- `CommonToolExecutor`: Routes `CommonToolCall` requests to registered providers and returns normalized `CommonToolResult` values.
+- `FileOps`: Performs scoped file reads and writes. Read roots include configured case, knowledge, and output directories; writes are restricted to the configured output root or current run output directory.
+- `ToolArtifactStore`: Persists complete CommonTool outputs under the current run directory and provides bounded artifact search and slice reads.
+- `DefaultCommonToolProvider`: Built-in provider for `read_file`, `write_file`, `get_runtime_secret`, `search_artifact`, `read_artifact_slice`, and `wait_ms`.
+- `AgentsCommonToolAdapter`: Builds OpenAI Agents SDK `FunctionTool` objects from the active `CommonToolRegistry` while preserving SDK-neutral execution semantics.
+
+The CommonTool names exposed in this SPEC cycle are:
+
+| Tool name | Purpose |
+|---|---|
+| `read_file` | Read UTF-8 text from an allowed input/output path with bounded response size. |
+| `write_file` | Write UTF-8 text below the configured output root or current run directory. |
+| `get_runtime_secret` | Return an environment variable value only when its name is listed in `runtime_secrets.allowed_env_names`. |
+| `search_artifact` | Search text artifacts below the current run directory and return bounded matches. |
+| `read_artifact_slice` | Read a bounded byte or line slice from one current-run artifact path. |
+| `wait_ms` | Sleep for an explicit duration without touching platform state. |
+
+Removed from the public tools contract: `run_cli_tool`, SDK `ShellTool` construction/execution, public/common `submit_visual_assertion`, and public/common `publish_progress`.
 
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
-- `_registry.py`: Capability discovery and lookup.
-- `_agents_tools.py`: OpenAI Agents SDK function tool construction for configured local tools and user-visible progress events.
-- `_tool_artifacts.py`: Per-run local tool output artifact persistence plus bounded artifact search and slice helpers.
-- `_shell_executor.py`: Local SDK `ShellTool` executor with command policy enforcement and timeout handling.
-- `_cli_runner.py`: Async subprocess execution and command allowlisting.
+- `_common.py`: `CommonToolProvider` protocol, registry, executor, and built-in capability wiring.
+- `_agents_adapter.py`: OpenAI Agents SDK adapter that converts CommonTool definitions into SDK `FunctionTool` objects and maps SDK calls back to `CommonToolExecutor`.
+- `_tool_artifacts.py`: Per-run CommonTool output artifact persistence plus bounded artifact search and slice helpers.
 - `_file_ops.py`: Scoped file operations.
-- `_executor.py`: Tool routing and normalized result handling.
+- `_secrets.py`: Runtime secret allowlist lookup and redaction helpers.
+- `_wait.py`: Pure wait helper.
+- `_compat.py`: Temporary compatibility shims only when needed during migration; compatibility symbols must not be part of the target public interface.
 - `SPEC.md`: Module design.
 
 ## Error Handling
 
-Tool failures are surfaced according to the tool mode. During SDK-managed runs, recoverable local function tool failures return model-visible error text so the agent can retry or report failure. Invalid configuration, timeout exhaustion, invalid tool names, malformed outputs, and shell policy violations raise `ToolExecutionError` from `models`.
+During SDK-managed runs, recoverable CommonTool failures return model-visible structured error JSON so the agent can retry or report failure. Invalid configuration, duplicate tool names, invalid tool names, malformed arguments, path traversal, attempts to read or write outside allowed roots, secret allowlist violations, timeout exhaustion, artifact bounds violations, and malformed outputs raise or normalize to `ToolExecutionError` from `models` depending on whether the failure happens during construction or invocation.
+
+Secret values must be redacted from `RunEvent` payloads, tool artifacts, model-facing previews, final reports, and exception messages. Secret diagnostics may include only the requested environment variable name, allowlist status, and presence status.
 
 ## Design Decisions
 
-- The OpenAI Agents SDK runner sees SDK tool objects; diagnostics and CLI `capabilities` see serializable `ToolDefinition` metadata.
-- SDK-managed local tools emit live `RunEvent` values for start, completion, and failure when a run event sink is provided.
-- Local tool events include structured payload metadata identifying the tool origin as `local`, allowing reports to distinguish real local utility calls from harness calls and runtime-only records.
-- SDK-managed local tools write complete model-facing raw results to per-run artifacts when artifact output is enabled. Small and moderate current outputs are still returned inline to reduce extra model/tool turns; oversized outputs return an artifact reference, preview, and instructions to use `search_artifact` or `read_artifact_slice` only when more detail is needed.
+- CommonTool is SDK-neutral so the same capability core can be adapted to OpenAI Agents SDK now and another agent SDK later without rewriting file, artifact, wait, or secret safety policy.
+- The CommonTool core is intentionally small. Cross-platform tools are limited to file read/write, runtime secret lookup, artifact search/slice, and pure wait. More tools require a SPEC change.
+- Local CLI and shell execution are removed from the first-cycle public tool surface. If command execution returns in the future, it must be redesigned as an explicitly scoped capability with its own SPEC update.
+- `publish_progress` is not a CommonTool. Runtime progress is emitted directly by `agent` as `RunEvent` values so user-visible status does not consume a model tool call or become confused with external capabilities.
+- `submit_visual_assertion` is not a CommonTool. Android `assertWithAI` is a platform assertion operation exposed by the active harness and evaluated through an injected provider-backed evaluator.
+- CommonTool run events use tool origin `common`, allowing reports to distinguish common local utilities from platform harness actions and runtime-internal records.
+- SDK-managed CommonTools write complete raw results to per-run artifacts when CommonTool artifact output is enabled. Small and moderate current outputs may still return inline; oversized or historical outputs return artifact references, previews, and instructions to use `search_artifact` or `read_artifact_slice` only when more detail is needed.
 - Artifact read tools only resolve paths inside the current run directory and enforce bounded search/slice results so artifact recovery cannot reintroduce unbounded context growth.
-- A `publish_progress` SDK function tool lets the agent report planning, reasoning summaries, and plan updates in a user-visible way without exposing hidden chain-of-thought.
-- A `wait_ms` SDK function tool provides pure elapsed-time waits for FSQ pause semantics and page-load delays. It must be preferred over platform gestures when the intended action is waiting, because gestures can alter scroll position or UI state.
-- A `submit_visual_assertion` SDK function tool lets the agent bind one screenshot path to one visual assertion prompt, such as FSQ `assertWithAI`. The tool itself records the semantic assertion request; the agent runtime is responsible for attaching the image to the next model call when the path is readable under the configured output root.
-- A `get_runtime_secret` SDK function tool reads only environment variable names listed in `runtime_secrets.allowed_env_names`. It is intended for setup flows such as account sign-in where credentials must stay out of FSQ YAML and source code. The tool returns the value to the model for immediate use, but user-visible events, artifact records, and report previews must redact secret values and should show only the variable name and presence status.
-- CLI execution is allowlisted through configuration to avoid arbitrary command execution by default. Configured CLI tools run from the fsq-agent workspace so relative side effects do not land in the user's current directory.
-- File operation tools treat `cases.dir` as read-only input and write generated files only under the output root.
-- Skills remain descriptive instruction files. If shell is enabled, file-backed skills are attached to the SDK `ShellTool` local environment as skill metadata, while command execution is governed by `ShellSettings`.
-- `shell.mode: allow_all` is supported for intentionally unrestricted local runs and should be treated as a high-trust mode.
-- Platform action execution is outside the `tools` module. The active harness exposes platform action schemas, and the `agent` module adapts those schemas to SDK `FunctionTool` objects.
-- Setup, teardown, app lifecycle, and observation behavior belong to harnesses, drivers, or explicit authored actions rather than to a tools-layer lifecycle controller.
+- `wait_ms` provides elapsed-time waits for FSQ pause semantics and page-load delays. It must be preferred over platform gestures when the intended action is waiting, because gestures can alter scroll position or UI state.
+- `get_runtime_secret` reads only environment variable names listed in `runtime_secrets.allowed_env_names`. It is intended for setup flows such as account sign-in where credentials must stay out of FSQ YAML and source code.
+- File operation tools treat `cases.dir` and configured knowledge directories as read-only inputs and write generated files only under managed output directories.
+- Platform action execution remains outside the tools module. The active harness exposes platform action schemas, and the `agent` module adapts those schemas to SDK `FunctionTool` objects.

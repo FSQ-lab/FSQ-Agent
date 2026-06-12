@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from fsq_agent.models import StepResult, Task, VerificationResult
-from fsq_agent.report import ReportGenerator
+from fsq_agent.models import ReportGenerationError, StepResult, Task, VerificationResult
+from fsq_agent.report import ReportGenerator, resolve_report_path
 
 
 class _FailingRichReportGenerator(ReportGenerator):
@@ -235,3 +235,27 @@ def test_report_generator_writes_minimal_json_fallback(tmp_path: Path) -> None:
     assert payload["status"] == "failed"
     assert payload["summary"] == "Reportable failure."
     assert "simulated rich report failure" in payload["error"]
+
+
+def test_resolve_report_path_finds_llm_or_strict_report(tmp_path: Path) -> None:
+    llm_run = tmp_path / "llm-run"
+    strict_run = tmp_path / "strict-run"
+    llm_run.mkdir()
+    strict_run.mkdir()
+    (llm_run / "report.md").write_text("llm", encoding="utf-8")
+    (strict_run / "core-report.md").write_text("strict", encoding="utf-8")
+
+    assert resolve_report_path(tmp_path, "llm-run") == llm_run / "report.md"
+    assert resolve_report_path(tmp_path, "strict-run") == strict_run / "core-report.md"
+
+
+def test_resolve_report_path_errors_for_missing_or_ambiguous_report(tmp_path: Path) -> None:
+    ambiguous = tmp_path / "ambiguous"
+    ambiguous.mkdir()
+    (ambiguous / "report.md").write_text("llm", encoding="utf-8")
+    (ambiguous / "core-report.md").write_text("strict", encoding="utf-8")
+
+    with pytest.raises(ReportGenerationError, match="Report not found"):
+        resolve_report_path(tmp_path, "missing")
+    with pytest.raises(ReportGenerationError, match="ambiguous"):
+        resolve_report_path(tmp_path, "ambiguous")
