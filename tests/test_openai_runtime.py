@@ -1,4 +1,3 @@
-from contextlib import AsyncExitStack
 import json
 from pathlib import Path
 from typing import Any
@@ -7,14 +6,16 @@ from unittest.mock import patch
 import pytest
 
 from fsq_agent.agent import OpenAIAgentsRuntime
+from fsq_agent.agent._harness_tools import HarnessToolAdapter
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._verification_task import VerificationEvidenceBuilder
 from fsq_agent.config import Settings
 from fsq_agent.models import (
+    HarnessActionResult,
+    HarnessContext,
+    HarnessFunctionSchema,
     KnowledgeBundle,
     LocalToolOutputSettings,
-    MCPToolValidationSettings,
-    MCPToolValidationIssue,
     OpenAIAgentsSettings,
     OutputSettings,
     StepResult,
@@ -23,37 +24,64 @@ from fsq_agent.models import (
 
 
 class _EmptyToolFactory:
-    def build_tools(self) -> list[Any]:
+    def build_tools(self, *_args: Any, **_kwargs: Any) -> list[Any]:
         return []
 
 
-class _FailingMCPFactory:
-    async def enter_servers(self, _stack: AsyncExitStack) -> tuple[list[Any], list[Any]]:
-        raise RuntimeError("MCP startup failed")
+class _FakeFunctionTool:
+    def __init__(self, **kwargs: Any) -> None:
+        self.name = kwargs["name"]
+        self.description = kwargs["description"]
+        self.params_json_schema = kwargs["params_json_schema"]
+        self.on_invoke_tool = kwargs["on_invoke_tool"]
 
 
-class _DiagnosticMCPFactory:
-    def get_validation_issues(self) -> list[MCPToolValidationIssue]:
+class _FakeHarness:
+    def __init__(self) -> None:
+        self.steps: list[Any] = []
+
+    def action_space(self) -> list[HarnessFunctionSchema]:
         return [
-            MCPToolValidationIssue(
-                server_name="appium-mcp",
-                tool_name="appium_driver_settings",
-                reason="Unsupported JSON Schema keyword: propertyNames",
-                policy="auto_ignore",
-                schema_path="$.propertyNames",
+            HarnessFunctionSchema(
+                name="tap_on",
+                description="Tap an Android UI target.",
+                params_json_schema={"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]},
+                platform="android",
+                driver_method="tap_on",
+                fsq_action_name="tapOn",
             )
         ]
+
+    def get_context(self) -> HarnessContext:
+        return HarnessContext(platform="android", session_id="session-1")
+
+    def invoke_action(self, step: Any, context: HarnessContext) -> HarnessActionResult:
+        self.steps.append(step)
+        return HarnessActionResult(
+            status="passed",
+            action_name=step.action_name,
+            output={"context_session_id": context.session_id, "params": step.params},
+        )
+
+
+class _FailingHarness(_FakeHarness):
+    def action_space(self) -> list[HarnessFunctionSchema]:
+        raise RuntimeError("Harness action-space failed")
+
+
+def _fake_harness_factory(_run_id: str) -> _FakeHarness:
+    return _FakeHarness()
 
 
 @pytest.mark.asyncio
 async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
     settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), lambda _run_id: _FailingHarness())
     task = Task(
         id="runtime-failure",
         name="Runtime Failure",
-        description="Trigger MCP failure.",
+        description="Trigger harness failure.",
         acceptance_criteria=["A failed step is returned."],
     )
 
@@ -61,12 +89,12 @@ async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPat
 
     assert results[0].status == "failed"
     assert results[0].tool_name == "openai_agents.runner"
-    assert "MCP startup failed" in str(results[0].error)
+    assert "Harness action-space discovery failed" in str(results[0].error)
 
 
 def test_runtime_builds_step_results_from_structured_pre_plan() -> None:
     settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     final_output = """
 {
     "status": "failed",
@@ -104,7 +132,7 @@ def test_runtime_builds_step_results_from_structured_pre_plan() -> None:
 
 def test_runtime_task_input_requests_derived_acceptance_criteria() -> None:
     settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     task = Task(id="derive", name="Derive", description="Open the page and verify it loads.")
 
     task_input = runtime._build_task_input(task)
@@ -121,7 +149,7 @@ def test_runtime_instructions_include_custom_operator_instructions() -> None:
             prompt={"custom_instructions": ["Prefer accessibility locators before coordinate-based actions."]},
         )
     )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
 
     instructions = runtime._build_instructions(KnowledgeBundle(), [])
 
@@ -153,7 +181,7 @@ def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) ->
             },
         )
     )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     knowledge = KnowledgeBundle(items={"k": "v"})
 
     instructions = runtime._build_instructions(knowledge, [])
@@ -166,7 +194,7 @@ def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) ->
 
 def test_runtime_instructions_include_knowledge_index_content() -> None:
     settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     knowledge = KnowledgeBundle(items={"project.md": "Use Other ways to sign in, then choose password sign-in."})
 
     instructions = runtime._build_instructions(knowledge, [])
@@ -231,43 +259,37 @@ def test_prompt_renderer_injects_model_into_configured_jinja_templates(tmp_path:
     assert renderer.render_task_prompt(task_model) == "Task task-1 Base."
 
 
-def test_runtime_builds_mcp_validation_diagnostic_steps() -> None:
-    settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _DiagnosticMCPFactory())
+@pytest.mark.asyncio
+async def test_harness_tool_adapter_invokes_harness_action() -> None:
+    harness = _FakeHarness()
+    adapter = HarnessToolAdapter(harness)
 
-    steps = runtime._build_mcp_validation_steps()
+    tools = adapter.build_tools(_FakeFunctionTool)
+    output = await tools[0].on_invoke_tool(None, json.dumps({"target": "Downloads"}))
 
-    assert steps[0].status == "skipped"
-    assert steps[0].tool_name == "mcp_tool_validation"
-    assert "appium-mcp.appium_driver_settings" in steps[0].actual_outcome
-    assert steps[0].tool_output["schema_path"] == "$.propertyNames"
+    payload = json.loads(output)
+    assert tools[0].name == "tap_on"
+    assert payload["tool_origin"] == "harness"
+    assert payload["status"] == "passed"
+    assert payload["driver_method"] == "tap_on"
+    assert payload["fsq_action_name"] == "tapOn"
+    assert payload["result"]["output"]["params"] == {"target": "Downloads"}
+    assert harness.steps[0].action_name == "tapOn"
+    assert harness.steps[0].kind == "action"
 
 
-def test_runtime_mcp_strict_schema_conversion_follows_config() -> None:
-    strict_runtime = OpenAIAgentsRuntime(
-        Settings(
-            openai_agents=OpenAIAgentsSettings(),
-            mcp_tool_validation=MCPToolValidationSettings(strict_schema=True),
-        ),
-        _EmptyToolFactory(),
-        _FailingMCPFactory(),
-    )
-    relaxed_runtime = OpenAIAgentsRuntime(
-        Settings(
-            openai_agents=OpenAIAgentsSettings(),
-            mcp_tool_validation=MCPToolValidationSettings(strict_schema=False),
-        ),
-        _EmptyToolFactory(),
-        _FailingMCPFactory(),
-    )
+def test_runtime_tool_origin_recognizes_harness_tools() -> None:
+    runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory(), _fake_harness_factory)
+    runtime._harness_tool_names = {"tap_on"}
 
-    assert strict_runtime._build_mcp_config() == {"convert_schemas_to_strict": True}
-    assert relaxed_runtime._build_mcp_config() == {"convert_schemas_to_strict": False}
+    assert runtime._tool_origin("tap_on") == "harness"
+    assert runtime._tool_origin("read_file") == "local"
+    assert runtime._tool_origin("unexpected_tool") == "unknown"
 
 
 def test_verification_evidence_builder_uses_text_only_after_runner_visual_assertion(tmp_path: Path) -> None:
     output_root = tmp_path / "output"
-    screenshots_dir = output_root / "appium-screenshots"
+    screenshots_dir = output_root / "harness-screenshots"
     screenshots_dir.mkdir(parents=True)
     screenshot_path = screenshots_dir / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
@@ -342,7 +364,7 @@ def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
             self.kwargs = kwargs
 
     settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
 
     run_config = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider")
 
@@ -364,7 +386,7 @@ def test_runtime_builds_azure_openai_client(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-key")
     settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
 
     client = runtime._build_openai_client(_AsyncOpenAI)
 
@@ -381,7 +403,7 @@ def test_runtime_builds_github_copilot_client() -> None:
             provider="github_copilot",
         )
     )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
 
     with patch("fsq_agent.agent._openai_runtime.build_copilot_async_openai_client", return_value="client") as build_client:
         client = runtime._build_openai_client(object)
@@ -408,7 +430,7 @@ def test_runtime_tool_count_filter_keeps_recent_outputs_and_trims_history() -> N
             return data.model_data
 
     settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider").kwargs["call_model_input_filter"]
     old_output = "old-output " * 1000
     recent_output = "recent-output " * 1000
@@ -456,14 +478,14 @@ def test_runtime_tool_count_filter_writes_artifact_for_trimmed_history(tmp_path:
         ),
         output=OutputSettings(runs_dir=tmp_path / "runs"),
     )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
         "call_model_input_filter"
     ]
     data = SimpleNamespace(
         model_data=ModelInputData(
             input=[
-                {"type": "function_call", "call_id": "1", "name": "appium_source"},
+                {"type": "function_call", "call_id": "1", "name": "harness_source"},
                 {"type": "function_call_output", "call_id": "1", "output": "<node>" * 2000},
             ],
             instructions="instructions",
@@ -493,7 +515,7 @@ def test_runtime_input_filter_leaves_plain_screenshot_outputs_text_only(tmp_path
             return data.model_data
 
     output_root = tmp_path / "output"
-    screenshots_dir = output_root / "appium-screenshots"
+    screenshots_dir = output_root / "harness-screenshots"
     screenshots_dir.mkdir(parents=True)
     screenshot_path = screenshots_dir / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
@@ -501,14 +523,14 @@ def test_runtime_input_filter_leaves_plain_screenshot_outputs_text_only(tmp_path
         openai_agents=OpenAIAgentsSettings(),
         output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
     )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
         "call_model_input_filter"
     ]
     data = SimpleNamespace(
         model_data=ModelInputData(
             input=[
-                {"type": "function_call", "call_id": "img", "name": "appium_screenshot"},
+                {"type": "function_call", "call_id": "img", "name": "harness_screenshot"},
                 {
                     "type": "function_call_output",
                     "call_id": "img",
@@ -541,7 +563,7 @@ def test_runtime_input_filter_attaches_submitted_visual_assertion_image(tmp_path
             return data.model_data
 
     output_root = tmp_path / "output"
-    screenshots_dir = output_root / "appium-screenshots"
+    screenshots_dir = output_root / "harness-screenshots"
     screenshots_dir.mkdir(parents=True)
     screenshot_path = screenshots_dir / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
@@ -549,7 +571,7 @@ def test_runtime_input_filter_attaches_submitted_visual_assertion_image(tmp_path
         openai_agents=OpenAIAgentsSettings(),
         output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
     )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
         "call_model_input_filter"
     ]
@@ -610,7 +632,7 @@ def test_runtime_input_filter_rejects_screenshot_images_outside_output_root(tmp_
         openai_agents=OpenAIAgentsSettings(),
         output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
     )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), _FailingMCPFactory())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
         "call_model_input_filter"
     ]

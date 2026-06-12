@@ -1,7 +1,6 @@
 flowchart LR
     subgraph Entry[Entry Modules]
         CLI[CLI / API]
-        MCP[MCP Entry]
         PLAY[Playground / Debug UI]
     end
 
@@ -36,7 +35,6 @@ flowchart LR
 
     CLI --> FSQYAML
     CLI --> GOAL
-    MCP --> GOAL
     PLAY --> DEBUG
     FSQYAML --> NORMALIZER --> RUNNER --> ACTIONIR
     GOAL --> PLANNER

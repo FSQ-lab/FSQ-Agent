@@ -1,6 +1,6 @@
 import pytest
 
-from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, LifecycleControllerSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, ShellSettings, SkillConfig, Task, VerificationCriterion, VerificationSettings
+from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, HarnessSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, ShellSettings, SkillConfig, Task, VerificationCriterion, VerificationSettings
 
 
 def test_task_defaults() -> None:
@@ -81,11 +81,14 @@ def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:
     assert settings.local_tool_output.full_output_max_chars == 30000
 
 
-def test_lifecycle_controller_settings_default_to_noop() -> None:
-    settings = LifecycleControllerSettings()
+def test_harness_settings_default_to_android_uiautomator2() -> None:
+    settings = HarnessSettings()
 
-    assert settings.controller == "none"
-    assert settings.options == {}
+    assert settings.platform == "android"
+    assert settings.android.backend == "uiautomator2"
+    assert settings.android.app_id is None
+    assert settings.android.serial is None
+    assert settings.android.enable_ai_assertions is False
 
 
 def test_skill_config_defaults_to_markdown() -> None:

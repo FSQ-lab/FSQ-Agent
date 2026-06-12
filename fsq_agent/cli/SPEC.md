@@ -16,18 +16,18 @@ Provide command line entry points for validating OpenAI Agents SDK configuration
 
 ## Public Interface
 
-Current `__init__.py` exports via `__all__`:
+Target `__init__.py` exports via `__all__` after this change:
 
 - `main`: CLI entry point for package scripts.
 
 Current commands:
 
 - `fsq-agent init --config PATH --workspace PATH`: Initialize and mark the fsq-agent workspace.
-- `fsq-agent validate-config --config PATH --workspace PATH`: Validate Azure OpenAI, OpenAI Agents SDK, MCP, shell, skills, CLI, workspace, cases, and output settings without running a task.
+- `fsq-agent validate-config --config PATH --workspace PATH`: Validate Azure OpenAI or GitHub Copilot provider settings, OpenAI Agents SDK settings, harness/driver settings, shell, skills, CLI, workspace, cases, and output settings without running a task.
 - `fsq-agent run --task PATH --config PATH --workspace PATH --stream/--no-stream --stream-format rich|jsonl`: Run one `.codex.yaml` FSQ case through the OpenAI Agents SDK runtime. Relative task paths resolve against `cases.dir` first. Goal-only cases are supported and are pre-planned before execution. Streaming is enabled by default.
 - `fsq-agent run-goal --goal TEXT --config PATH --workspace PATH --stream/--no-stream --stream-format rich|jsonl`: Run one natural-language goal task without a YAML case file. The goal is pre-planned into execution key actions before the normal runtime executes it, and final verification uses the goal-level criterion.
 - `fsq-agent run-batch --tasks PATH --config PATH --workspace PATH --stream/--no-stream --stream-format rich|jsonl`: Run a directory tree of `.codex.yaml` FSQ cases serially. If `--tasks` is omitted, the command scans `cases.dir`.
-- `fsq-agent capabilities --config PATH --workspace PATH`: Print discovered MCP, CLI, and file operation capabilities.
+- `fsq-agent capabilities --config PATH --workspace PATH`: Print discovered local CLI and file operation capabilities. Platform action capabilities are exposed by the configured harness at runtime through `HarnessInterface.action_space()`.
 - `fsq-agent report --run-id ID --format FORMAT --config PATH --workspace PATH`: Print a report from the configured workspace output runs directory.
 - `fsq-agent pre-plan --goal TEXT --config PATH --workspace PATH --format text|json --stream/--no-stream --stream-format rich|jsonl`: Generate an ordered key-action pre-plan from a natural-language goal using configured page knowledge. This command does not execute UI actions or generate a run report.
 - `fsq-agent run-strict-core --task PATH --android-serial SERIAL --app-id APP_ID? --run-id ID? --enable-ai-assertions --config PATH --workspace PATH`: Run one Android `.codex.yaml` FSQ case through the deterministic core strict path using `UiAutomator2AndroidDriver`, write `evidence-manifest.json`, generate `core-report.md/json`, and print the generated paths. Relative task paths resolve against `cases.dir` first. `appId` is read from the FSQ case unless `--app-id` is provided. Authored `assertWithAI` steps are allowed only when `--enable-ai-assertions` is supplied; the CLI then validates model provider settings and injects the agent-layer OpenAI visual assertion evaluator into `AndroidHarness`. This flag does not enable locator fallback, action repair, recovery, or testcase mutation.
@@ -84,5 +84,5 @@ CLI commands catch `FsqAgentError` subclasses from `models`, render concise user
 - FSQ `.codex.yaml` is the primary case input. The loader treats FSQ command flow as structured reference context and lets the OpenAI Agents SDK runtime derive success criteria from the case description, assertions, locators, knowledge, and skills.
 - `pre-plan` is the first standalone goal-planning entry point. It uses the configured knowledge directory and agent runtime to produce key actions, but deliberately stops before case execution, verification, and report generation.
 - `run-goal` is the direct goal-task execution entry point. It creates a normal `Task` from the goal text and delegates to `FsqAgent.run`, so execution, verification, reporting, streaming, and errors remain consistent with `run --task`.
-- Batch execution is intentionally serial because UI automation cases share external device and application state. Each task still creates independent agent runtime state so SDK sessions, MCP connections, and tool approvals do not leak across tasks.
+- Batch execution is intentionally serial because UI automation cases share external device and application state. Each task still creates independent agent runtime and harness state so SDK sessions, harness context, and local tool state do not leak across tasks.
 - CLI logging never emits API key values; it may log the configured API key environment variable name and whether it is present.

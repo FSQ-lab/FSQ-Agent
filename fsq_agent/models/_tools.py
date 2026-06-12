@@ -1,61 +1,10 @@
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-ToolKind = Literal["mcp", "cli", "file"]
+ToolKind = Literal["cli", "file", "harness", "shell"]
 ToolStatus = Literal["success", "failed", "skipped"]
-MCPTransport = Literal["stdio", "streamable_http", "sse", "hosted"]
-MCPInvalidToolPolicy = Literal["auto_ignore", "fail_fast", "warn_only"]
-
-
-class MCPToolValidationSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = True
-    invalid_tool_policy: MCPInvalidToolPolicy = "auto_ignore"
-    strict_schema: bool = True
-    unsupported_schema_keywords: list[str] = Field(
-        default_factory=lambda: [
-            "propertyNames",
-            "patternProperties",
-            "dependencies",
-            "dependentSchemas",
-            "unevaluatedProperties",
-            "unevaluatedItems",
-        ]
-    )
-    fail_when_all_tools_filtered: bool = True
-
-
-class MCPToolValidationIssue(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    server_name: str
-    tool_name: str
-    reason: str
-    policy: MCPInvalidToolPolicy
-    schema_path: str = ""
-
-
-class MCPServerConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    transport: MCPTransport = "stdio"
-    command: str | None = None
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
-    cwd: Path | None = None
-    url: str | None = None
-    headers: dict[str, str] = Field(default_factory=dict)
-    require_approval: Any = "never"
-    load_prompts: bool = False
-    cache_tools_list: bool = True
-    timeout_seconds: int | None = Field(default=None, ge=1)
-    allowed_tools: list[str] = Field(default_factory=list)
-    blocked_tools: list[str] = Field(default_factory=list)
 
 
 class CLIToolConfig(BaseModel):

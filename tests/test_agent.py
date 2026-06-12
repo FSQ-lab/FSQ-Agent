@@ -27,6 +27,8 @@ workspace:
 cases:
   dir: cases
 knowledge_dir: knowledge
+openai_agents:
+    api_key_env: FSQ_AGENT_TEST_MISSING_API_KEY
 """,
         encoding="utf-8",
     )
@@ -398,7 +400,7 @@ async def test_pre_plan_runtime_reads_page_by_index_page_id(tmp_path: Path) -> N
         encoding="utf-8",
     )
     (pages_dir / "edge_android_new_tab_page.md").write_text("# New Tab Page", encoding="utf-8")
-    runtime = OpenAIAgentsRuntime(Settings(knowledge_dir=knowledge_dir), object(), object())  # type: ignore[arg-type]
+    runtime = OpenAIAgentsRuntime(Settings(knowledge_dir=knowledge_dir), object())  # type: ignore[arg-type]
 
     output = await runtime._read_knowledge_page_tool(None, '{"page_id":"edge_android_new_tab_page"}')
 
@@ -418,7 +420,6 @@ async def test_pre_plan_runtime_reads_from_pre_plan_knowledge_dir(tmp_path: Path
     (pages_dir / "edge_android_new_tab_page.md").write_text("# New Tab Page", encoding="utf-8")
     runtime = OpenAIAgentsRuntime(
         Settings(knowledge_dir=private_knowledge_dir, pre_plan={"knowledge_dir": page_knowledge_dir}),
-        object(),
         object(),
     )  # type: ignore[arg-type]
 

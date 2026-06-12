@@ -6,9 +6,7 @@ from fsq_agent.models import (
     AgentSettings,
     CaseSettings,
     CLIToolConfig,
-    LifecycleControllerSettings,
-    MCPServerConfig,
-    MCPToolValidationSettings,
+    HarnessSettings,
     OpenAIAgentsSettings,
     OutputSettings,
     PrePlanSettings,
@@ -25,10 +23,8 @@ class Settings(BaseModel):
 
     agent: AgentSettings = Field(default_factory=AgentSettings)
     openai_agents: OpenAIAgentsSettings = Field(default_factory=OpenAIAgentsSettings)
-    lifecycle: LifecycleControllerSettings = Field(default_factory=LifecycleControllerSettings)
+    harness: HarnessSettings = Field(default_factory=HarnessSettings)
     verification: VerificationSettings = Field(default_factory=VerificationSettings)
-    mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
-    mcp_tool_validation: MCPToolValidationSettings = Field(default_factory=MCPToolValidationSettings)
     runtime_secrets: RuntimeSecretSettings = Field(default_factory=RuntimeSecretSettings)
     workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
     cases: CaseSettings = Field(default_factory=CaseSettings)

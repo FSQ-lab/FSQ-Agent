@@ -47,13 +47,6 @@ class LocalToolOutputSettings(BaseModel):
         return value
 
 
-class LifecycleControllerSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    controller: str = "none"
-    options: dict[str, Any] = Field(default_factory=dict)
-
-
 class VerificationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -70,6 +63,22 @@ class PrePlanSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     knowledge_dir: Path | None = None
+
+
+class AndroidHarnessSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backend: Literal["uiautomator2"] = "uiautomator2"
+    app_id: str | None = None
+    serial: str | None = None
+    enable_ai_assertions: bool = False
+
+
+class HarnessSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    platform: Literal["android"] = "android"
+    android: AndroidHarnessSettings = Field(default_factory=AndroidHarnessSettings)
 
 
 class OpenAIAgentPromptConfig(BaseModel):

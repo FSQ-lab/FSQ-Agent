@@ -78,9 +78,10 @@ from fsq_agent.models._page_knowledge import (
 from fsq_agent.models._report import ReportArtifact
 from fsq_agent.models._settings import (
     AgentSettings,
+    AndroidHarnessSettings,
     CaseSettings,
     ContextTrimmingSettings,
-    LifecycleControllerSettings,
+    HarnessSettings,
     LocalToolOutputSettings,
     OpenAIAgentPromptConfig,
     OpenAIAgentsSettings,
@@ -106,9 +107,6 @@ from fsq_agent.models._task import (
 )
 from fsq_agent.models._tools import (
     CLIToolConfig,
-    MCPServerConfig,
-    MCPToolValidationIssue,
-    MCPToolValidationSettings,
     ToolCall,
     ToolDefinition,
     ToolResult,
@@ -195,14 +193,12 @@ __all__ = [
     "ToolDefinition",
     "ToolCall",
     "ToolResult",
-    "MCPServerConfig",
-    "MCPToolValidationIssue",
-    "MCPToolValidationSettings",
     "CLIToolConfig",
     "OpenAIAgentsSettings",
     "OpenAIAgentPromptConfig",
     "ContextTrimmingSettings",
-    "LifecycleControllerSettings",
+    "HarnessSettings",
+    "AndroidHarnessSettings",
     "LocalToolOutputSettings",
     "RuntimeSecretSettings",
     "VerificationSettings",

@@ -11,7 +11,7 @@ RunEventType: TypeAlias = Literal[
     "planning_started",
     "planning_update",
     "reasoning_summary",
-    "mcp_tools_listed",
+    "tool_capabilities_listed",
     "tool_call_started",
     "tool_call_completed",
     "tool_call_failed",

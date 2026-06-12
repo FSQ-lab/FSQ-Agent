@@ -53,7 +53,8 @@
         "config.local.yaml",
         "--goal",
         "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page.",
-        // "--no-stream"
+        "--stream-format",
+        "jsonl"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,

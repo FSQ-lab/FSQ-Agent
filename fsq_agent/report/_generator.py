@@ -159,7 +159,7 @@ class ReportGenerator:
         return starts.pop(0) if starts else {}
 
     def _tool_origin(self, tool_name: str, explicit_origin: Any) -> str:
-        if explicit_origin in {"mcp", "local", "hosted", "shell", "unknown"}:
+        if explicit_origin in {"harness", "local", "shell", "unknown"}:
             return str(explicit_origin)
         if tool_name == "shell":
             return "shell"
@@ -167,7 +167,7 @@ class ReportGenerator:
             return "local"
         if tool_name == "unknown":
             return "unknown"
-        return "mcp"
+        return "harness"
 
     def _write_minimal_fallback(
         self,

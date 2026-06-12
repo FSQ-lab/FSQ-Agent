@@ -33,9 +33,4 @@ class ToolExecutor:
             if call.tool_name == "file.write":
                 return await self.file_ops.write_text(call.arguments)
             raise ToolExecutionError("Unknown file operation.", context={"tool": call.tool_name})
-        if kind == "mcp":
-            raise ToolExecutionError(
-                "Direct MCP tool execution is not supported; MCP execution is managed by OpenAI Agents SDK.",
-                context={"tool": call.tool_name},
-            )
         raise ToolExecutionError("Unsupported tool kind.", context={"tool": call.tool_name, "kind": kind})

@@ -30,7 +30,7 @@ class Verifier:
             )
         return VerificationResult(
             status="inconclusive",
-            summary="Execution completed, but final acceptance criteria require an MCP/LLM verifier or domain-specific checks.",
+            summary="Execution completed, but final acceptance criteria require an LLM verifier or domain-specific checks.",
             satisfied_criteria=[],
             unmet_criteria=self._blocking_texts(task, mode) or ["No derived acceptance criteria were reported."],
             diagnostics=["Verifier avoids claiming UI task success without direct evidence."],

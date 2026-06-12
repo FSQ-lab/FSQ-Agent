@@ -20,15 +20,15 @@ Bug fixes that do not change public interfaces or intended behavior may skip the
 | Module | SPEC | Purpose |
 |---|---|---|
 | models | fsq_agent/models/SPEC.md | Owns shared domain models, result types, and exceptions. |
-| config | fsq_agent/config/SPEC.md | Loads and validates runtime configuration. |
-| tools | fsq_agent/tools/SPEC.md | Provides MCP, CLI, and file operation adapters behind a common capability interface. |
-| observation | fsq_agent/observation/SPEC.md | Persists run event timelines; screenshots and UI trees come only from configured MCP/tools. |
+| config | fsq_agent/config/SPEC.md | Loads and validates runtime, model provider, harness/driver, local tool, and workspace configuration. |
+| tools | fsq_agent/tools/SPEC.md | Provides local CLI, file, artifact, wait, secret, progress, visual assertion, and optional shell utility tools for the SDK runtime. |
+| observation | fsq_agent/observation/SPEC.md | Persists run event timelines; screenshots, UI trees, and other observations are represented by harness or local tool artifact refs. |
 | knowledge | fsq_agent/knowledge/SPEC.md | Loads private element history and application knowledge. |
 | fsq | fsq_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases and converts them into agent tasks. |
 | skills | fsq_agent/skills/SPEC.md | Loads automation skill instruction bundles and skill file metadata. |
 | report | fsq_agent/report/SPEC.md | Generates task reports and evidence manifests. |
 | core | fsq_agent/core/SPEC.md | Defines shared execution-core orchestration boundaries, StepRunner protocol, harness interface, and evidence coordination. |
-| agent | fsq_agent/agent/SPEC.md | Orchestrates planning, execution, verification, retry, and report generation. |
+| agent | fsq_agent/agent/SPEC.md | Orchestrates planning, harness-tool execution through OpenAI Agents SDK, verification, retry, and report generation. |
 | cli | fsq_agent/cli/SPEC.md | Exposes command line workflows for running tasks and inspecting capabilities. |
 
 ## Architecture Diagram

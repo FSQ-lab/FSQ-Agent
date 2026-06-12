@@ -22,7 +22,7 @@ flowchart TB
     subgraph Entry[Entry Layer]
         FSQ[FSQ YAML\nRegression / Batch / CI]
         GOAL[Natural Goal\nExploration / Testcase Generation]
-        CLI[CLI / API / MCP / Playground]
+        CLI[CLI / API / Debug UI]
     end
 
     subgraph Core[Core Layer]
@@ -40,11 +40,11 @@ flowchart TB
 
     subgraph Platform[Platform Layer]
         HARNESS[Harness Adapter Contract]
-        ANDROID[Android Harness MVP\nAppium / MCP / Device Lifecycle]
+        ANDROID[Android Harness\nHarness Actions / Device Lifecycle]
         IOS[iOS Harness]
-        WEB[Web Harness\nPlaywright / Browser MCP]
-        WIN[Windows Harness\npywinauto / WinAppDriver / MCP]
-        MAC[macOS Harness\nAccessibility / MCP]
+        WEB[Web Harness\nNative Platform Adapter]
+        WIN[Windows Harness\nNative Platform Adapter]
+        MAC[macOS Harness\nNative Platform Adapter]
     end
 
     CLI --> FSQ
@@ -83,7 +83,7 @@ flowchart TB
 
 The key architecture choice is **Dual Loop, Shared Harness**. FSQ YAML is the regression-test path. Natural goal is the exploration and testcase-generation path. Both loops share execution, harness, evidence, verification, report, debug, and knowledge contracts.
 
-Midscene uses a similar layered shape: entry integrations such as CLI, Playwright, Puppeteer, Chrome extension, MCP, and playground call into `packages/core`; core owns `Agent`, `TaskExecutor`, YAML `ScriptPlayer`, planning, dump, and report; platform packages provide concrete page/device interfaces.
+Midscene uses a similar layered shape: entry integrations such as CLI, Playwright, Puppeteer, Chrome extension, and playground call into `packages/core`; core owns `Agent`, `TaskExecutor`, YAML `ScriptPlayer`, planning, dump, and report; platform packages provide concrete page/device interfaces.
 
 ## 2. Module Map
 
@@ -91,7 +91,6 @@ Midscene uses a similar layered shape: entry integrations such as CLI, Playwrigh
 flowchart LR
     subgraph Entry[Entry Modules]
         CLI[CLI / API]
-        MCP[MCP Entry]
         PLAY[Playground / Debug UI]
     end
 
@@ -126,7 +125,6 @@ flowchart LR
 
     CLI --> FSQYAML
     CLI --> GOAL
-    MCP --> GOAL
     PLAY --> DEBUG
     FSQYAML --> NORMALIZER --> RUNNER --> ACTIONIR
     GOAL --> PLANNER
@@ -289,15 +287,15 @@ FSQ difference: Midscene focuses on completing the live instruction. FSQ should 
 
 Team ownership: planner prompt contract, generated YAML quality, repair loop, human review handoff.
 
-### 6.3 CLI / API / MCP / Playground
+### 6.3 CLI / API / Debug UI
 
 FSQ role: Entry points should be thin routing layers. They should not own platform action logic or verifier logic.
 
-Midscene reference: Midscene CLI creates YAML players in `packages/cli/src/create-yaml-player.ts`. Web integrations expose Playwright/Puppeteer/Chrome extension entry points under `packages/web-integration/src`. MCP is represented by `packages/mcp` and newer platform-specific MCP packages referenced by `packages/mcp/src/server.ts`.
+Midscene reference: Midscene CLI creates YAML players in `packages/cli/src/create-yaml-player.ts`. Web integrations expose Playwright/Puppeteer/Chrome extension entry points under `packages/web-integration/src`.
 
 FSQ difference: FSQ should expose two clearly named workflows: regression execution from FSQ YAML, and exploration/generation from natural goal. Debug UI should open existing artifacts rather than re-run logic.
 
-Team ownership: command UX, CI behavior, API request/response shape, MCP tool surface, local debug entry.
+Team ownership: command UX, CI behavior, API request/response shape, harness capability display, local debug entry.
 
 ### 6.4 YAML Parser + Normalizer + Deterministic Runner
 
@@ -353,17 +351,17 @@ Team ownership: platform capability model, lifecycle hooks, action execution API
 
 FSQ role: Android is the first production harness target. It should manage device/app lifecycle, execute normalized actions, capture screenshot/UI tree/tool logs, and classify failures.
 
-Midscene reference: Midscene has platform-oriented packages and device options, including Android-oriented MCP direction in package organization. The older general MCP package is deprecated in favor of platform-specific MCP packages.
+Midscene reference: Midscene has platform-oriented packages and device options. FSQ keeps backend details behind the harness contract and exposes platform actions through harness schemas.
 
-FSQ difference: FSQ can use Appium MCP, direct Appium, or a hybrid adapter, but the harness contract should hide that choice from YAML runner and verifier.
+FSQ difference: FSQ uses the Android harness and configured driver backend as the platform boundary. The harness contract hides driver details from the YAML runner, OpenAI agent runtime, and verifier.
 
-Team ownership: Appium/MCP integration, device lifecycle, app lifecycle, session management, Android UI tree and screenshot capture, platform flake handling.
+Team ownership: Android harness and driver integration, device lifecycle, app lifecycle, session management, Android UI tree and screenshot capture, platform flake handling.
 
 ### 6.10 Web / iOS / Windows / macOS Harnesses
 
 FSQ role: These adapters should implement the same harness contract after Android proves the MVP path.
 
-Midscene reference: Midscene web integration is mature: Playwright, Puppeteer, Chrome extension, bridge mode, static page, and MCP tooling live under `packages/web-integration/src`.
+Midscene reference: Midscene web integration is mature: Playwright, Puppeteer, Chrome extension, bridge mode, and static page tooling live under `packages/web-integration/src`.
 
 FSQ difference: FSQ should avoid making web semantics the default for every platform. The contract should preserve shared concepts while letting platforms expose their own capabilities.
 
@@ -444,8 +442,8 @@ Team ownership: knowledge schema, retrieval policy, write-back review, stale kno
 ## 8. Immediate Documentation Next Steps
 
 1. Promote `docs/superpowers/specs/2026-06-04-fsq-agent-v2-core-contracts.md` from planned content into a real committed spec.
-2. Update module-level `SPEC.md` files with the v2 direction before implementation.
-3. Decide the Android harness implementation path: Appium MCP, direct Appium, or hybrid.
+2. Update module-level `SPEC.md` files with the current architecture direction before implementation.
+3. Keep Android platform behavior behind the harness action-space and configured driver backend.
 4. Define the first deterministic FSQ YAML command set for Android MVP.
 5. Define the minimum evidence bundle schema needed for CI trust.
 
@@ -457,7 +455,7 @@ Team ownership: knowledge schema, retrieval policy, write-back review, stale kno
 
 ## 核心结论
 
-FSQ-Agent v2 的核心架构是 **Dual Loop, Shared Harness**：
+FSQ-Agent 的核心架构是 **Dual Loop, Shared Harness**：
 
 - FSQ YAML 是 regression test 入口，必须可以脱离 agent 执行。
 - Natural Goal 是 exploration/testcase generation 入口，通过 planner 生成、验证、修复 FSQ YAML。
@@ -465,7 +463,7 @@ FSQ-Agent v2 的核心架构是 **Dual Loop, Shared Harness**：
 
 ## Midscene 给 FSQ 的主要启发
 
-Midscene 的结构可以概括为三层：入口层、核心层、平台层。入口层包括 CLI、Playwright、Puppeteer、Chrome Extension、MCP；核心层包括 `Agent`、`TaskExecutor`、YAML `ScriptPlayer`、AI planning、dump/report；平台层提供具体 UI 操作能力。
+Midscene 的结构可以概括为三层：入口层、核心层、平台层。入口层包括 CLI、Playwright、Puppeteer、Chrome Extension 和 Playground；核心层包括 `Agent`、`TaskExecutor`、YAML `ScriptPlayer`、AI planning、dump/report；平台层提供具体 UI 操作能力。
 
 FSQ 应学习这种分层，但要强化 regression test 的可信度。Midscene 更偏向完成视觉 UI automation 任务；FSQ 需要把 YAML、evidence、verifier、debug、knowledge 都做成可团队协作和 CI 信任的系统。
 
@@ -475,13 +473,13 @@ FSQ 应学习这种分层，但要强化 regression test 的可信度。Midscene
 | --- | --- | --- | --- |
 | FSQ YAML | 稳定 regression artifact | `ScriptPlayer` 执行 YAML flow | 无 agent deterministic runner |
 | Natural Goal | 探索和生成 testcase | `TaskExecutor.action` planning loop | 输出 durable FSQ YAML |
-| CLI/API/MCP/Playground | 薄入口 | CLI/player/web/MCP packages | 清晰分离 regression 与 exploration |
+| CLI/API/Debug UI | 薄入口 | CLI/player/web packages | 清晰分离 regression 与 exploration |
 | YAML Runner | validate/normalize/execute | `ScriptPlayer.playTask` | 拆出 parser、normalizer、runner |
 | Planner Loop | 生成和修复 YAML | `llm-planning.ts` + `TaskExecutor` | model-provider neutral |
 | Model Provider | 多模型适配 | Midscene model config/callAI | OpenAI + GitHub Copilot 起步 |
 | Execution Core | Action IR 状态机 | `TaskExecutor`/`ExecutionSession` | regression path 不依赖 planner |
 | Harness Contract | 平台能力抽象 | `AbstractInterface`/`actionSpace` | 强化 failure taxonomy 和 evidence refs |
-| Android Harness | MVP 平台 | platform MCP/device direction | Appium/MCP/hybrid 需决策 |
+| Android Harness | MVP 平台 | platform/device direction | harness action-space 与 driver backend 隔离实现细节 |
 | Evidence Bundle | 权威执行记录 | `ExecutionDump`/`ReportActionDump` | 跨模块 schema，artifact refs |
 | Step Verifier | 步骤级确定性判断 | `aiAssert`/Insight query | 与 case verifier 分离 |
 | Case Verifier | evidence-only 最终判断 | Midscene 无强独立 verifier | FSQ 信任核心 |

@@ -2,20 +2,20 @@
 
 ## Purpose
 
-Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, model provider selection, Azure OpenAI model deployment, GitHub Copilot local provider authentication, final verification policy, MCP servers, lifecycle setup/teardown controller selection, MCP tool validation policy, CLI tools, automation skills, runtime secret allowlists, case input directories, pre-plan page knowledge, the fsq-agent workspace, and output directories.
+Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, model provider selection, Azure OpenAI model deployment, GitHub Copilot local provider authentication, final verification policy, harness/driver construction, CLI tools, automation skills, runtime secret allowlists, case input directories, pre-plan page knowledge, the fsq-agent workspace, and output directories.
 
 ## Dependencies
 
-- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `LifecycleControllerSettings`, `VerificationSettings`, `MCPServerConfig`, `MCPToolValidationSettings`, `WorkspaceSettings`, `CaseSettings`, `CLIToolConfig`, `ShellSettings`, `SkillConfig`, `OutputSettings`, `PrePlanSettings`, and `ConfigurationError`.
+- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `VerificationSettings`, `HarnessSettings`, `AndroidHarnessSettings`, `WorkspaceSettings`, `CaseSettings`, `CLIToolConfig`, `ShellSettings`, `SkillConfig`, `OutputSettings`, `PrePlanSettings`, and `ConfigurationError`.
 
 ## Public Interface
 
-Current `__init__.py` exports via `__all__`:
+Target `__init__.py` exports via `__all__` after this change:
 
-- `Settings`: Runtime settings aggregate model that combines agent, OpenAI Agents SDK provider, configurable prompt text, context trimming, local tool output artifact policy, lifecycle setup/teardown controller selection, final verification policy, MCP, MCP tool validation, runtime secret allowlists, workspace, case directory, CLI, shell, skills, output, normal task knowledge, and pre-plan page knowledge configuration.
+- `Settings`: Runtime settings aggregate model that combines agent, OpenAI Agents SDK provider, configurable prompt text, context trimming, local tool output artifact policy, harness/driver construction, final verification policy, runtime secret allowlists, workspace, case directory, CLI, shell, skills, output, normal task knowledge, and pre-plan page knowledge configuration.
 - `load_settings(path: str | Path | None = None, workspace: str | Path | None = None) -> Settings`: Loads `.env` values without overriding existing environment variables, then loads YAML configuration from the provided path or default search locations. The optional workspace argument overrides `workspace.root_dir`.
 - `resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> None`: Ensures the fsq-agent workspace is initialized and marked, resolves case and knowledge directories, and creates output directories under the workspace.
-- `validate_runtime_settings(settings: Settings) -> None`: Validates provider-specific secrets or auth requirements, Azure OpenAI base URL shape when selected, model deployment name, optional shell policy, and local path constraints before a run starts.
+- `validate_runtime_settings(settings: Settings) -> None`: Validates provider-specific secrets or auth requirements, Azure OpenAI base URL shape when selected, model deployment name, harness/driver settings, optional shell policy, and local path constraints before a run starts.
 
 ## Internal Structure
 
@@ -42,10 +42,13 @@ Invalid or missing configuration raises `ConfigurationError` from `models`. Low-
 - The default model is the Azure deployment name `gpt-5.4`, not an OpenAI public model alias.
 - GPT-5.4 is treated as the default sizing target for tool-output context policy. The default keeps recent moderate local outputs inline, writes every local tool output to a per-run artifact, and trims older large SDK tool outputs before model calls.
 - `openai_agents.prompt` owns prompt customization. `prompt.agent_template_path`, `prompt.task_template_path`, and `prompt.custom_instructions_path` may point to files resolved relative to the configuration file directory; when template paths are omitted, package default templates are used. Static prompt text, headings, loops, and task formatting live in templates. Long operator guidance should live in `prompt.custom_instructions_path`; `prompt.custom_instructions` remains available for short inline overrides, and `prompt.variables` provides operator-controlled scalar model data injected into templates.
-- `lifecycle.controller` selects a named setup/teardown implementation such as `appium_android`; `lifecycle.options` is passed to that implementation. The default `none` preserves existing behavior.
+- `harness.platform` selects the platform harness used by goal-driven task execution. The first supported platform is `android`.
+- `harness.android.backend` selects the Android backend. The first supported backend is `uiautomator2`.
+- `harness.android.app_id` optionally supplies the Android application id for goal-driven runs. FSQ case metadata or CLI flags may still provide a task-specific app id where those entry points already own case context.
+- `harness.android.serial` optionally selects the Android device serial passed to the uiautomator2 backend.
+- `harness.android.enable_ai_assertions` controls whether authored `assertWithAI` actions may use the configured AI assertion evaluator when the entry point wires one into `AndroidHarness`. It does not enable locator fallback, action repair, recovery, or testcase mutation.
 - `verification.mode` selects final verification strictness. The default `normal` verifies the goal and assertion-style criteria. `strict` verifies the goal plus all required ordered key actions, including operation-style criteria. `goal` verifies only the goal-level criteria. The setting affects final verification only; the execution agent still receives all key actions as task context.
-- Non-interactive execution is the default: trusted MCP servers use `require_approval: never`; any approval callback must be programmatic.
+- Non-interactive execution is the default. Any human-in-the-loop SDK feature must be disabled or backed by deterministic programmatic approval.
 - Local shell execution is disabled by default. When enabled, `shell.mode: allowlist` requires `command_allowlist`; `shell.mode: allow_all` intentionally permits unrestricted local shell commands inside the fsq-agent workspace.
 - Output directory creation is part of config resolution so later modules can assume directories are writable. Reports, run event timelines, tool artifacts, and generated files must be placed under `output.root_dir`; completed run reports are stored under `output.runs_dir`.
-- MCP tool validation is enabled by default and uses `auto_ignore` policy so a single malformed MCP tool schema does not prevent otherwise healthy tools on the same server from being registered with the OpenAI Agents SDK.
-- `mcp_tool_validation.strict_schema` is the single configuration switch for strict MCP schema behavior: it enables project-side strict compatibility validation and is passed through to the OpenAI Agents SDK as `convert_schemas_to_strict`.
+- Platform action schemas are not configured through external tool servers. They are discovered from the active harness through `HarnessInterface.action_space()` and adapted by the agent runtime into SDK `FunctionTool` objects.

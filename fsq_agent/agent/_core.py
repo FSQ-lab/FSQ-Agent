@@ -8,7 +8,7 @@ from fsq_agent.models import GoalPrePlan, KnowledgeBundle, RunEvent, RunEventSin
 from fsq_agent.observation import ExecutionLogger
 from fsq_agent.report import ReportGenerator
 from fsq_agent.skills import SkillLoader
-from fsq_agent.tools import AgentsMCPFactory, AgentsToolFactory, CLIRunner, FileOps
+from fsq_agent.tools import AgentsToolFactory, CLIRunner, FileOps
 
 from fsq_agent.agent._openai_runtime import OpenAIAgentsRuntime
 from fsq_agent.agent._events import RunEventEmitter
@@ -55,7 +55,6 @@ class FsqAgent:
             settings.output.runs_dir,
             settings.runtime_secrets,
         )
-        mcp_factory = AgentsMCPFactory(settings.mcp_servers, settings.mcp_tool_validation)
         knowledge_loader = PrivateKnowledgeLoader(settings.knowledge_dir)
         skill_loader = SkillLoader(settings.knowledge_dir / "skills")
         reporter = ReportGenerator(settings.output.runs_dir)
@@ -66,7 +65,7 @@ class FsqAgent:
             reporter,
             knowledge_loader,
             skill_loader,
-            OpenAIAgentsRuntime(settings, tool_factory, mcp_factory),
+            OpenAIAgentsRuntime(settings, tool_factory),
             event_logger,
         )
 

@@ -8,8 +8,8 @@ This project delegates the model/tool loop to OpenAI Agents SDK. fsq-agent does 
 2. `FsqAgent.run` loads private knowledge and configured skills.
 3. `OpenAIAgentsRuntime.run_task` validates Azure OpenAI and SDK settings.
 4. The runtime creates an `AsyncOpenAI` client and wraps it in `OpenAIProvider`.
-5. The runtime enters configured MCP servers and builds local SDK tools.
-6. The runtime creates an SDK `Agent` with instructions, tools, MCP servers, and the Azure model deployment.
+5. The runtime constructs the configured harness, reads `HarnessInterface.action_space()`, and builds local SDK tools.
+6. The runtime creates an SDK `Agent` with instructions, local utility tools, harness-generated platform action tools, and the configured model deployment.
 7. `Runner.run` owns the loop: model turn, tool call, tool result, next model turn, and final answer.
 8. The agent final answer must be JSON containing pre-plan steps, plan updates, satisfied criteria, unmet criteria, evidence, and errors.
 9. The runtime converts pre-plan JSON entries into `StepResult` records and appends the raw SDK final output as the runner summary step.
@@ -40,7 +40,7 @@ Task description + instructions + knowledge + skills
 OpenAI Agents SDK Runner.run
         |
         +--> model derives acceptance criteria and pre-plan
-        +--> model requests MCP or local tool calls
+        +--> model requests harness or local tool calls
         +--> SDK executes the tool call
         +--> tool result is returned to the model
         +--> model adjusts the pre-plan if needed
@@ -57,8 +57,8 @@ fsq-agent owns these parts around the SDK loop:
 - Build the task input from `Task.description` and optional metadata.
 - Load relevant knowledge before the run.
 - Load skills as descriptive instructions.
-- Adapt configured MCP servers into SDK MCP server objects.
-- Adapt configured CLI/file/shell capabilities into SDK tools.
+- Adapt harness `HarnessFunctionSchema` records into SDK platform action tools.
+- Adapt configured CLI/file/shell capabilities into local SDK tools.
 - Require non-interactive execution.
 - Require final JSON output.
 - Convert final pre-plan entries into reportable `StepResult` records.
@@ -71,7 +71,7 @@ The SDK agent is instructed to do this inside `Runner.run`:
 - Derive acceptance criteria from the task description, knowledge, and skills.
 - If the task is broad, use successful flow completion as the success standard.
 - Create a pre-plan before external actions.
-- Execute each step with MCP/tools/skills.
+- Execute each step with harness action tools, local utility tools, and skill guidance.
 - Dynamically adjust the pre-plan when tool feedback or page state changes the best path.
 - Finish with JSON only.
 
@@ -106,7 +106,7 @@ OpenAI Agents SDK already provides the loop runner. Rebuilding the loop in this 
 
 ## Failure Handling
 
-If SDK setup, MCP startup, tool execution, or the runner fails before final JSON, the runtime returns a failed `StepResult` so reporting can still complete.
+If SDK setup, harness construction/action-space discovery, tool execution, or the runner fails before final JSON, the runtime returns a failed `StepResult` so reporting can still complete.
 
 If the evidence-based verifier agent returns parseable final JSON, `Verifier` preserves that `success`, `failed`, or `inconclusive` status as the final conclusion.
 

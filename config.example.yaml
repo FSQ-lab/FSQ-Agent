@@ -9,7 +9,7 @@ openai_agents:
   # Provider selector: azure_openai or github_copilot.
   # github_copilot runs GitHub device-code auth on first use and caches the
   # OAuth token under workspace.root_dir/auth/github-copilot-token.json.
-  # When provider is github_copilot, use model: gpt-5.5.
+  # When provider is github_copilot, use model: gpt-5.5 and no API-key env is required.
   provider: azure_openai
   # Azure OpenAI only: normalized /openai/v1/ endpoint used when provider is azure_openai.
   base_url: https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/
@@ -44,38 +44,40 @@ openai_agents:
     historical_preview_chars: 1000
     model_response_max_chars: 4000
 
-lifecycle:
-  controller: none
-  options: {}
+harness:
+  platform: android
+  android:
+    backend: uiautomator2
+    # Required for run-goal and tasks that do not provide appId in FSQ case metadata.
+    # Microsoft Edge Android package id:
+    app_id: com.microsoft.emmx
+    # Optional uiautomator2 device serial. Leave null when exactly one device is connected.
+    serial: null
+    # Only enable when authored assertWithAI actions should call the configured model provider.
+    enable_ai_assertions: false
 
 verification:
   # strict: goal + all key actions; normal: goal + assertion key actions; goal: goal only.
   mode: normal
 
-mcp_tool_validation:
-  enabled: true
-  invalid_tool_policy: auto_ignore
-  # Also controls OpenAI Agents SDK MCP schema conversion via convert_schemas_to_strict.
-  strict_schema: true
-  fail_when_all_tools_filtered: true
-
 runtime_secrets:
+  # The get_runtime_secret tool may only read names listed here. Values come from
+  # process env or .env, never from config YAML. For sign-in cases, use:
+  # allowed_env_names:
+  #   - TEST_ACCOUNT_EMAIL
+  #   - TEST_ACCOUNT_PASSWORD
   allowed_env_names: []
-
-mcp_servers:
-  - name: browser
-    transport: stdio
-    command: npx
-    args: ["-y", "@playwright/mcp@latest"]
-    require_approval: never
-    load_prompts: false
-    timeout_seconds: 60
 
 skills:
   - name: automation-basics
-    description: Describes how the agent should use configured CLI and MCP tools for automation tasks.
+    description: Describes how the agent should use configured harness and local tools for automation tasks.
     kind: markdown
     path: automation-basics.md
+    required: true
+  - name: android-harness
+    description: Android harness action selection and recovery guidance.
+    kind: markdown
+    path: android-harness.md
     required: true
 
 shell:

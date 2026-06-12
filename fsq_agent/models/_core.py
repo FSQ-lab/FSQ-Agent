@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 
 StepPhase: TypeAlias = Literal["prepare", "invoke", "finalize"]
@@ -89,6 +89,10 @@ class HarnessArtifactRef(BaseModel):
     mime_type: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_serializer("path", when_used="json")
+    def serialize_path(self, value: Path) -> str:
+        return value.as_posix()
 
 
 class HarnessContext(BaseModel):
@@ -344,6 +348,10 @@ class EvidenceArtifactRef(BaseModel):
     step_id: str | None = None
     phase: StepPhase | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_serializer("path", when_used="json")
+    def serialize_path(self, value: Path) -> str:
+        return value.as_posix()
 
 
 class StepPhaseReport(BaseModel):

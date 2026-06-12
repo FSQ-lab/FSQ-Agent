@@ -82,9 +82,9 @@ def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> N
                         "sequence": 10,
                         "timestamp": "2026-05-09T00:00:00Z",
                         "tool_call_id": "call-1",
-                        "tool_name": "appium_find_element",
+                        "tool_name": "tap_on",
                         "tool_arguments": {"strategy": "id", "selector": "target"},
-                        "payload": {"tool_origin": "mcp"},
+                        "payload": {"tool_origin": "harness"},
                     }
                 ),
                 json.dumps(
@@ -108,8 +108,8 @@ def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> N
     assert payload["execution"]["tool_calls"] == [
         {
             "tool_call_id": "call-1",
-            "tool_name": "appium_find_element",
-            "tool_origin": "mcp",
+            "tool_name": "tap_on",
+            "tool_origin": "harness",
             "status": "completed",
             "started_sequence": 10,
             "completed_sequence": 11,
@@ -136,9 +136,9 @@ def test_report_generator_classifies_tool_usage_error_with_unmet_semantic_action
                         "sequence": 89,
                         "timestamp": "2026-05-09T00:00:00Z",
                         "tool_call_id": "call-1",
-                        "tool_name": "appium_perform_actions",
+                        "tool_name": "perform_actions",
                         "tool_arguments": {"actions": [{"type": "key", "parameters": {"pointerType": "touch"}}]},
-                        "payload": {"tool_origin": "mcp"},
+                        "payload": {"tool_origin": "harness"},
                     }
                 ),
                 json.dumps(
@@ -175,7 +175,7 @@ def test_report_generator_classifies_conflicting_key_identity_diagnostic(tmp_pat
         status="failed",
         summary="Required ordered key action pressKey: Enter was unmet.",
         unmet_criteria=["Key action 9: pressKey: Enter"],
-        diagnostics=["Tool usage issue: appium_mobile_press_key was called with conflicting key identities."],
+        diagnostics=["Tool usage issue: press_key was called with conflicting key identities."],
     )
 
     artifact = ReportGenerator(tmp_path).generate("run-conflicting-key", _task(), [], verification)

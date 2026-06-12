@@ -1,14 +1,10 @@
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
 
 import json
 
 import pytest
 
 from fsq_agent.models import (
-    MCPServerConfig,
-    MCPToolValidationSettings,
     LocalToolOutputSettings,
     RunEvent,
     RuntimeSecretSettings,
@@ -20,58 +16,12 @@ from fsq_agent.models import (
     ToolExecutionError,
 )
 from fsq_agent.tools import (
-    AgentsMCPFactory,
     AgentsToolFactory,
-    AppiumAndroidLifecycleController,
     CLIRunner,
     CapabilityRegistry,
     FileOps,
-    LifecycleControllerFactory,
-    MCPToolCaller,
-    MCPToolValidator,
     ToolExecutor,
 )
-
-
-class _FakeMCPTool:
-    def __init__(self, name: str, input_schema: dict[str, Any]) -> None:
-        self.name = name
-        self.inputSchema = input_schema
-
-
-class _FakeMCPServer:
-    def __init__(self, tools: list[_FakeMCPTool]) -> None:
-        self.tools = tools
-        self.tool_filter: dict[str, list[str]] | None = None
-
-    async def list_tools(self) -> list[_FakeMCPTool]:
-        filtered_tools = self.tools
-        if self.tool_filter:
-            allowed = self.tool_filter.get("allowed_tool_names")
-            blocked = self.tool_filter.get("blocked_tool_names")
-            if allowed is not None:
-                filtered_tools = [tool for tool in filtered_tools if tool.name in allowed]
-            if blocked is not None:
-                filtered_tools = [tool for tool in filtered_tools if tool.name not in blocked]
-        return filtered_tools
-
-
-class _FakeCallableMCPServer:
-    name = "appium-mcp"
-
-    def __init__(self, env: dict[str, str] | None = None, failures: list[tuple[str, str]] | None = None) -> None:
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.failures = failures or []
-        self.params = SimpleNamespace(env=env or {})
-
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        self.calls.append((tool_name, arguments))
-        if self.failures and self.failures[0][0] == tool_name:
-            _, message = self.failures.pop(0)
-            return type("ToolResult", (), {"content": [type("Text", (), {"text": message})()], "isError": True})()
-        if tool_name == "appium_session_management" and arguments.get("action") == "create":
-            return type("ToolResult", (), {"content": [type("Text", (), {"text": "ANDROID session created successfully with ID: session-1"})()], "isError": False})()
-        return type("ToolResult", (), {"content": [type("Text", (), {"text": "ok"})()], "isError": False})()
 
 
 @pytest.mark.asyncio
@@ -88,13 +38,13 @@ async def test_file_ops_are_scoped(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_direct_mcp_execution_is_sdk_only(tmp_path: Path) -> None:
+async def test_direct_harness_execution_is_runtime_owned(tmp_path: Path) -> None:
     registry = CapabilityRegistry.from_cli_tools([])
-    registry.register(ToolDefinition(name="browser.click", kind="mcp", server_name="browser"))
+    registry.register(ToolDefinition(name="tap_on", kind="harness"))
     executor = ToolExecutor(registry, CLIRunner([]), FileOps(tmp_path))
 
-    with pytest.raises(ToolExecutionError, match="OpenAI Agents SDK"):
-        await executor.execute(ToolCall(tool_name="browser.click", arguments={}))
+    with pytest.raises(ToolExecutionError, match="Unsupported tool kind"):
+        await executor.execute(ToolCall(tool_name="tap_on", arguments={}))
 
 
 def test_agents_tool_factory_adds_shell_tool_with_file_backed_skill(tmp_path: Path) -> None:
@@ -289,162 +239,4 @@ async def test_agents_tool_factory_large_output_uses_artifact_search_and_slice(t
     assert "gamma" in json.loads(slice_output)["content"]
 
 
-def test_agents_mcp_factory_applies_client_session_timeout() -> None:
-    config = MCPServerConfig(name="browser", command="npx", timeout_seconds=42)
-    server = AgentsMCPFactory([config])._build_local_server(config)
 
-    assert server.client_session_timeout_seconds == 42.0
-
-
-def test_lifecycle_controller_factory_resolves_appium_android() -> None:
-    from fsq_agent.models import LifecycleControllerSettings
-
-    controller = LifecycleControllerFactory.create(
-        LifecycleControllerSettings(controller="appium_android", options={})
-    )
-
-    assert isinstance(controller, AppiumAndroidLifecycleController)
-
-
-@pytest.mark.asyncio
-async def test_appium_android_lifecycle_calls_expected_tools(tmp_path: Path) -> None:
-    capabilities_path = tmp_path / "capabilities.json"
-    capabilities_path.write_text(json.dumps({"android": {"appium:appPackage": "com.example.app"}}), encoding="utf-8")
-    server = _FakeCallableMCPServer({"CAPABILITIES_CONFIG": str(capabilities_path)})
-    caller = MCPToolCaller([server], "run-1", "task-1")
-    controller = AppiumAndroidLifecycleController()
-
-    await controller.batch_setup(caller)
-    assert controller.runtime_policy()[0] == "The runtime has already created exactly one Appium Android session for this MCP client. Because the strict Appium MCP tool schema requires sessionId, use sessionId 'session-1' on every appium-mcp tool call that accepts sessionId."
-    await controller.case_setup(caller, Task(description="Run case."))
-    await controller.case_teardown(caller, Task(description="Run case."))
-    await controller.batch_teardown(caller)
-
-    terminate_args = {
-        "action": "terminate",
-        "id": "com.example.app",
-        "name": "",
-        "path": "",
-        "keepData": False,
-        "applicationType": "User",
-        "seconds": 5,
-        "url": "",
-        "waitForLaunch": True,
-        "sessionId": "session-1",
-    }
-    activate_args = {**terminate_args, "action": "activate"}
-    query_state_args = {**terminate_args, "action": "query_state"}
-    assert server.calls == [
-        ("appium_session_management", {"action": "create", "platform": "android"}),
-        ("appium_session_management", {"action": "list"}),
-        ("appium_app_lifecycle", terminate_args),
-        ("appium_app_lifecycle", activate_args),
-        ("appium_app_lifecycle", query_state_args),
-        ("appium_mobile_keyboard", {"action": "hide", "keys": [], "sessionId": "session-1"}),
-        ("appium_alert", {"action": "dismiss", "buttonLabel": "", "sessionId": "session-1"}),
-        ("appium_app_lifecycle", terminate_args),
-        ("appium_session_management", {"action": "delete"}),
-        ("appium_session_management", {"action": "list"}),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_appium_android_lifecycle_retries_session_create(tmp_path: Path) -> None:
-    capabilities_path = tmp_path / "capabilities.json"
-    capabilities_path.write_text(json.dumps({"android": {"appium:appPackage": "com.example.app"}}), encoding="utf-8")
-    server = _FakeCallableMCPServer(
-        {"CAPABILITIES_CONFIG": str(capabilities_path)},
-        failures=[("appium_session_management", "Appium Settings app is not running after 5000ms")],
-    )
-    caller = MCPToolCaller([server], "run-1", "task-1")
-    controller = AppiumAndroidLifecycleController(session_create_retry_delay_seconds=0)
-
-    await controller.batch_setup(caller)
-
-    assert server.calls[:3] == [
-        ("appium_session_management", {"action": "create", "platform": "android"}),
-        ("appium_session_management", {"action": "create", "platform": "android"}),
-        ("appium_session_management", {"action": "list"}),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_appium_android_case_setup_requires_app_package(tmp_path: Path) -> None:
-    capabilities_path = tmp_path / "capabilities.json"
-    capabilities_path.write_text(json.dumps({"android": {"appium:udid": "device-1"}}), encoding="utf-8")
-    server = _FakeCallableMCPServer({"CAPABILITIES_CONFIG": str(capabilities_path)})
-    caller = MCPToolCaller([server], "run-1", "task-1")
-    controller = AppiumAndroidLifecycleController()
-
-    await controller.batch_setup(caller)
-
-    with pytest.raises(ToolExecutionError, match="appium:appPackage"):
-        await controller.case_setup(caller, Task(description="Run case."))
-
-
-@pytest.mark.asyncio
-async def test_mcp_tool_caller_emits_lifecycle_events() -> None:
-    events: list[RunEvent] = []
-    server = _FakeCallableMCPServer()
-    caller = MCPToolCaller([server], "run-1", "task-1", events.append)
-
-    await caller.call("appium-mcp", "appium_session_management", {"action": "list"})
-
-    assert [event.type for event in events] == ["tool_call_started", "tool_call_completed"]
-    assert events[0].payload["lifecycle"] is True
-    assert events[0].payload["tool_origin"] == "mcp"
-
-
-def test_mcp_tool_validator_flags_unsupported_schema_keyword() -> None:
-    validator = MCPToolValidator(MCPToolValidationSettings())
-    tool = _FakeMCPTool(
-        "bad_tool",
-        {
-            "type": "object",
-            "properties": {},
-            "propertyNames": {"pattern": "^[a-z]+$"},
-        },
-    )
-
-    issues = validator.validate_tools("server", [tool])
-
-    assert len(issues) == 1
-    assert issues[0].tool_name == "bad_tool"
-    assert "propertyNames" in issues[0].reason
-    assert issues[0].schema_path == "$.propertyNames"
-
-
-def test_mcp_tool_validator_fail_fast_raises() -> None:
-    validator = MCPToolValidator(MCPToolValidationSettings(invalid_tool_policy="fail_fast"))
-    tool = _FakeMCPTool("bad_tool", {"type": "object", "propertyNames": {}})
-
-    with pytest.raises(ToolExecutionError, match="compatibility validation"):
-        validator.validate_tools("server", [tool])
-
-
-@pytest.mark.asyncio
-async def test_agents_mcp_factory_auto_blocks_invalid_tools_and_preserves_manual_blocks() -> None:
-    factory = AgentsMCPFactory([MCPServerConfig(name="server")], MCPToolValidationSettings())
-    server = _FakeMCPServer(
-        [
-            _FakeMCPTool("healthy", {"type": "object", "properties": {}}),
-            _FakeMCPTool("bad", {"type": "object", "propertyNames": {}}),
-            _FakeMCPTool("manual", {"type": "object", "properties": {}}),
-        ]
-    )
-    config = MCPServerConfig(name="server", blocked_tools=["manual"])
-
-    await factory._validate_and_filter_tools(server, config)
-
-    assert server.tool_filter == {"blocked_tool_names": ["bad", "manual"]}
-    assert [tool.name for tool in await server.list_tools()] == ["healthy"]
-    assert factory.get_validation_issues()[0].tool_name == "bad"
-
-
-@pytest.mark.asyncio
-async def test_agents_mcp_factory_raises_when_all_tools_are_filtered() -> None:
-    factory = AgentsMCPFactory([MCPServerConfig(name="server")], MCPToolValidationSettings())
-    server = _FakeMCPServer([_FakeMCPTool("bad", {"type": "object", "propertyNames": {}})])
-
-    with pytest.raises(ToolExecutionError, match="All MCP tools were filtered out"):
-        await factory._validate_and_filter_tools(server, MCPServerConfig(name="server"))

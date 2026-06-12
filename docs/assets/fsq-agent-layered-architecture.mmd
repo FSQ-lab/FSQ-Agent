@@ -2,7 +2,7 @@ flowchart TB
     subgraph Entry[Entry Layer]
         FSQ[FSQ YAML\nRegression / Batch / CI]
         GOAL[Natural Goal\nExploration / Testcase Generation]
-        CLI[CLI / API / MCP / Playground]
+        CLI[CLI / API / Debug UI]
     end
 
     subgraph Core[Core Layer]
@@ -20,11 +20,11 @@ flowchart TB
 
     subgraph Platform[Platform Layer]
         HARNESS[Harness Adapter Contract]
-        ANDROID[Android Harness MVP\nAppium / MCP / Device Lifecycle]
+        ANDROID[Android Harness\nHarness Actions / Device Lifecycle]
         IOS[iOS Harness]
-        WEB[Web Harness\nPlaywright / Browser MCP]
-        WIN[Windows Harness\npywinauto / WinAppDriver / MCP]
-        MAC[macOS Harness\nAccessibility / MCP]
+        WEB[Web Harness\nNative Platform Adapter]
+        WIN[Windows Harness\nNative Platform Adapter]
+        MAC[macOS Harness\nNative Platform Adapter]
     end
 
     CLI --> FSQ

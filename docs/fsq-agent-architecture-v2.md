@@ -1,4 +1,4 @@
-# FSQ-Agent Architecture v2
+# FSQ-Agent Architecture
 
 This draft captures the selected architecture direction for FSQ-Agent after comparing Midscene's layered design with FSQ's testing goals.
 
@@ -12,7 +12,7 @@ FSQ-Agent should use a **Dual Loop, Shared Harness** architecture:
 
 ## Architecture Diagram
 
-![FSQ-Agent Architecture v2](assets/fsq-agent-architecture-v2.png)
+![FSQ-Agent Architecture](assets/fsq-agent-architecture-v2.png)
 
 The PNG above is generated from [assets/fsq-agent-architecture-v2.svg](assets/fsq-agent-architecture-v2.svg). The Mermaid source below remains editable for future architecture changes.
 
@@ -21,7 +21,7 @@ flowchart TB
     subgraph Entry[Entry Layer]
         FSQ[FSQ YAML\nRegression / Batch / CI]
         GOAL[Natural Goal\nExploration / Testcase Generation]
-        CLI[CLI / API / MCP / Playground]
+        CLI[CLI / API / Debug UI]
     end
 
     subgraph Core[Core Layer]
@@ -39,11 +39,11 @@ flowchart TB
 
     subgraph Platform[Platform Layer]
         HARNESS[Harness Adapter Contract]
-        ANDROID[Android Harness MVP\nAppium / MCP / Device Lifecycle]
+        ANDROID[Android Harness\nHarness Actions / Device Lifecycle]
         IOS[iOS Harness]
-        WEB[Web Harness\nPlaywright / Browser MCP]
-        WIN[Windows Harness\npywinauto / WinAppDriver / MCP]
-        MAC[macOS Harness\nAccessibility / MCP]
+        WEB[Web Harness\nNative Platform Adapter]
+        WIN[Windows Harness\nNative Platform Adapter]
+        MAC[macOS Harness\nNative Platform Adapter]
     end
 
     CLI --> FSQ

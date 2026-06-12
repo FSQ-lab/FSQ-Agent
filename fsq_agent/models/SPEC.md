@@ -10,7 +10,7 @@ No project module dependencies. May depend on external libraries such as `pydant
 
 ## Public Interface
 
-Current `__init__.py` exports via `__all__`:
+Target `__init__.py` exports via `__all__` after this change:
 
 - `VerificationCriterion`: Pydantic model for one structured final-verification requirement. It includes criterion text, kind (`goal`, `assertion`, or `operation`), required flag, and source metadata.
 - `Task`: Pydantic model describing a natural-language test task, optional metadata, complete execution key actions, structured final-verification criteria, retry limits, timeout, and knowledge references. Only `description` is required. Execution key actions are always available to the runner as planning context; final verification decides which criteria are blocking according to configured verification mode.
@@ -45,9 +45,7 @@ Current `__init__.py` exports via `__all__`:
 - `OperationResult`: Pydantic model for the operation result, optionally linking to a destination `page_id` when the operation is a graph transition.
 - `GoalPrePlan`: Pydantic model returned by goal pre-planning. It contains the input goal, ordered key actions, relevant page ids, summary, and warnings.
 - `GoalKeyAction`: Pydantic model for one ordered key action generated from a goal and page knowledge.
-- `MCPToolValidationSettings`: Pydantic model controlling startup-time MCP tool compatibility checks, including enabled state, invalid tool policy, strict schema conversion, unsupported schema keyword checks, and all-tools-filtered behavior.
-- `MCPToolValidationIssue`: Pydantic model describing one MCP tool that was ignored or failed validation, including server name, tool name, reason, policy, and schema path.
-- `ToolDefinition`: Pydantic model describing a discovered MCP, CLI, or file operation capability.
+- `ToolDefinition`: Pydantic model describing a discovered local CLI, file, artifact, wait, secret, progress, visual assertion, shell, or harness-facing capability for diagnostics and CLI display.
 - `ToolCall`: Pydantic model describing a tool invocation request.
 - `ToolResult`: Pydantic model describing a normalized tool invocation response.
 - Execution-core contract models: Pydantic models for StepRunner, HarnessInterface inputs/outputs, runner events, and EvidenceBundle manifests. These include `ExecutableStep`, `SourceRef`, `RetryPolicy`, `EvidencePolicy`, `StepCallInfo`, `StepPhaseReport`, `RunnerStepResult`, `RunnerEvent`, `HarnessContext`, `HarnessActionResult`, `HarnessArtifactRef`, `EvidenceBundle`, and `EvidenceManifest`.
@@ -78,8 +76,8 @@ Current `__init__.py` exports via `__all__`:
 - `ContextTrimmingSettings`: Pydantic model controlling SDK model-input trimming for older large tool outputs, including recent turn retention, maximum inline tool output size, preview size, and optional trimmable tool names.
 - `LocalToolOutputSettings`: Pydantic model controlling how local SDK function tools write full outputs to per-run artifacts and decide whether model-facing responses contain full output or artifact references.
 - `RuntimeSecretSettings`: Pydantic model listing environment variable names that local SDK tools may reveal to the model during a run. Values are loaded through normal environment or `.env` loading but are never stored in YAML case files.
-- `LifecycleControllerSettings`: Pydantic model selecting the named setup/teardown controller implementation and passing implementation-specific options.
-- `MCPServerConfig`: Pydantic model for OpenAI Agents SDK MCP configuration. Supports `stdio`, `streamable_http`, `sse`, and `hosted` transports plus approval policy, headers, manual tool filters, and prompt loading policy.
+- `HarnessSettings`: Pydantic model selecting the platform harness configuration used by goal-driven task execution.
+- `AndroidHarnessSettings`: Pydantic model for the built-in Android harness runtime construction. It selects the Android backend, stores optional `app_id` and device `serial`, and controls whether authored AI assertions may use the configured AI assertion evaluator.
 - `CLIToolConfig`: Pydantic model for configured CLI tools.
 - `SkillConfig`: Pydantic model for one configured automation skill source.
 - `SkillBundle`: Pydantic model containing loaded skill instructions, optional files, descriptions, and warnings.
@@ -102,7 +100,7 @@ Current `__init__.py` exports via `__all__`:
 - `_agent_io.py`: Structured agent task input, final output, plan item, schema version, and normalized tool-call record models.
 - `_events.py`: Live run event model and event sink type alias.
 - `_fsq.py`: FSQ AI Test DSL case metadata and case models.
-- `_tools.py`: Tool metadata, tool call, tool result, MCP validation issue/settings, MCP config, and CLI config models.
+- `_tools.py`: Tool metadata, tool call, tool result, and CLI config models.
 - `_core.py`: Shared execution-core contract models for executable steps, runner phases/events, harness context/results, artifact references, evidence manifests, serializable harness function schemas, and Android driver parameter models used across `fsq` and `core`.
 - `_settings.py`: Settings value models.
 - `_skills.py`: Skill configuration and loaded skill bundle models.
@@ -122,7 +120,7 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - New execution-core contracts must be added to this module rather than to `fsq_agent.core`, because cross-module data structures live only in `models`.
 - Shared platform action parameter contracts must live in this module when they are consumed by more than one project module. Android strict-core parameter models and the Android action registry are shared by `fsq` for YAML normalization/step kind classification and by `core` for harness dispatch and action-space schema generation.
 - `ANDROID_ACTION_DEFINITIONS_BY_NAME` is the single source of truth for phase-1 Android FSQ action name, driver method name, parameter model, and deterministic step kind. Modules must not maintain parallel handwritten maps for those fields.
-- `HarnessFunctionSchema` is deliberately serializable. It describes function-call compatibility but does not import or wrap OpenAI Agents SDK tool objects.
+- `HarnessFunctionSchema` is deliberately serializable. It is the single platform action function-call schema source and does not import or wrap OpenAI Agents SDK tool objects.
 - Android driver parameter models forbid unexpected fields and provide canonical `model_dump(mode="json", exclude_none=True)` output. Runtime-only step metadata such as evidence policy, timeout fields, source references, retry policy, and step identifiers stays on `ExecutableStep` rather than inside driver parameter models.
 - Pydantic is used at boundaries where external inputs, config files, agent output, and tool output enter the system.
 - The agent final output contract is model-owned. The runtime always uses the current `AgentFinalOutput` schema through OpenAI Agents SDK structured output. The schema version is emitted in the final output for traceability, but schema selection is not a user-facing configuration.
@@ -130,17 +128,17 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Goal-only tasks may start with no `key_actions` and only goal-level verification criteria. If the agent orchestrator later derives key actions from `GoalPrePlan`, those generated actions are execution planning data only; they do not change the task's blocking final-verification criteria unless a caller explicitly supplies such criteria.
 - Final verification strictness is model-owned through `VerificationSettings.mode`. `strict` requires every required `goal`, `assertion`, and `operation` criterion. `normal` requires required `goal` and `assertion` criteria while treating operation-only criteria as non-blocking execution evidence. `goal` requires only required `goal` criteria. A proven unmet goal criterion prevents success in every mode.
 - Agent output schema evolution follows one of two policies: compatible evolution may only add fields without removing or changing existing field meaning; breaking evolution replaces the current schema and does not preserve a runtime switch for old formats.
-- Tool-call reporting uses `ToolCallRecord` for real local/MCP/hosted/shell tool invocations. Runtime/provenance records such as pre-plan reconstruction and SDK runner summaries are not represented as real tool calls.
+- Tool-call reporting uses `ToolCallRecord` for real harness, local, and shell tool invocations. Runtime/provenance records such as pre-plan reconstruction and SDK runner summaries are not represented as real tool calls.
 - Result models store evidence paths rather than binary evidence to keep logs and reports lightweight.
 - Live run events are serializable and intentionally store user-visible summaries rather than hidden model chain-of-thought. Tool inputs and outputs may be redacted or preview-truncated by emitters before display or persistence.
 - Context and local tool output settings are GPT-5.4 tuned by default: recent small or moderate tool outputs remain inline for fewer extra tool turns, while older or very large outputs are written to artifacts and represented by bounded previews.
 - Runtime prompt text is template-owned through `OpenAIAgentPromptConfig`. The agent runtime assembles prompt models for knowledge, skills, task input, file-backed and inline custom instructions, and variables, then renders Jinja template files. Static behavioral text, headings, loops, and formatting should live in template files instead of hidden code paths or ad hoc string concatenation. Long operator instructions should live in a configured custom instructions file rather than inline YAML.
 - Runtime secrets are model-owned as an allowlist of environment variable names. This keeps credential values out of cases and config YAML while allowing the tools module to expose only explicitly approved values to the SDK runner. Secret values must be redacted from user-visible events, artifact output, and final reports.
-- Setup and teardown lifecycle selection is model-owned through `LifecycleControllerSettings`. The setting stores a controller name and opaque options; concrete behavior is implemented by the tools module so platform/MCP-specific logic does not leak into config parsing.
-- fsq-agent does not own native screenshot or UI tree capture settings. Those observations are used only when supplied by configured MCP servers or tools.
+- Harness and driver selection is model-owned through `HarnessSettings` and platform-specific nested settings. Concrete platform behavior is implemented by the entry/runtime layer and the `core` harness/driver modules so configuration parsing does not own execution logic.
+- fsq-agent does not expose MCP as a runtime capability path. Screenshots, UI trees, page sources, and other platform observations are represented by harness or local utility tool artifact references rather than by MCP tool output.
 - Page knowledge is represented as a compact graph-like Markdown/JSON format owned by shared models so external generators can produce compatible files. `index.md` is a concise JSON index for page lookup; each `pages/*.md` file contains one JSON page node. Page identifiers are semantic descriptions without locators. Element locators are explicitly reference locators, not authoritative runtime truth.
 - Goal pre-planning is represented separately from execution results. It produces ordered key actions from a natural-language goal and loaded page knowledge, but it does not execute UI actions or verify runtime state.
-- OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration that `agent` and `tools` adapt into SDK `Agent`, `FunctionTool`, `MCPServer*`, and hosted tool objects. `OpenAIAgentsSettings.provider` is the serialized switch for choosing Azure OpenAI or GitHub Copilot provider construction at runtime.
+- OpenAI Agents SDK runtime objects are not stored directly in shared models. Models hold serializable configuration and harness function schemas that `agent` and `tools` adapt into SDK `Agent` and `FunctionTool` objects. `OpenAIAgentsSettings.provider` is the serialized switch for choosing Azure OpenAI or GitHub Copilot provider construction at runtime.
 - Skills are descriptive instruction bundles. CLI/shell execution is controlled separately by configured CLI tools or `ShellSettings`.
 - FSQ `.codex.yaml` cases are converted into `Task` descriptions for the agent loop. The parsed FSQ models preserve source metadata and command flow before rendering.
-- MCP tool validation settings are global runtime policy. Per-server `allowed_tools` and `blocked_tools` remain explicit operator controls and are combined with automatically detected invalid tools during MCP server startup.
+- Platform action parameter schemas come from `HarnessFunctionSchema` records returned by the active harness. There is no MCP schema validation fallback or MCP-derived tool schema source.

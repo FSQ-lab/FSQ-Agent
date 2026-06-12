@@ -181,7 +181,7 @@ class VerificationEvidenceBuilder:
         return self._preview(str(value))
 
     def _tool_origin(self, tool_name: str, explicit_origin: Any) -> str:
-        if explicit_origin in {"mcp", "local", "hosted", "shell", "unknown"}:
+        if explicit_origin in {"harness", "local", "shell", "unknown"}:
             return str(explicit_origin)
         if tool_name == "shell":
             return "shell"
@@ -189,7 +189,7 @@ class VerificationEvidenceBuilder:
             return "local"
         if tool_name == "unknown":
             return "unknown"
-        return "mcp"
+        return "harness"
 
 
 VERIFICATION_AGENT_INSTRUCTIONS = """You are an evidence-based automation result verifier.

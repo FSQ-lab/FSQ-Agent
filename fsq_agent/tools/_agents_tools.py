@@ -131,7 +131,7 @@ class AgentsToolFactory:
                 name="wait_ms",
                 description=(
                     "Wait without touching or changing the UI. Use this for FSQ performActions pause steps "
-                    "and page-load delays instead of appium gestures such as scroll or long_press."
+                    "and page-load delays instead of platform gestures such as scroll or long_press."
                 ),
                 params_json_schema=_WaitArgs.model_json_schema(),
                 on_invoke_tool=self._wait_ms,

@@ -58,19 +58,19 @@ def test_load_settings_rejects_non_empty_unmarked_workspace(tmp_path: Path) -> N
         load_settings(config_path)
 
 
-def test_load_settings_accepts_mcp_tool_validation_policy(tmp_path: Path) -> None:
+def test_load_settings_accepts_harness_settings(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
-mcp_tool_validation:
-  enabled: true
-  invalid_tool_policy: fail_fast
-  strict_schema: false
-  unsupported_schema_keywords:
-    - propertyNames
-  fail_when_all_tools_filtered: false
+harness:
+  platform: android
+  android:
+    backend: uiautomator2
+    app_id: com.example.app
+    serial: emulator-5554
+    enable_ai_assertions: true
 """,
         ),
         encoding="utf-8",
@@ -78,10 +78,11 @@ mcp_tool_validation:
 
     settings = load_settings(config_path)
 
-    assert settings.mcp_tool_validation.invalid_tool_policy == "fail_fast"
-    assert settings.mcp_tool_validation.strict_schema is False
-    assert settings.mcp_tool_validation.unsupported_schema_keywords == ["propertyNames"]
-    assert settings.mcp_tool_validation.fail_when_all_tools_filtered is False
+    assert settings.harness.platform == "android"
+    assert settings.harness.android.backend == "uiautomator2"
+    assert settings.harness.android.app_id == "com.example.app"
+    assert settings.harness.android.serial == "emulator-5554"
+    assert settings.harness.android.enable_ai_assertions is True
 
 
 def test_load_settings_accepts_runtime_secret_allowlist(tmp_path: Path) -> None:
@@ -268,24 +269,15 @@ openai_agents:
     assert settings.openai_agents.local_tool_output.full_output_max_chars == 40000
 
 
-def test_load_settings_accepts_lifecycle_controller(tmp_path: Path) -> None:
+def test_load_settings_uses_default_harness(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        _base_config(
-            tmp_path,
-            """
-lifecycle:
-  controller: appium_android
-  options: {}
-""",
-        ),
-        encoding="utf-8",
-    )
+    config_path.write_text(_base_config(tmp_path), encoding="utf-8")
 
     settings = load_settings(config_path)
 
-    assert settings.lifecycle.controller == "appium_android"
-    assert settings.lifecycle.options == {}
+    assert settings.harness.platform == "android"
+    assert settings.harness.android.backend == "uiautomator2"
+    assert settings.harness.android.app_id is None
 
 
 def test_validate_runtime_settings_requires_api_key_when_enabled(tmp_path: Path) -> None:

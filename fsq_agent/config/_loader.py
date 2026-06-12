@@ -129,6 +129,16 @@ def validate_runtime_settings(settings: Settings) -> None:
             "Azure OpenAI API key environment variable still contains a placeholder value.",
             context={"api_key_env": settings.openai_agents.api_key_env},
         )
+    if settings.harness.platform != "android":
+        raise ConfigurationError(
+            "Unsupported harness platform.",
+            context={"platform": settings.harness.platform, "supported": ["android"]},
+        )
+    if settings.harness.android.backend != "uiautomator2":
+        raise ConfigurationError(
+            "Unsupported Android harness backend.",
+            context={"backend": settings.harness.android.backend, "supported": ["uiautomator2"]},
+        )
     if settings.shell.enabled:
         if settings.shell.mode == "allowlist" and not settings.shell.command_allowlist:
             raise ConfigurationError("Shell command allowlist cannot be empty when shell mode is allowlist.")

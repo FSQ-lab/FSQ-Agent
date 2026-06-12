@@ -44,10 +44,6 @@ def log_run_event(event: RunEvent, stream_format: str = "rich") -> None:
 def _event_logger(event: RunEvent):
     if event.type in {"tool_call_failed", "run_failed"}:
         return logger.error
-    if event.type == "step_completed" and event.payload.get("source") == "mcp_validation":
-        return logger.warning
-    if event.title.lower().startswith("mcp tool validation"):
-        return logger.warning
     return logger.info
 
 
