@@ -85,3 +85,64 @@ def test_core_evidence_report_generator_writes_markdown_and_json(tmp_path: Path)
     assert payload["steps"][1]["failure_category"] == "target_resolution_error"
     assert payload["events"][1]["event_type"] == "step_error"
     assert payload["artifacts"][0]["path"] == "artifacts/screenshots/step-2-finalize-failure.png"
+
+
+def test_core_evidence_report_preserves_ai_assertion_verdict_metadata(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "evidence-manifest.json"
+    bundle = EvidenceBundle(
+        bundle_id="run-ai-evidence",
+        run_id="run-ai",
+        manifest_path=manifest_path,
+        steps=[
+            RunnerStepResult(
+                step_id="step-ai",
+                status="passed",
+                phase_reports=[
+                    StepPhaseReport(
+                        step_id="step-ai",
+                        phase="invoke",
+                        status="passed",
+                        artifact_refs=[
+                            EvidenceArtifactRef(
+                                artifact_id="step-ai-invoke-assert-with-ai",
+                                kind="screenshot",
+                                path=Path("artifacts/screenshots/step-ai-invoke-assert-with-ai.png"),
+                                step_id="step-ai",
+                                phase="invoke",
+                            )
+                        ],
+                        metadata={
+                            "harness_metadata": {
+                                "prompt": "Verify the logo is visible.",
+                                "ai_assertion": {
+                                    "status": "passed",
+                                    "passed": True,
+                                    "explanation": "The logo is visible.",
+                                    "provider": "github_copilot",
+                                    "model": "gpt-5.5",
+                                    "latency_ms": 123,
+                                    "token_usage": {"input_tokens": 10, "output_tokens": 5},
+                                    "error": None,
+                                },
+                            }
+                        },
+                    )
+                ],
+            )
+        ],
+        artifacts=[],
+    )
+    manifest_path.write_text(json.dumps(bundle.model_dump(mode="json"), indent=2), encoding="utf-8")
+
+    artifact = CoreEvidenceReportGenerator().generate_from_manifest(manifest_path)
+
+    markdown = artifact.path.read_text(encoding="utf-8")
+    assert "## AI Assertions" in markdown
+    assert "The logo is visible." in markdown
+    assert "github_copilot" in markdown
+    assert "artifacts/screenshots/step-ai-invoke-assert-with-ai.png" in markdown
+    payload = json.loads((tmp_path / "core-report.json").read_text(encoding="utf-8"))
+    ai_assertion = payload["steps"][0]["phase_reports"][0]["metadata"]["harness_metadata"]["ai_assertion"]
+    assert ai_assertion["provider"] == "github_copilot"
+    assert ai_assertion["model"] == "gpt-5.5"
+    assert ai_assertion["token_usage"] == {"input_tokens": 10, "output_tokens": 5}

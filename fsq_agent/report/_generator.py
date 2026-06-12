@@ -10,10 +10,17 @@ from fsq_agent.report._failure_analysis import FailureAnalyzer
 
 
 class ReportGenerator:
-    def __init__(self, runs_dir: Path, evidence_bundler: EvidenceBundler | None = None) -> None:
+    def __init__(
+        self,
+        runs_dir: Path,
+        evidence_bundler: EvidenceBundler | None = None,
+        *,
+        secret_values: tuple[str, ...] | list[str] = (),
+    ) -> None:
         self.runs_dir = runs_dir
         self.evidence_bundler = evidence_bundler or EvidenceBundler(runs_dir)
         self.failure_analyzer = FailureAnalyzer()
+        self.secret_values = tuple(sorted({value for value in secret_values if value}, key=len, reverse=True))
 
     def generate(
         self,
@@ -41,15 +48,11 @@ class ReportGenerator:
         verification: VerificationResult,
     ) -> None:
         tool_calls = self._load_tool_calls(report_dir)
-        report_path.write_text(
-            self._render_markdown(task, steps, verification, tool_calls),
-            encoding="utf-8",
-        )
+        markdown = self._redact_text(self._render_markdown(task, steps, verification, tool_calls))
+        report_path.write_text(markdown, encoding="utf-8")
         json_path = report_dir / "report.json"
-        json_path.write_text(
-            json.dumps(self._build_json_report(report_dir, task, steps, verification, tool_calls), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        json_report = self._redact_value(self._build_json_report(report_dir, task, steps, verification, tool_calls))
+        json_path.write_text(json.dumps(json_report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def _build_json_report(
         self,
@@ -159,12 +162,12 @@ class ReportGenerator:
         return starts.pop(0) if starts else {}
 
     def _tool_origin(self, tool_name: str, explicit_origin: Any) -> str:
-        if explicit_origin in {"harness", "local", "shell", "unknown"}:
+        if explicit_origin in {"harness", "common", "runtime", "unknown"}:
             return str(explicit_origin)
-        if tool_name == "shell":
-            return "shell"
-        if tool_name in {"publish_progress", "run_cli_tool", "read_file", "write_file", "search_artifact", "read_artifact_slice", "submit_visual_assertion", "wait_ms"}:
-            return "local"
+        if tool_name in {"read_file", "write_file", "get_runtime_secret", "search_artifact", "read_artifact_slice", "wait_ms"}:
+            return "common"
+        if tool_name in {"read_knowledge_index", "read_knowledge_page"}:
+            return "runtime"
         if tool_name == "unknown":
             return "unknown"
         return "harness"
@@ -180,20 +183,16 @@ class ReportGenerator:
     ) -> ReportArtifact:
         fallback_path = report_dir / "report-fallback.json"
         try:
-            fallback_path.write_text(
-                json.dumps(
-                    {
-                        "run_id": run_id,
-                        "task_id": task.id,
-                        "status": verification.status,
-                        "summary": verification.summary,
-                        "error": str(error),
-                    },
-                    indent=2,
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
+            payload = self._redact_value(
+                {
+                    "run_id": run_id,
+                    "task_id": task.id,
+                    "status": verification.status,
+                    "summary": verification.summary,
+                    "error": str(error),
+                }
             )
+            fallback_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         except OSError as fallback_error:
             raise ReportGenerationError("Unable to generate report.", context={"run_id": run_id}) from fallback_error
         return ReportArtifact(
@@ -272,3 +271,20 @@ class ReportGenerator:
             lines.extend(f"- {diagnostic}" for diagnostic in verification.diagnostics)
             lines.append("")
         return "\n".join(lines)
+
+    def _redact_value(self, value: Any) -> Any:
+        if not self.secret_values:
+            return value
+        if isinstance(value, dict):
+            return {key: self._redact_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._redact_value(item) for item in value]
+        if isinstance(value, str):
+            return self._redact_text(value)
+        return value
+
+    def _redact_text(self, text: str) -> str:
+        redacted = text
+        for secret_value in self.secret_values:
+            redacted = redacted.replace(secret_value, "***")
+        return redacted

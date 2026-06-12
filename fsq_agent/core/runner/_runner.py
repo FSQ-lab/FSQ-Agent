@@ -75,6 +75,7 @@ class StepRunner:
                     phase="invoke",
                     status=action_result.status,
                     artifact_refs=self._action_result_artifacts(run_id, step, action_result, "invoke"),
+                    metadata=self._action_result_metadata(action_result),
                 )
             )
         except Exception as exc:  # noqa: BLE001 - runner converts phase exceptions into structured results.
@@ -252,6 +253,14 @@ class StepRunner:
                 },
             )
         return refs
+
+    def _action_result_metadata(self, action_result: HarnessActionResult) -> dict[str, object]:
+        metadata: dict[str, object] = {}
+        if action_result.metadata:
+            metadata["harness_metadata"] = action_result.metadata
+        if action_result.output is not None:
+            metadata["harness_output"] = action_result.output
+        return metadata
 
     def _is_failed_result(
         self,

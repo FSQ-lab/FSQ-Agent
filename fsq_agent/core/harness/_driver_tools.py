@@ -64,6 +64,11 @@ def _android_driver_tool(
             "Unknown Android driver tool action.",
             context={"fsq_action_name": fsq_action_name},
         )
+    if action_definition.owner != "driver":
+        raise ConfigurationError(
+            "Android action is not driver-owned.",
+            context={"fsq_action_name": fsq_action_name, "owner": action_definition.owner},
+        )
 
     def decorate(method: _F) -> _F:
         method_name = getattr(method, "__name__", "")

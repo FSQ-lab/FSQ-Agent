@@ -8,7 +8,6 @@ from fsq_agent.models import (
     AndroidAssertNotVisibleParams,
     AndroidAssertStateParams,
     AndroidAssertVisibleParams,
-    AndroidAssertWithAIParams,
     AndroidInputTextParams,
     AndroidKillAppParams,
     AndroidLaunchAppParams,
@@ -164,9 +163,6 @@ class UiAutomator2AndroidDriver:
             if self._has_locator(element):
                 return self._passed({"exists": True})
         return self._configuration_error("assert requires a text or supported element state assertion.")
-
-    def assert_with_ai(self, params: AndroidAssertWithAIParams) -> dict[str, object]:
-        return self._configuration_error("assertWithAI is not implemented for the uiautomator2 backend yet.")
 
     def screenshot(self) -> bytes:
         image = self.device.screenshot(format="pillow")

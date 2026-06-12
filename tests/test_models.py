@@ -1,6 +1,7 @@
 import pytest
 
-from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, HarnessSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, ShellSettings, SkillConfig, Task, VerificationCriterion, VerificationSettings
+import fsq_agent.models as models
+from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, HarnessSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, SkillConfig, Task, VerificationCriterion, VerificationSettings
 
 
 def test_task_defaults() -> None:
@@ -97,12 +98,13 @@ def test_skill_config_defaults_to_markdown() -> None:
     assert skill.required is False
 
 
-def test_shell_settings_defaults_to_disabled_allowlist() -> None:
-    settings = ShellSettings()
-
-    assert settings.enabled is False
-    assert settings.mode == "allowlist"
-    assert settings.command_allowlist == []
+def test_models_public_surface_does_not_export_removed_tool_execution_settings() -> None:
+    assert "ShellSettings" not in models.__all__
+    assert "CLIToolConfig" not in models.__all__
+    assert "DeprecatedToolSettings" not in models.__all__
+    assert not hasattr(models, "ShellSettings")
+    assert not hasattr(models, "CLIToolConfig")
+    assert not hasattr(models, "DeprecatedToolSettings")
 
 
 def test_local_tool_output_rejects_artifact_subdir_escape() -> None:

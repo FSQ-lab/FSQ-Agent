@@ -5,8 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsq_agent.agent import _copilot_provider as copilot
-from fsq_agent.models import ConfigurationError
+from fsq_agent.config import Settings
+from fsq_agent.models import ConfigurationError, OpenAIAgentsSettings
+from fsq_agent.providers import _github_copilot as copilot
 
 
 class _AsyncOpenAI:
@@ -14,22 +15,25 @@ class _AsyncOpenAI:
         self.kwargs = kwargs
 
 
-def test_build_copilot_async_openai_client_uses_plan_endpoint(tmp_path) -> None:
+def test_build_github_copilot_client_config_uses_plan_endpoint(tmp_path) -> None:
     token_cache_path = tmp_path / "auth" / "github-copilot-token.json"
     token_cache_path.parent.mkdir()
     token_cache_path.write_text(json.dumps({"access_token": "ghu_test", "expires_at": time.time() + 3600}), encoding="utf-8")
+    settings = Settings(openai_agents=OpenAIAgentsSettings(provider="github_copilot", model="gpt-5.5"))
+    settings.workspace.root_dir = tmp_path
     with patch.object(copilot, "_get_copilot_plan", return_value="business") as get_plan, patch.object(
         copilot,
         "_get_copilot_token",
         return_value=copilot.CopilotToken(token="copilot-token", expires_at=9999999999),
     ) as get_token:
-        client = copilot.build_copilot_async_openai_client(_AsyncOpenAI, tmp_path)
+        config = copilot.build_github_copilot_client_config(settings)
 
     get_plan.assert_called_once_with("ghu_test")
     get_token.assert_called_once_with("ghu_test")
-    assert client.kwargs["api_key"] == "copilot-token"
-    assert client.kwargs["base_url"] == "https://api.business.githubcopilot.com"
-    assert client.kwargs["default_headers"]["copilot-integration-id"] == "vscode-chat"
+    assert config.api_key == "copilot-token"
+    assert config.base_url == "https://api.business.githubcopilot.com"
+    assert config.default_headers["copilot-integration-id"] == "vscode-chat"
+    assert config.model == "gpt-5.5"
 
 
 def test_load_cached_token_returns_none_when_expired(tmp_path) -> None:

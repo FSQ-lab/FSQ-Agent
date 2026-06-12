@@ -199,6 +199,84 @@ def test_recent_tool_output_filter_does_not_artifact_sensitive_outputs() -> None
     assert artifact_store.writes == []
 
 
+def test_recent_tool_output_filter_omits_wrapped_sensitive_history_preview() -> None:
+    from agents.run_config import ModelInputData
+
+    artifact_store = _FakeArtifactStore()
+    input_filter = _RecentToolOutputInputFilter(
+        sdk_filter=None,
+        recent_tool_outputs=0,
+        max_output_chars=1,
+        preview_chars=20,
+        trimmable_tools=None,
+        artifact_store=artifact_store,  # type: ignore[arg-type]
+    )
+    output = (
+        '{"tool_name":"get_runtime_secret","model_output":"full","result":'
+        '{"tool_name":"get_runtime_secret","status":"success","output":'
+        '{"type":"runtime_secret","name":"TEST_ACCOUNT_PASSWORD","value":"secret-password","sensitive":true},'
+        '"sensitive":true}}'
+    )
+    data = type(
+        "Data",
+        (),
+        {
+            "model_data": ModelInputData(
+                input=[
+                    {"type": "function_call", "call_id": "call-1", "name": "get_runtime_secret"},
+                    {"type": "function_call_output", "call_id": "call-1", "output": output},
+                ],
+                instructions="instructions",
+            )
+        },
+    )()
+
+    filtered = input_filter(data)
+
+    assert artifact_store.writes == []
+    assert "secret-password" not in filtered.input[1]["output"]
+    assert filtered.input[1]["output"] == "[Sensitive historical get_runtime_secret output omitted.]"
+
+
+def test_recent_tool_output_filter_omits_small_wrapped_sensitive_history() -> None:
+    from agents.run_config import ModelInputData
+
+    artifact_store = _FakeArtifactStore()
+    input_filter = _RecentToolOutputInputFilter(
+        sdk_filter=None,
+        recent_tool_outputs=0,
+        max_output_chars=100000,
+        preview_chars=20,
+        trimmable_tools=None,
+        artifact_store=artifact_store,  # type: ignore[arg-type]
+    )
+    output = (
+        '{"tool_name":"get_runtime_secret","model_output":"full","result":'
+        '{"tool_name":"get_runtime_secret","status":"success","output":'
+        '{"type":"runtime_secret","name":"TEST_ACCOUNT_PASSWORD","value":"secret-password","sensitive":true},'
+        '"sensitive":true}}'
+    )
+    data = type(
+        "Data",
+        (),
+        {
+            "model_data": ModelInputData(
+                input=[
+                    {"type": "function_call", "call_id": "call-1", "name": "get_runtime_secret"},
+                    {"type": "function_call_output", "call_id": "call-1", "output": output},
+                ],
+                instructions="instructions",
+            )
+        },
+    )()
+
+    filtered = input_filter(data)
+
+    assert artifact_store.writes == []
+    assert "secret-password" not in filtered.input[1]["output"]
+    assert filtered.input[1]["output"] == "[Sensitive historical get_runtime_secret output omitted.]"
+
+
 @pytest.mark.asyncio
 async def test_agent_run_emits_and_persists_live_events(tmp_path: Path) -> None:
     reporter = _Reporter()

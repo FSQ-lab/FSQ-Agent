@@ -42,7 +42,7 @@ def load_settings(path: str | Path | None = None, workspace: str | Path | None =
         raise ConfigurationError("Invalid configuration.", context={"errors": exc.errors()}) from exc
     if workspace is not None:
         settings.workspace.root_dir = Path(workspace)
-    _normalize_openai_provider_settings(settings)
+    _normalize_openai_provider_settings(settings, data)
     base_dir = config_path.parent if config_path is not None else Path.cwd()
     resolve_runtime_paths(settings, base_dir)
     return settings
@@ -92,8 +92,10 @@ def _strip_env_value(value: str) -> str:
     return value
 
 
-def _normalize_openai_provider_settings(settings: Settings) -> None:
+def _normalize_openai_provider_settings(settings: Settings, data: dict[str, Any]) -> None:
     if settings.openai_agents.provider == "github_copilot":
+        if not _openai_model_configured(data):
+            settings.openai_agents.model = "gpt-5.5"
         return
     base_url = settings.openai_agents.base_url.strip()
     if "/openai/responses" in base_url:
@@ -105,14 +107,20 @@ def _normalize_openai_provider_settings(settings: Settings) -> None:
     settings.openai_agents.base_url = base_url
 
 
+def _openai_model_configured(data: dict[str, Any]) -> bool:
+    openai_agents = data.get("openai_agents")
+    return isinstance(openai_agents, dict) and "model" in openai_agents
+
+
 def validate_runtime_settings(settings: Settings) -> None:
     _validate_openai_provider_settings(settings)
     _validate_android_harness_settings(settings)
-    _validate_shell_settings(settings)
 
 
-def validate_strict_core_settings(settings: Settings) -> None:
+def validate_strict_core_settings(settings: Settings, requires_ai_assertion: bool = False) -> None:
     _validate_android_harness_settings(settings)
+    if requires_ai_assertion:
+        _validate_openai_provider_settings(settings)
 
 
 def _validate_openai_provider_settings(settings: Settings) -> None:
@@ -152,20 +160,3 @@ def _validate_android_harness_settings(settings: Settings) -> None:
             "Unsupported Android harness backend.",
             context={"backend": settings.harness.android.backend, "supported": ["uiautomator2"]},
         )
-
-
-def _validate_shell_settings(settings: Settings) -> None:
-    if settings.shell.enabled:
-        if settings.shell.mode == "allowlist" and not settings.shell.command_allowlist:
-            raise ConfigurationError("Shell command allowlist cannot be empty when shell mode is allowlist.")
-        if not settings.shell.working_dir.exists() or not settings.shell.working_dir.is_dir():
-            raise ConfigurationError(
-                "Shell working directory must exist.",
-                context={"working_dir": str(settings.shell.working_dir)},
-            )
-        workspace_root = settings.workspace.root_dir
-        if workspace_root is None or workspace_root not in (settings.shell.working_dir, *settings.shell.working_dir.parents):
-            raise ConfigurationError(
-                "Shell working directory must stay inside the fsq-agent workspace.",
-                context={"working_dir": str(settings.shell.working_dir), "workspace": str(workspace_root)},
-            )

@@ -1,4 +1,5 @@
 import time
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from fsq_agent.models import KnowledgeBundle, RunEvent, RunEventSink, Task, Task
 from fsq_agent.observation import ExecutionLogger
 from fsq_agent.report import ReportGenerator
 from fsq_agent.skills import SkillLoader
-from fsq_agent.tools import AgentsToolFactory, CLIRunner, FileOps
+from fsq_agent.tools import AgentsCommonToolAdapter, CommonToolRegistry, DefaultCommonToolProvider, FileOps
 
 from fsq_agent.agent._openai_runtime import OpenAIAgentsRuntime
 from fsq_agent.agent._events import RunEventEmitter
@@ -42,22 +43,23 @@ class FsqAgent:
     def from_settings(cls, settings: Settings) -> "FsqAgent":
         output_root = settings.output.root_dir
         pre_plan_knowledge_dir = settings.pre_plan.knowledge_dir or settings.knowledge_dir
-        cli_runner = CLIRunner(settings.cli_tools, cwd=settings.workspace.root_dir)
         file_ops = FileOps(
             read_roots=[settings.cases.dir, settings.knowledge_dir, pre_plan_knowledge_dir, output_root],
             write_root=output_root / "artifacts",
         )
-        tool_factory = AgentsToolFactory(
-            cli_runner,
+        common_tool_provider = DefaultCommonToolProvider(
             file_ops,
-            settings.shell,
-            settings.openai_agents.local_tool_output,
-            settings.output.runs_dir,
-            settings.runtime_secrets,
+            runtime_secret_settings=settings.runtime_secrets,
+            local_tool_output_settings=settings.openai_agents.local_tool_output,
+            runs_dir=settings.output.runs_dir,
+        )
+        common_tool_adapter = AgentsCommonToolAdapter(
+            CommonToolRegistry.from_providers([common_tool_provider]),
+            local_tool_output_settings=settings.openai_agents.local_tool_output,
         )
         knowledge_loader = PrivateKnowledgeLoader(settings.knowledge_dir)
         skill_loader = SkillLoader(settings.knowledge_dir / "skills")
-        reporter = ReportGenerator(settings.output.runs_dir)
+        reporter = ReportGenerator(settings.output.runs_dir, secret_values=cls._runtime_secret_values(settings))
         event_logger = ExecutionLogger(settings.output.runs_dir)
         return cls(
             settings,
@@ -65,9 +67,14 @@ class FsqAgent:
             reporter,
             knowledge_loader,
             skill_loader,
-            OpenAIAgentsRuntime(settings, tool_factory),
+            OpenAIAgentsRuntime(settings, common_tool_adapter),
             event_logger,
         )
+
+    @staticmethod
+    def _runtime_secret_values(settings: Settings) -> tuple[str, ...]:
+        values = [os.getenv(name) for name in settings.runtime_secrets.allowed_env_names]
+        return tuple(sorted({value for value in values if value}, key=len, reverse=True))
 
     async def run(self, task: Task, event_sink: RunEventSink | None = None) -> TaskResult:
         started = time.perf_counter()

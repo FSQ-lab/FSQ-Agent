@@ -3,8 +3,10 @@ from pydantic import BaseModel, ValidationError
 from fsq_agent.core.evidence import ArtifactStore
 from fsq_agent.core.harness._android_driver import AndroidDriverInterface
 from fsq_agent.core.harness._driver_tools import _discover_driver_function_schemas
+from fsq_agent.core.harness._interface import AIAssertionEvaluatorProtocol
 from fsq_agent.models import (
     ANDROID_ACTION_DEFINITIONS_BY_NAME,
+    AIAssertionRequest,
     ExecutableStep,
     FailureCategory,
     HarnessActionResult,
@@ -35,9 +37,11 @@ class AndroidHarness:
         self,
         driver: AndroidDriverInterface,
         artifact_store: ArtifactStore | None = None,
+        ai_assertion_evaluator: AIAssertionEvaluatorProtocol | None = None,
     ) -> None:
         self.driver = driver
         self.artifact_store = artifact_store
+        self.ai_assertion_evaluator = ai_assertion_evaluator
 
     def get_context(self) -> HarnessContext:
         context = self.driver.context()
@@ -55,11 +59,14 @@ class AndroidHarness:
         backend = getattr(self.driver, "backend", None)
         if isinstance(backend, str):
             metadata["backend"] = backend
-        return _discover_driver_function_schemas(
+        schemas = _discover_driver_function_schemas(
             self.driver,
             platform="android",
             metadata=metadata,
         )
+        if self.ai_assertion_evaluator is not None:
+            schemas.append(self._assert_with_ai_schema(metadata))
+        return schemas
 
     def before_action(self, step: ExecutableStep, context: HarnessContext) -> None:
         return None
@@ -69,6 +76,13 @@ class AndroidHarness:
             return self._assert_with_ai(step, context)
         action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(step.action_name)
         if action_definition is not None:
+            if action_definition.owner != "driver":
+                return HarnessActionResult(
+                    status="failed",
+                    action_name=step.action_name,
+                    failure_category="configuration_error",
+                    error_message=f"Unsupported Android harness-owned action: {step.action_name}",
+                )
             params = self._validate_params(step, action_definition.params_model)
             if isinstance(params, HarnessActionResult):
                 return params
@@ -101,33 +115,117 @@ class AndroidHarness:
         if self.artifact_store is None:
             raise RuntimeError("Artifact capture requires an ArtifactStore.")
         if kind == "screenshot":
-            return self.artifact_store.write_bytes(
+            return self._to_harness_artifact_ref(self.artifact_store.write_bytes(
                 kind="screenshot",
                 step_id=step_id,
                 phase=phase,
                 name=reason,
                 data=self.driver.screenshot(),
-            )
+            ))
         if kind == "ui_tree":
-            return self.artifact_store.write_json(
+            return self._to_harness_artifact_ref(self.artifact_store.write_json(
                 kind="ui_tree",
                 step_id=step_id,
                 phase=phase,
                 name=reason,
                 payload=self.driver.ui_tree(),
-            )
+            ))
         raise RuntimeError(f"Unsupported Android artifact kind: {kind}")
+
+    def _to_harness_artifact_ref(self, ref: object) -> HarnessArtifactRef:
+        if isinstance(ref, HarnessArtifactRef):
+            return ref
+        data = ref.model_dump()  # type: ignore[attr-defined]
+        return HarnessArtifactRef(
+            artifact_id=data["artifact_id"],
+            kind=data["kind"],
+            path=data["path"],
+            mime_type=data.get("mime_type"),
+            created_at=data["created_at"],
+            metadata=dict(data.get("metadata") or {}),
+        )
 
     def _assert_with_ai(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
         action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"]
         params = self._validate_params(step, action_definition.params_model)
         if isinstance(params, HarnessActionResult):
             return params
-        return HarnessActionResult(
-            status="failed",
+        if self.ai_assertion_evaluator is None:
+            return HarnessActionResult(
+                status="failed",
+                action_name=step.action_name,
+                failure_category="configuration_error",
+                error_message="assertWithAI requires an AI assertion evaluator.",
+            )
+        try:
+            screenshot_ref = self.capture_artifact(
+                kind="screenshot",
+                reason="assert-with-ai",
+                context=context,
+                step_id=step.step_id,
+                phase="invoke",
+            )
+        except Exception as exc:
+            return HarnessActionResult(
+                status="failed",
+                action_name=step.action_name,
+                failure_category="artifact_error",
+                error_message=str(exc) or exc.__class__.__name__,
+            )
+        request = AIAssertionRequest(
+            platform="android",
+            prompt=params.prompt,
+            screenshot_path=(self.artifact_store.run_dir / screenshot_ref.path) if self.artifact_store else screenshot_ref.path,
+            screenshot_artifact_ref=screenshot_ref,
+            ui_context=context.model_dump(mode="json"),
+            step_id=step.step_id,
             action_name=step.action_name,
-            failure_category="configuration_error",
-            error_message="assertWithAI is not available in deterministic strict-core execution.",
+            metadata=step.metadata,
+        )
+        result = self.ai_assertion_evaluator.evaluate(request)
+        status = "passed" if result.passed else "failed"
+        failure_category: FailureCategory | None = None
+        if not result.passed:
+            failure_category = "assertion_error" if result.status == "failed" else "harness_error"
+        artifact_refs = self._unique_artifact_refs([screenshot_ref, *result.artifact_refs])
+        return HarnessActionResult(
+            status=status,
+            action_name=step.action_name,
+            output=result.model_dump(mode="json"),
+            artifact_refs=artifact_refs,
+            failure_category=failure_category,
+            error_message=result.error,
+            metadata={
+                "ai_assertion": result.model_dump(mode="json"),
+                "prompt": params.prompt,
+                "optional": params.optional,
+                "owner": "harness",
+            },
+        )
+
+    def _unique_artifact_refs(self, refs: list[HarnessArtifactRef]) -> list[HarnessArtifactRef]:
+        seen: set[str] = set()
+        unique: list[HarnessArtifactRef] = []
+        for ref in refs:
+            if ref.artifact_id in seen:
+                continue
+            seen.add(ref.artifact_id)
+            unique.append(ref)
+        return unique
+
+    def _assert_with_ai_schema(self, metadata: dict[str, object]) -> HarnessFunctionSchema:
+        action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"]
+        schema_metadata = dict(metadata)
+        schema_metadata["owner"] = "harness"
+        return HarnessFunctionSchema(
+            name=action_definition.driver_method,
+            description="Evaluate an explicit Android visual assertion with a fresh screenshot and the configured AI evaluator.",
+            params_json_schema=action_definition.params_model.model_json_schema(),
+            strict=True,
+            platform="android",
+            driver_method=action_definition.driver_method,
+            fsq_action_name=action_definition.fsq_action_name,
+            metadata=schema_metadata,
         )
 
     def classify_error(self, error: BaseException, phase: StepPhase, step: ExecutableStep) -> FailureCategory:

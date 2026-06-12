@@ -78,6 +78,23 @@ class CoreEvidenceReportGenerator:
                     f"{step.get('error_message') or 'No error message.'}"
                 )
 
+        ai_assertions = self._ai_assertions(report)
+        if ai_assertions:
+            lines.extend(["", "## AI Assertions", ""])
+            for assertion in ai_assertions:
+                verdict = assertion.get("status") or ("passed" if assertion.get("passed") else "failed")
+                provider = assertion.get("provider") or "unknown provider"
+                model = assertion.get("model") or "unknown model"
+                prompt = assertion.get("prompt") or ""
+                explanation = assertion.get("explanation") or assertion.get("error") or "No explanation."
+                lines.append(
+                    f"- `{assertion['step_id']}` `{verdict}` via `{provider}`/`{model}`: {explanation}"
+                )
+                if prompt:
+                    lines.append(f"  Prompt: {prompt}")
+                for artifact_path in assertion.get("artifact_paths", []):
+                    lines.append(f"  Artifact: `{artifact_path}`")
+
         lines.extend(["", "## Events", ""])
         for event in report["events"]:
             phase = f"/{event['phase']}" if event.get("phase") else ""
@@ -92,3 +109,24 @@ class CoreEvidenceReportGenerator:
             lines.append("No artifacts recorded.")
         lines.append("")
         return "\n".join(lines)
+
+    def _ai_assertions(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+        assertions: list[dict[str, Any]] = []
+        for step in report["steps"]:
+            for phase_report in step.get("phase_reports", []):
+                metadata = phase_report.get("metadata") or {}
+                harness_metadata = metadata.get("harness_metadata") or {}
+                ai_assertion = harness_metadata.get("ai_assertion")
+                if not isinstance(ai_assertion, dict):
+                    continue
+                artifact_paths = [artifact.get("path") for artifact in phase_report.get("artifact_refs", []) if artifact.get("path")]
+                assertions.append(
+                    {
+                        "step_id": step.get("step_id"),
+                        "phase": phase_report.get("phase"),
+                        "prompt": harness_metadata.get("prompt"),
+                        "artifact_paths": artifact_paths,
+                        **ai_assertion,
+                    }
+                )
+        return assertions

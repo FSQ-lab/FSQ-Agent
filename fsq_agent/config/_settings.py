@@ -5,17 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from fsq_agent.models import (
     AgentSettings,
     CaseSettings,
-    CLIToolConfig,
     HarnessSettings,
     OpenAIAgentsSettings,
     OutputSettings,
     PrePlanSettings,
     RuntimeSecretSettings,
-    ShellSettings,
     SkillConfig,
     VerificationSettings,
     WorkspaceSettings,
 )
+from fsq_agent.models._settings import DeprecatedToolSettings
 
 
 class Settings(BaseModel):
@@ -28,8 +27,8 @@ class Settings(BaseModel):
     runtime_secrets: RuntimeSecretSettings = Field(default_factory=RuntimeSecretSettings)
     workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
     cases: CaseSettings = Field(default_factory=CaseSettings)
-    cli_tools: list[CLIToolConfig] = Field(default_factory=list)
-    shell: ShellSettings = Field(default_factory=ShellSettings)
+    cli_tools: list[DeprecatedToolSettings] = Field(default_factory=list, exclude=True)
+    shell: DeprecatedToolSettings = Field(default_factory=DeprecatedToolSettings, exclude=True)
     skills: list[SkillConfig] = Field(default_factory=list)
     output: OutputSettings = Field(default_factory=OutputSettings)
     pre_plan: PrePlanSettings = Field(default_factory=PrePlanSettings)

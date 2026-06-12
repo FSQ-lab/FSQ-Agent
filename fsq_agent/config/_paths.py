@@ -96,11 +96,3 @@ def resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> N
     if prompt.custom_instructions_path is not None:
         prompt.custom_instructions_path = _resolve_path(prompt.custom_instructions_path, config_base)
 
-    shell_dir = settings.shell.working_dir
-    settings.shell.working_dir = workspace_root if shell_dir == Path(".") else _resolve_path(shell_dir, workspace_root)
-    _ensure_inside(
-        settings.shell.working_dir,
-        workspace_root,
-        "Shell working directory must be inside the fsq-agent workspace.",
-    )
-    settings.shell.working_dir.mkdir(parents=True, exist_ok=True)

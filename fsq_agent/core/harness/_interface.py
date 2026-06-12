@@ -1,6 +1,8 @@
 from typing import Protocol, runtime_checkable
 
 from fsq_agent.models import (
+    AIAssertionRequest,
+    AIAssertionResult,
     ExecutableStep,
     FailureCategory,
     HarnessActionResult,
@@ -9,6 +11,12 @@ from fsq_agent.models import (
     HarnessFunctionSchema,
     StepPhase,
 )
+
+
+@runtime_checkable
+class AIAssertionEvaluatorProtocol(Protocol):
+    def evaluate(self, request: AIAssertionRequest) -> AIAssertionResult:
+        ...
 
 
 @runtime_checkable

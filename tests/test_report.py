@@ -70,6 +70,51 @@ def test_report_generator_writes_markdown_and_json(tmp_path: Path) -> None:
     assert artifact.evidence_manifest_path.exists()
 
 
+def test_report_generator_redacts_configured_secret_values(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-secret"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "tool_call_started",
+                        "sequence": 1,
+                        "timestamp": "2026-05-09T00:00:00Z",
+                        "tool_call_id": "call-1",
+                        "tool_name": "input_text",
+                        "tool_arguments": {"text": "super-secret"},
+                        "payload": {"tool_origin": "harness"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "tool_call_completed",
+                        "sequence": 2,
+                        "timestamp": "2026-05-09T00:00:01Z",
+                        "tool_call_id": "call-1",
+                        "tool_output_preview": "typed super-secret",
+                        "payload": {"artifact_path": None},
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    steps = [StepResult(step_id=1, status="success", actual_outcome="used super-secret", tool_name="openai_agents.runner")]
+    verification = VerificationResult(status="success", summary="super-secret hidden")
+
+    ReportGenerator(tmp_path, secret_values=("super-secret",)).generate("run-secret", _task(), steps, verification)
+
+    markdown = (run_dir / "report.md").read_text(encoding="utf-8")
+    payload = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    assert "super-secret" not in markdown
+    assert "super-secret" not in json.dumps(payload, ensure_ascii=False)
+    assert payload["execution"]["runtime_steps"][0]["outcome"] == "used ***"
+    assert payload["execution"]["tool_calls"][0]["arguments"] == {"text": "***"}
+    assert payload["execution"]["tool_calls"][0]["output_preview"] == "typed ***"
+
+
 def test_report_generator_summarizes_tool_calls_from_events(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-events"
     run_dir.mkdir(parents=True)
@@ -185,7 +230,7 @@ def test_report_generator_classifies_conflicting_key_identity_diagnostic(tmp_pat
     assert "Failure Classification: `tool_usage_error + semantic_action_unmet`" in artifact.path.read_text(encoding="utf-8")
 
 
-def test_report_generator_summarizes_local_tool_calls_without_call_id(tmp_path: Path) -> None:
+def test_report_generator_summarizes_common_tool_calls_without_call_id(tmp_path: Path) -> None:
     run_dir = tmp_path / "run-local-events"
     run_dir.mkdir(parents=True)
     (run_dir / "events.jsonl").write_text(
@@ -198,7 +243,7 @@ def test_report_generator_summarizes_local_tool_calls_without_call_id(tmp_path: 
                         "timestamp": "2026-05-09T00:00:00Z",
                         "tool_name": "search_artifact",
                         "tool_arguments": {"query": "Settings"},
-                        "payload": {"tool_origin": "local"},
+                            "payload": {"tool_origin": "common"},
                     }
                 ),
                 json.dumps(
@@ -208,7 +253,7 @@ def test_report_generator_summarizes_local_tool_calls_without_call_id(tmp_path: 
                         "timestamp": "2026-05-09T00:00:01Z",
                         "tool_name": "search_artifact",
                         "tool_output_preview": "match",
-                        "payload": {"tool_origin": "local", "artifact_path": "output/runs/run/artifacts/tools/a.json"},
+                            "payload": {"tool_origin": "common", "artifact_path": "output/runs/run/artifacts/tools/a.json"},
                     }
                 ),
             ]
@@ -220,7 +265,7 @@ def test_report_generator_summarizes_local_tool_calls_without_call_id(tmp_path: 
 
     payload = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     assert payload["execution"]["tool_calls"][0]["tool_name"] == "search_artifact"
-    assert payload["execution"]["tool_calls"][0]["tool_origin"] == "local"
+    assert payload["execution"]["tool_calls"][0]["tool_origin"] == "common"
     assert payload["execution"]["tool_calls"][0]["artifact_path"] == "output/runs/run/artifacts/tools/a.json"
 
 

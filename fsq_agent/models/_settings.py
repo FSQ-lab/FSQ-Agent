@@ -116,6 +116,10 @@ class ShellSettings(BaseModel):
     working_dir: Path = Path(".")
 
 
+class DeprecatedToolSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
 class WorkspaceSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

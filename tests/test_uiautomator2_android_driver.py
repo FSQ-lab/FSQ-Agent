@@ -374,12 +374,15 @@ def test_uiautomator2_driver_reports_unimplemented_backend_operations() -> None:
     driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=FakeDevice())
 
     perform_result = driver.perform_actions({"actions": []})
-    ai_result = driver.assert_with_ai({"prompt": "Verify page"})
 
     assert perform_result["status"] == "failed"
     assert perform_result["failure_category"] == "configuration_error"
-    assert ai_result["status"] == "failed"
-    assert ai_result["failure_category"] == "configuration_error"
+
+
+def test_uiautomator2_driver_does_not_own_ai_assertion() -> None:
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=FakeDevice())
+
+    assert not hasattr(driver, "assert_with_ai")
 
 
 def test_uiautomator2_driver_raises_configuration_error_when_dependency_missing(monkeypatch) -> None:

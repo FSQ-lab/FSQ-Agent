@@ -2,6 +2,7 @@ from fsq_agent.core.evidence import ArtifactStore, EvidenceRecorder
 from fsq_agent.core.harness import (
     AndroidDriverInterface,
     AndroidHarness,
+    AIAssertionEvaluatorProtocol,
     HarnessInterface,
     UiAutomator2AndroidDriver,
 )
@@ -10,6 +11,7 @@ from fsq_agent.core.runner import StepRunner, StepSequenceRunner
 __all__ = [
     "AndroidDriverInterface",
     "AndroidHarness",
+    "AIAssertionEvaluatorProtocol",
     "ArtifactStore",
     "EvidenceRecorder",
     "HarnessInterface",

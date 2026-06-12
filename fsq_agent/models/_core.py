@@ -302,6 +302,7 @@ class AndroidActionDefinition:
     driver_method: str
     params_model: type[BaseModel]
     step_kind: ExecutableStepKind
+    owner: Literal["driver", "harness"] = "driver"
 
 
 ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
@@ -316,7 +317,7 @@ ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
     AndroidActionDefinition("assertNotVisible", "assert_not_visible", AndroidAssertNotVisibleParams, "assertion"),
     AndroidActionDefinition("longPressOn", "long_press_on", AndroidLongPressOnParams, "action"),
     AndroidActionDefinition("swipe", "swipe", AndroidSwipeParams, "action"),
-    AndroidActionDefinition("assertWithAI", "assert_with_ai", AndroidAssertWithAIParams, "assertion"),
+    AndroidActionDefinition("assertWithAI", "assert_with_ai", AndroidAssertWithAIParams, "assertion", "harness"),
 )
 ANDROID_ACTION_DEFINITIONS_BY_NAME: dict[str, AndroidActionDefinition] = {
     definition.fsq_action_name: definition for definition in ANDROID_ACTION_DEFINITIONS
@@ -365,6 +366,7 @@ class StepPhaseReport(BaseModel):
     error_message: str | None = None
     artifact_refs: list[EvidenceArtifactRef] = Field(default_factory=list)
     harness_call_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunnerStepResult(BaseModel):

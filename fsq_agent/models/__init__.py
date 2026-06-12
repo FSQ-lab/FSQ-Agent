@@ -5,6 +5,7 @@ from fsq_agent.models._agent_io import (
     AgentTaskInput,
     ToolCallRecord,
 )
+from fsq_agent.models._ai_assertion import AIAssertionRequest, AIAssertionResult
 from fsq_agent.models._exceptions import (
     ConfigurationError,
     FsqAgentError,
@@ -88,7 +89,6 @@ from fsq_agent.models._settings import (
     OutputSettings,
     PrePlanSettings,
     RuntimeSecretSettings,
-    ShellSettings,
     VerificationSettings,
     WorkspaceSettings,
 )
@@ -106,7 +106,9 @@ from fsq_agent.models._task import (
     VerificationStatus,
 )
 from fsq_agent.models._tools import (
-    CLIToolConfig,
+    CommonToolCall,
+    CommonToolDefinition,
+    CommonToolResult,
     ToolCall,
     ToolDefinition,
     ToolResult,
@@ -118,6 +120,8 @@ __all__ = [
     "AgentPlanItem",
     "AgentFinalOutput",
     "ToolCallRecord",
+    "AIAssertionRequest",
+    "AIAssertionResult",
     "Task",
     "VerificationCriterion",
     "VerificationCriterionKind",
@@ -193,7 +197,9 @@ __all__ = [
     "ToolDefinition",
     "ToolCall",
     "ToolResult",
-    "CLIToolConfig",
+    "CommonToolDefinition",
+    "CommonToolCall",
+    "CommonToolResult",
     "OpenAIAgentsSettings",
     "OpenAIAgentPromptConfig",
     "ContextTrimmingSettings",
@@ -209,7 +215,6 @@ __all__ = [
     "CaseSettings",
     "OutputSettings",
     "PrePlanSettings",
-    "ShellSettings",
     "FsqAgentError",
     "ConfigurationError",
     "PlanningError",

@@ -1,6 +1,6 @@
 Prefer targeted artifact searches over full artifact reads when recovering details from large tool outputs.
 
-Current runtime policy: use the configured harness action tools to execute Android FSQ cases. The harness owns platform action schemas and driver dispatch; local utility tools are for artifacts, progress, waits, secrets, files, and optional shell access.
+Current runtime policy: use the configured harness action tools to execute Android FSQ cases. The harness owns platform action schemas and driver dispatch; common utility tools are for artifacts, waits, runtime secrets, and scoped files.
 
 Use FSQ case metadata as target context. The current Android cases target platform android and appId com.microsoft.emmx; prefer configured harness and driver context over repeated device/app discovery.
 

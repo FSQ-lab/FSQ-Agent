@@ -197,6 +197,26 @@ openai_agents:
 
   validate_runtime_settings(settings)
   assert settings.openai_agents.provider == "github_copilot"
+  assert settings.openai_agents.model == "gpt-5.5"
+
+
+def test_github_copilot_provider_preserves_explicit_model(tmp_path: Path) -> None:
+  config_path = tmp_path / "config.yaml"
+  config_path.write_text(
+    _base_config(
+      tmp_path,
+      """
+openai_agents:
+  provider: github_copilot
+  model: custom-copilot-model
+""",
+    ),
+    encoding="utf-8",
+  )
+
+  settings = load_settings(config_path)
+
+  assert settings.openai_agents.model == "custom-copilot-model"
 
 
 def test_load_settings_rejects_invalid_provider(tmp_path: Path) -> None:
@@ -331,7 +351,7 @@ openai_agents:
     validate_strict_core_settings(settings)
 
 
-def test_validate_runtime_settings_requires_shell_allowlist_when_enabled(
+def test_load_settings_accepts_deprecated_shell_without_runtime_validation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -351,11 +371,12 @@ shell:
     )
     settings = load_settings(config_path)
 
-    with pytest.raises(ConfigurationError, match="allowlist cannot be empty"):
-        validate_runtime_settings(settings)
+    validate_runtime_settings(settings)
+    assert settings.shell.enabled is True
+    assert settings.shell.mode == "allowlist"
 
 
-def test_validate_runtime_settings_allows_shell_allow_all(
+def test_deprecated_shell_working_dir_is_not_resolved_or_used(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -377,7 +398,7 @@ shell:
     settings = load_settings(config_path)
 
     validate_runtime_settings(settings)
-    assert settings.shell.working_dir == settings.workspace.root_dir
+    assert settings.shell.working_dir == "."
 
 
 def test_load_settings_loads_dotenv_from_config_directory(

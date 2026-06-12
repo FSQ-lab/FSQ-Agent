@@ -57,7 +57,7 @@ class VerificationEvidenceBuilder:
                 "Mark a criterion satisfied only when supplied events, tool outputs, or artifact excerpts support it.",
                 "Mark a criterion unmet only when supplied evidence proves it did not happen or the required final state is false.",
                 "If evidence is missing, truncated, ambiguous, or outside the supplied bundle, mark the criterion unknown by leaving it out of both satisfied_criteria and unmet_criteria and use status=inconclusive.",
-                "For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. Verify that the execution stage completed a submit_visual_assertion tool call, that the main agent reported the corresponding visual assertion result in its structured output, and that no supplied evidence contradicts that result.",
+                "For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. Verify that execution evidence contains the harness-owned AI assertion tool result, including verdict metadata and screenshot artifact references, and that no supplied evidence contradicts that result.",
                 "Do not depend on fixed key-action text formats; infer the intended requirement from the task/case content provided in the bundle.",
                 "Apply verification_mode only to final status. In strict mode, all required goal, assertion, and operation criteria are blocking. In normal mode, only goal and assertion criteria are blocking. In goal mode, only goal criteria are blocking.",
                 "Nonblocking criteria may be discussed as evidence or diagnostics, but they must not make the final status failed or inconclusive when every blocking criterion is satisfied.",
@@ -181,12 +181,12 @@ class VerificationEvidenceBuilder:
         return self._preview(str(value))
 
     def _tool_origin(self, tool_name: str, explicit_origin: Any) -> str:
-        if explicit_origin in {"harness", "local", "shell", "unknown"}:
+        if explicit_origin in {"harness", "common", "runtime", "unknown"}:
             return str(explicit_origin)
-        if tool_name == "shell":
-            return "shell"
-        if tool_name in {"publish_progress", "run_cli_tool", "read_file", "write_file", "search_artifact", "read_artifact_slice", "submit_visual_assertion", "wait_ms"}:
-            return "local"
+        if tool_name in {"read_file", "write_file", "get_runtime_secret", "search_artifact", "read_artifact_slice", "wait_ms"}:
+            return "common"
+        if tool_name in {"read_knowledge_index", "read_knowledge_page"}:
+            return "runtime"
         if tool_name == "unknown":
             return "unknown"
         return "harness"
@@ -205,7 +205,7 @@ Rules:
 - Mark criteria as satisfied only when the supplied evidence supports them.
 - Mark criteria as unmet only when the supplied evidence proves the required action/state did not occur or a permanent execution failure prevents it.
 - If evidence is insufficient or ambiguous, leave the criterion out of satisfied_criteria and unmet_criteria, explain it in evidence/errors, and use status=inconclusive unless another criterion is proven unmet.
-- For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. The execution agent already performs image judgment after submit_visual_assertion attaches the image to the runner's model context. Verify that the execution records contain the visual assertion submission, that the main agent's structured output reports the visual assertion result, and that no supplied evidence contradicts that result.
+- For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. The execution stage evaluates authored visual assertions through the harness-owned platform AI assertion action. Verify that execution records contain the harness AI assertion result, verdict metadata, and screenshot artifact reference, that the main agent's structured output reports the corresponding result, and that no supplied evidence contradicts that result.
 - Final status must be success only when every required criterion is satisfied; failed only when at least one required criterion is proven unmet; inconclusive when there are unknown criteria and no proven unmet criteria.
 
 Return only the configured structured final output. Do not perform external actions.

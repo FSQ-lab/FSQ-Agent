@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -11,6 +10,7 @@ from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._verification_task import VerificationEvidenceBuilder
 from fsq_agent.config import Settings
 from fsq_agent.models import (
+    AgentFinalOutput,
     HarnessActionResult,
     HarnessContext,
     HarnessFunctionSchema,
@@ -18,9 +18,11 @@ from fsq_agent.models import (
     LocalToolOutputSettings,
     OpenAIAgentsSettings,
     OutputSettings,
+    RuntimeSecretSettings,
     StepResult,
     Task,
 )
+from fsq_agent.providers import build_model_provider_session
 
 
 class _EmptyToolFactory:
@@ -283,7 +285,8 @@ def test_runtime_tool_origin_recognizes_harness_tools() -> None:
     runtime._harness_tool_names = {"tap_on"}
 
     assert runtime._tool_origin("tap_on") == "harness"
-    assert runtime._tool_origin("read_file") == "local"
+    assert runtime._tool_origin("read_file") == "common"
+    assert runtime._tool_origin("read_knowledge_index") == "runtime"
     assert runtime._tool_origin("unexpected_tool") == "unknown"
 
 
@@ -379,38 +382,27 @@ def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
     }
 
 
-def test_runtime_builds_azure_openai_client(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_provider_session_builds_azure_openai_agents_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     class _AsyncOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _OpenAIProvider:
         def __init__(self, **kwargs: Any) -> None:
             self.kwargs = kwargs
 
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-key")
     settings = Settings(openai_agents=OpenAIAgentsSettings())
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
 
-    client = runtime._build_openai_client(_AsyncOpenAI)
+    session = build_model_provider_session(settings)
+    provider = session.create_agents_provider(openai_provider_type=_OpenAIProvider, async_openai_type=_AsyncOpenAI)
 
-    assert client.kwargs == {
+    assert provider.kwargs["use_responses"] is True
+    assert provider.kwargs["openai_client"].kwargs == {
         "api_key": "azure-key",
         "base_url": "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/",
+        "default_headers": None,
     }
-    assert runtime._use_responses_api() is True
-
-
-def test_runtime_builds_github_copilot_client() -> None:
-    settings = Settings(
-        openai_agents=OpenAIAgentsSettings(
-            provider="github_copilot",
-        )
-    )
-    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
-
-    with patch("fsq_agent.agent._openai_runtime.build_copilot_async_openai_client", return_value="client") as build_client:
-        client = runtime._build_openai_client(object)
-
-    assert client == "client"
-    build_client.assert_called_once_with(object, settings.workspace.root_dir)
-    assert runtime._use_responses_api() is True
 
 
 def test_runtime_tool_count_filter_keeps_recent_outputs_and_trims_history() -> None:
@@ -498,6 +490,70 @@ def test_runtime_tool_count_filter_writes_artifact_for_trimmed_history(tmp_path:
     assert list((tmp_path / "runs" / "run-1" / "artifacts" / "tools").glob("*.json"))
 
 
+def test_runtime_preview_redacts_wrapped_sensitive_tool_output() -> None:
+    runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory())
+    output = json.dumps(
+        {
+            "tool_name": "get_runtime_secret",
+            "model_output": "full",
+            "result": {
+                "tool_name": "get_runtime_secret",
+                "status": "success",
+                "output": {
+                    "type": "runtime_secret",
+                    "name": "TEST_ACCOUNT_PASSWORD",
+                    "value": "super-secret",
+                    "sensitive": True,
+                },
+                "sensitive": True,
+            },
+        }
+    )
+
+    preview = runtime._preview(output)
+
+    assert "super-secret" not in preview
+    assert '"value": "***"' in preview
+
+
+def test_runtime_redacts_configured_secret_values_from_final_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_ACCOUNT_PASSWORD", "super-secret")
+    runtime = OpenAIAgentsRuntime(
+        Settings(
+            openai_agents=OpenAIAgentsSettings(),
+            runtime_secrets=RuntimeSecretSettings(allowed_env_names=["TEST_ACCOUNT_PASSWORD"]),
+        ),
+        _EmptyToolFactory(),
+    )
+    final_output = AgentFinalOutput(
+        status="success",
+        summary="Logged in with super-secret.",
+        evidence=["The password super-secret was entered."],
+    )
+
+    redacted = runtime._redact_runtime_secrets(final_output)
+
+    assert isinstance(redacted, AgentFinalOutput)
+    assert redacted.summary == "Logged in with ***."
+    assert redacted.evidence == ["The password *** was entered."]
+
+
+def test_runtime_redacts_configured_secret_values_from_tool_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_ACCOUNT_PASSWORD", "super-secret")
+    runtime = OpenAIAgentsRuntime(
+        Settings(
+            openai_agents=OpenAIAgentsSettings(),
+            runtime_secrets=RuntimeSecretSettings(allowed_env_names=["TEST_ACCOUNT_PASSWORD"]),
+        ),
+        _EmptyToolFactory(),
+    )
+    item = type("Item", (), {"raw_item": {"arguments": {"text": "super-secret", "target": "Password"}}})()
+
+    arguments = runtime._tool_arguments(item)
+
+    assert arguments == {"text": "***", "target": "Password"}
+
+
 def test_runtime_input_filter_leaves_plain_screenshot_outputs_text_only(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
@@ -546,7 +602,7 @@ def test_runtime_input_filter_leaves_plain_screenshot_outputs_text_only(tmp_path
     assert filtered.input == data.model_data.input
 
 
-def test_runtime_input_filter_attaches_submitted_visual_assertion_image(tmp_path: Path) -> None:
+def test_runtime_input_filter_does_not_attach_submitted_visual_assertion_image(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
     from agents.run_config import ModelInputData
@@ -596,14 +652,7 @@ def test_runtime_input_filter_attaches_submitted_visual_assertion_image(tmp_path
     filtered = input_filter(data)
 
     assert filtered.input[1]["output"] == output
-    image_message = filtered.input[2]
-    assert image_message["role"] == "user"
-    assert image_message["content"][0]["type"] == "input_text"
-    assert "key-action-7" in image_message["content"][0]["text"]
-    assert "Verify the logo is visible." in image_message["content"][0]["text"]
-    assert str(screenshot_path.resolve()) in image_message["content"][0]["text"]
-    assert image_message["content"][1]["type"] == "input_image"
-    assert image_message["content"][1]["image_url"].startswith("data:image/png;base64,")
+    assert len(filtered.input) == 2
 
 
 def test_runtime_input_filter_rejects_screenshot_images_outside_output_root(tmp_path: Path) -> None:

@@ -1,9 +1,6 @@
-import base64
 import json
-import mimetypes
 import os
 from pathlib import Path
-import re
 import time
 import inspect
 from collections.abc import Callable
@@ -13,10 +10,10 @@ from fsq_agent.config import Settings, validate_runtime_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, UiAutomator2AndroidDriver
 from fsq_agent.agent._harness_tools import HarnessToolAdapter
 from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, KnowledgeBundle, PlanningError, RunEvent, RunEventSink, SkillBundle, StepResult, Task
-from fsq_agent.tools import AgentsToolFactory
+from fsq_agent.providers import build_ai_assertion_evaluator, build_model_provider_session
+from fsq_agent.tools import AgentsCommonToolAdapter
 from fsq_agent.tools._tool_artifacts import ToolArtifactStore
 
-from fsq_agent.agent._copilot_provider import build_copilot_async_openai_client
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._pre_plan import (
     PRE_PLAN_AGENT_INSTRUCTIONS,
@@ -30,24 +27,22 @@ from fsq_agent.agent._structured_output import coerce_agent_final_output, coerce
 from fsq_agent.agent._verification_task import VERIFICATION_AGENT_INSTRUCTIONS, VerificationEvidenceBuilder
 
 
-_LOCAL_TOOL_NAMES = {
-    "publish_progress",
-    "run_cli_tool",
+_COMMON_TOOL_NAMES = {
     "read_file",
     "write_file",
     "search_artifact",
     "read_artifact_slice",
-    "submit_visual_assertion",
     "get_runtime_secret",
     "wait_ms",
+}
+
+_RUNTIME_TOOL_NAMES = {
     "read_knowledge_index",
     "read_knowledge_page",
 }
 
 
 class _RecentToolOutputInputFilter:
-    _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
-
     def __init__(
         self,
         sdk_filter: Any | None,
@@ -56,8 +51,6 @@ class _RecentToolOutputInputFilter:
         preview_chars: int,
         trimmable_tools: set[str] | None,
         artifact_store: ToolArtifactStore | None,
-        visual_image_root: Path | None = None,
-        max_visual_attachments: int = 4,
     ) -> None:
         self.sdk_filter = sdk_filter
         self.recent_tool_outputs = recent_tool_outputs
@@ -65,8 +58,6 @@ class _RecentToolOutputInputFilter:
         self.preview_chars = preview_chars
         self.trimmable_tools = trimmable_tools
         self.artifact_store = artifact_store
-        self.visual_image_root = visual_image_root
-        self.max_visual_attachments = max_visual_attachments
         self.artifact_paths_by_call_id: dict[str, str] = {}
 
     def __call__(self, data: Any) -> Any:
@@ -81,7 +72,6 @@ class _RecentToolOutputInputFilter:
         output_indices = [index for index, item in enumerate(items) if isinstance(item, dict) and item.get("type") == "function_call_output"]
         protected = set(output_indices[-self.recent_tool_outputs :]) if self.recent_tool_outputs else set()
         new_items: list[Any] = []
-        visual_attachment_count = 0
         for index, item in enumerate(items):
             if not isinstance(item, dict) or item.get("type") != "function_call_output":
                 new_items.append(item)
@@ -89,28 +79,29 @@ class _RecentToolOutputInputFilter:
             tool_names = call_id_to_names.get(str(item.get("call_id") or item.get("id") or ""), set())
             output = item.get("output", "")
             output_text = output if isinstance(output, str) else str(output)
+            is_sensitive = self._is_sensitive_tool_output(output_text)
             artifact_path = self._artifact_path_for(item, tool_names, output_text)
-            visual_items = self._visual_attachment_items(tool_names, output_text, visual_attachment_count)
-            visual_attachment_count += len(visual_items)
             if index in protected:
                 new_items.append(item)
-                new_items.extend(visual_items)
+                continue
+            if is_sensitive:
+                trimmed_item = dict(item)
+                display_name = next(iter(tool_names), "tool")
+                trimmed_item["output"] = f"[Sensitive historical {display_name} output omitted.]"
+                new_items.append(trimmed_item)
                 continue
             if self.trimmable_tools and not tool_names.intersection(self.trimmable_tools):
                 new_items.append(item)
-                new_items.extend(visual_items)
                 continue
             if len(output_text) <= self.max_output_chars:
                 new_items.append(item)
-                new_items.extend(visual_items)
                 continue
             trimmed_item = dict(item)
-            preview = output_text[: self.preview_chars]
             display_name = next(iter(tool_names), "tool")
+            preview = output_text[: self.preview_chars]
             artifact_line = f" Artifact path: {artifact_path}." if artifact_path else ""
             trimmed_item["output"] = f"[Trimmed historical {display_name} output: {len(output_text)} chars, preview follows].{artifact_line}\n{preview}..."
             new_items.append(trimmed_item)
-            new_items.extend(visual_items)
         return ModelInputData(input=new_items, instructions=model_data.instructions)
 
     def _call_id_to_names(self, items: list[Any]) -> dict[str, set[str]]:
@@ -147,78 +138,23 @@ class _RecentToolOutputInputFilter:
             payload = json.loads(output_text)
         except json.JSONDecodeError:
             return False
-        return isinstance(payload, dict) and payload.get("sensitive") is True
+        return self._has_sensitive_marker(payload)
 
-    def _visual_attachment_items(self, tool_names: set[str], output_text: str, current_count: int) -> list[dict[str, Any]]:
-        if current_count >= self.max_visual_attachments:
-            return []
-        if "submit_visual_assertion" not in tool_names:
-            return []
-        try:
-            payload = json.loads(output_text)
-        except json.JSONDecodeError:
-            return []
-        if not isinstance(payload, dict) or payload.get("type") != "visual_assertion_submission":
-            return []
-        prompt = str(payload.get("prompt") or "")
-        assertion_id = str(payload.get("assertion_id") or "visual assertion")
-        attachments: list[dict[str, Any]] = []
-        for image_path in self._image_paths_from_text(str(payload.get("screenshot_path") or "")):
-            if current_count + len(attachments) >= self.max_visual_attachments:
-                break
-            resolved = self._safe_image_path(image_path)
-            if not resolved:
-                continue
-            try:
-                data = resolved.read_bytes()
-            except OSError:
-                continue
-            mime_type = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
-            data_url = f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"
-            attachments.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": (
-                                f"Attached screenshot image for {assertion_id}: {resolved}. "
-                                f"Visual assertion prompt: {prompt}. "
-                                "Use the image pixels, not only the file path, when deciding this visual assertion."
-                            ),
-                        },
-                        {"type": "input_image", "image_url": data_url},
-                    ],
-                }
-            )
-        return attachments
-
-    def _image_paths_from_text(self, text: str) -> list[Path]:
-        pattern = r"(?:[A-Za-z]:)?[\\/][^\s\"'<>|]+?\.(?:png|jpe?g|webp)"
-        return [Path(match.group(0)) for match in re.finditer(pattern, text, flags=re.IGNORECASE)]
-
-    def _safe_image_path(self, path: Path) -> Path | None:
-        if path.suffix.lower() not in self._IMAGE_EXTENSIONS:
-            return None
-        try:
-            resolved = path.resolve()
-        except OSError:
-            return None
-        if self.visual_image_root is not None:
-            try:
-                resolved.relative_to(self.visual_image_root.resolve())
-            except ValueError:
-                return None
-        if not resolved.is_file():
-            return None
-        return resolved
+    def _has_sensitive_marker(self, value: Any) -> bool:
+        if isinstance(value, dict):
+            if value.get("sensitive") is True:
+                return True
+            return any(self._has_sensitive_marker(item) for item in value.values())
+        if isinstance(value, list):
+            return any(self._has_sensitive_marker(item) for item in value)
+        return False
 
 
 class OpenAIAgentsRuntime:
     def __init__(
         self,
         settings: Settings,
-        tool_factory: AgentsToolFactory,
+        tool_factory: AgentsCommonToolAdapter,
         harness_factory: Callable[[str], HarnessInterface] | None = None,
     ) -> None:
         self.settings = settings
@@ -245,21 +181,21 @@ class OpenAIAgentsRuntime:
             raise ConfigurationError("openai-agents and openai packages are required when SDK runtime is enabled.") from exc
 
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
-        client = self._build_openai_client(AsyncOpenAI)
-        provider = OpenAIProvider(openai_client=client, use_responses=self._use_responses_api())
+        provider_session = build_model_provider_session(self.settings)
+        provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
         try:
             try:
                 harness = self._build_harness(run_id)
-                harness_adapter = HarnessToolAdapter(harness, reserved_tool_names={*_LOCAL_TOOL_NAMES, "shell"})
+                harness_adapter = HarnessToolAdapter(harness, reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES})
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name
-                local_tools = self.tool_factory.build_tools(skills, run_id=run_id, task_id=task.id, event_sink=event_sink)
+                common_tools = self.tool_factory.build_tools(FunctionTool, run_id=run_id, task_id=task.id, event_sink=event_sink)
                 harness_tools = harness_adapter.build_tools(FunctionTool)
                 agent = Agent(
                     name=self.settings.agent.name,
                     model=self.settings.openai_agents.model,
                     instructions=self._build_instructions(knowledge, skills),
-                    tools=[*local_tools, *harness_tools],
+                    tools=[*common_tools, *harness_tools],
                     output_type=AgentFinalOutput,
                 )
                 await self._emit(
@@ -291,7 +227,7 @@ class OpenAIAgentsRuntime:
                         task_id=task.id,
                         type="run_failed",
                         title="SDK run failed",
-                        message=str(exc),
+                        message=self._replace_secret_values(str(exc), self._runtime_secret_values()),
                         duration_ms=duration_ms,
                     ),
                 )
@@ -301,15 +237,16 @@ class OpenAIAgentsRuntime:
                         status="failed",
                         actual_outcome="OpenAI Agents SDK run failed before producing structured verification output.",
                         duration_ms=duration_ms,
-                        error=str(exc),
+                        error=self._replace_secret_values(str(exc), self._runtime_secret_values()),
                         tool_name="openai_agents.runner",
                     )
                 ]
         finally:
-            await client.close()
+            await provider_session.close()
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         final_output = coerce_agent_final_output(result.final_output) or str(result.final_output)
+        final_output = self._redact_runtime_secrets(final_output)
         serialized_final_output = serialize_agent_final_output(final_output)
         pre_plan_steps = self._build_pre_plan_step_results(final_output, duration_ms)
         structured_steps = pre_plan_steps
@@ -354,8 +291,8 @@ class OpenAIAgentsRuntime:
             ),
         )
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
-        client = self._build_openai_client(AsyncOpenAI)
-        provider = OpenAIProvider(openai_client=client, use_responses=self._use_responses_api())
+        provider_session = build_model_provider_session(self.settings)
+        provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
         try:
             agent = Agent(
                 name=f"{self.settings.agent.name} pre-planner",
@@ -383,13 +320,13 @@ class OpenAIAgentsRuntime:
                     task_id=task_id,
                     type="run_failed",
                     title="Pre-plan failed",
-                    message=str(exc),
+                    message=self._replace_secret_values(str(exc), self._runtime_secret_values()),
                     duration_ms=duration_ms,
                 ),
             )
             raise PlanningError("Goal pre-plan failed before producing structured output.", context={"error": str(exc)}) from exc
         finally:
-            await client.close()
+            await provider_session.close()
 
         pre_plan = result.final_output
         if isinstance(pre_plan, GoalPrePlan):
@@ -501,9 +438,10 @@ class OpenAIAgentsRuntime:
             events_path,
             mode=self.settings.verification.mode,
         )
+        evidence_input = self._replace_secret_values(evidence_input, self._runtime_secret_values())
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
-        client = self._build_openai_client(AsyncOpenAI)
-        provider = OpenAIProvider(openai_client=client, use_responses=self._use_responses_api())
+        provider_session = build_model_provider_session(self.settings)
+        provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
         try:
             agent = Agent(
                 name=f"{self.settings.agent.name} verifier",
@@ -530,15 +468,16 @@ class OpenAIAgentsRuntime:
                     status="failed",
                     actual_outcome="Evidence-based verifier agent failed before producing structured output.",
                     duration_ms=duration_ms,
-                    error=str(exc),
+                    error=self._replace_secret_values(str(exc), self._runtime_secret_values()),
                     tool_name="openai_agents.verifier",
                 )
             ]
         finally:
-            await client.close()
+            await provider_session.close()
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         final_output = coerce_agent_final_output(result.final_output) or str(result.final_output)
+        final_output = self._redact_runtime_secrets(final_output)
         serialized_final_output = serialize_agent_final_output(final_output)
         return [
             StepResult(
@@ -582,23 +521,8 @@ class OpenAIAgentsRuntime:
                 trimming.preview_chars,
                 trimmable_tools,
                 artifact_store,
-                self.settings.output.root_dir,
             )
         return run_config_cls(model_provider=provider, call_model_input_filter=input_filter)
-
-    def _build_openai_client(self, async_openai_cls: Any) -> Any:
-        if self.settings.openai_agents.provider == "github_copilot":
-            return build_copilot_async_openai_client(
-                async_openai_cls,
-                self.settings.workspace.root_dir,
-            )
-        return async_openai_cls(
-            api_key=os.environ[self.settings.openai_agents.api_key_env],
-            base_url=self.settings.openai_agents.base_url,
-        )
-
-    def _use_responses_api(self) -> bool:
-        return True
 
     def _build_harness(self, run_id: str) -> HarnessInterface:
         if self.harness_factory is not None:
@@ -611,6 +535,7 @@ class OpenAIAgentsRuntime:
             return AndroidHarness(
                 driver=driver,
                 artifact_store=ArtifactStore(self.settings.output.runs_dir / run_id),
+                ai_assertion_evaluator=build_ai_assertion_evaluator(self.settings),
             )
         raise ConfigurationError("Unsupported harness platform.", context={"platform": self.settings.harness.platform})
 
@@ -711,12 +636,13 @@ class OpenAIAgentsRuntime:
         if isinstance(summary, list) and summary:
             return self._preview(summary)
         if isinstance(summary, str) and summary:
-            return summary
+            return self._preview(summary)
         return "The model produced a reasoning summary."
 
     def _preview(self, value: Any, limit: int = 1000) -> str:
         text = value if isinstance(value, str) else repr(value)
         text = self._redact_sensitive_tool_output(text)
+        text = self._replace_secret_values(text, self._runtime_secret_values())
         text = text.replace("\r", " ").replace("\n", " ")
         return text if len(text) <= limit else f"{text[:limit]}..."
 
@@ -725,19 +651,78 @@ class OpenAIAgentsRuntime:
             payload = json.loads(text)
         except json.JSONDecodeError:
             return text
-        if isinstance(payload, dict) and payload.get("sensitive") is True:
-            redacted = dict(payload)
-            if "value" in redacted:
-                redacted["value"] = "***"
+        redacted, changed = self._redact_sensitive_payload(payload)
+        if changed:
             return json.dumps(redacted, ensure_ascii=False)
         return text
 
+    def _redact_sensitive_payload(self, value: Any) -> tuple[Any, bool]:
+        if isinstance(value, dict):
+            changed = False
+            redacted: dict[str, Any] = {}
+            is_sensitive = value.get("sensitive") is True
+            for key, item in value.items():
+                if is_sensitive and key == "value":
+                    redacted[key] = "***"
+                    changed = changed or item != "***"
+                    continue
+                redacted_item, item_changed = self._redact_sensitive_payload(item)
+                redacted[key] = redacted_item
+                changed = changed or item_changed
+            return redacted, changed
+        if isinstance(value, list):
+            redacted_items: list[Any] = []
+            changed = False
+            for item in value:
+                redacted_item, item_changed = self._redact_sensitive_payload(item)
+                redacted_items.append(redacted_item)
+                changed = changed or item_changed
+            return redacted_items, changed
+        return value, False
+
+    def _redact_runtime_secrets(self, value: Any) -> Any:
+        secret_values = self._runtime_secret_values()
+        if not secret_values:
+            return value
+        redacted = self._replace_secret_values(value, secret_values)
+        if isinstance(value, AgentFinalOutput) and isinstance(redacted, dict):
+            return AgentFinalOutput.model_validate(redacted)
+        return redacted
+
+    def _runtime_secret_values(self) -> tuple[str, ...]:
+        values: list[str] = []
+        for name in self.settings.runtime_secrets.allowed_env_names:
+            raw_value = os.getenv(name)
+            if raw_value:
+                values.append(raw_value)
+        return tuple(sorted(set(values), key=len, reverse=True))
+
+    def _replace_secret_values(self, value: Any, secret_values: tuple[str, ...]) -> Any:
+        if isinstance(value, AgentFinalOutput):
+            return self._replace_secret_values(value.model_dump(mode="json"), secret_values)
+        if isinstance(value, dict):
+            return {key: self._replace_secret_values(item, secret_values) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._replace_secret_values(item, secret_values) for item in value]
+        if isinstance(value, str):
+            redacted = value
+            for secret_value in secret_values:
+                redacted = redacted.replace(secret_value, "***")
+            return redacted
+        return value
+
     def _redact(self, value: Any) -> Any:
         sensitive = ("token", "key", "secret", "password", "authorization", "cookie")
+        secret_values = self._runtime_secret_values()
         if isinstance(value, dict):
-            return {key: "***" if any(part in str(key).lower() for part in sensitive) else self._redact(item) for key, item in value.items()}
+            return {
+                key: "***" if any(part in str(key).lower() for part in sensitive) else self._redact(item)
+                for key, item in value.items()
+            }
         if isinstance(value, list):
             return [self._redact(item) for item in value]
+        if isinstance(value, str):
+            return self._replace_secret_values(value, secret_values)
         return value
 
     def _offset_step_ids(self, steps: list[StepResult], offset: int) -> list[StepResult]:
@@ -796,10 +781,10 @@ class OpenAIAgentsRuntime:
     def _tool_origin(self, tool_name: str | None) -> str:
         if not tool_name:
             return "unknown"
-        if tool_name == "shell":
-            return "shell"
-        if tool_name in _LOCAL_TOOL_NAMES:
-            return "local"
+        if tool_name in _COMMON_TOOL_NAMES:
+            return "common"
+        if tool_name in _RUNTIME_TOOL_NAMES:
+            return "runtime"
         if tool_name in self._harness_tool_names:
             return "harness"
         return "unknown"

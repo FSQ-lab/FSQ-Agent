@@ -14,8 +14,9 @@ from fsq_agent.cli._logging import configure_cli_logging
 from fsq_agent.cli._task_loader import discover_case_yaml_paths, read_raw_text_file, resolve_case_yaml_path
 from fsq_agent.config import Settings, load_settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, UiAutomator2AndroidDriver
-from fsq_agent.fsq import FsqCaseLoader
+from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import ConfigurationError, FsqAgentError, FsqCase, Task, VerificationCriterion
+from fsq_agent.providers import build_ai_assertion_evaluator
 from fsq_agent.report import resolve_report_path
 
 
@@ -37,6 +38,7 @@ def init(config_path: str | None, workspace_path: str | None) -> None:
         logger.info("Output root: %s", settings.output.root_dir)
         _log_readiness("LLM run", lambda: validate_runtime_settings(settings))
         _log_readiness("Strict-core run", lambda: validate_strict_core_settings(settings))
+        _log_readiness("AI assertion", lambda: validate_strict_core_settings(settings, requires_ai_assertion=True))
     except FsqAgentError as exc:
         logger.error("Error: %s", exc)
         raise click.Abort() from exc
@@ -156,11 +158,11 @@ async def _run_dynamic_case_tasks(settings: Settings, tasks: list[Task], stream:
 
 
 def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path: str | None) -> None:
-    validate_strict_core_settings(settings)
     loader = FsqCaseLoader()
     if case_yaml_path is not None:
         case_path = resolve_case_yaml_path(case_yaml_path, settings.cases.dir)
         case = loader.load_case(case_path)
+        validate_strict_core_settings(settings, requires_ai_assertion=_case_requires_ai_assertion(case))
         _validate_strict_case_app_id(settings, case)
         artifact = _run_strict_case(settings, case_path, case, case.id)
         logger.info("Core report: %s", artifact.path)
@@ -172,6 +174,7 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
         raise ConfigurationError("--case-dir is required for strict directory runs.")
     case_paths = discover_case_yaml_paths(case_dir_path, settings.cases.dir)
     cases = [(case_path, loader.load_case(case_path)) for case_path in case_paths]
+    validate_strict_core_settings(settings, requires_ai_assertion=any(_case_requires_ai_assertion(case) for _, case in cases))
     for _, case in cases:
         _validate_strict_case_app_id(settings, case)
     summary = _run_strict_case_batch(settings, cases)
@@ -181,7 +184,7 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
 
 def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id: str):
     run_dir = Path(settings.output.runs_dir) / run_id
-    harness = _build_strict_android_harness(settings, _strict_case_app_id(settings, case), run_dir)
+    harness = _build_strict_android_harness(settings, _strict_case_app_id(settings, case), run_dir, _case_requires_ai_assertion(case))
     return run_strict_fsq_core_case(
         case_path=case_path,
         harness=harness,
@@ -238,9 +241,14 @@ def _run_strict_case_batch(settings: Settings, cases: list[tuple[Path, FsqCase]]
     return summary
 
 
-def _build_strict_android_harness(settings: Settings, app_id: str, run_dir: Path) -> AndroidHarness:
+def _build_strict_android_harness(settings: Settings, app_id: str, run_dir: Path, requires_ai_assertion: bool = False) -> AndroidHarness:
     driver = UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial)
-    return AndroidHarness(driver=driver, artifact_store=ArtifactStore(run_dir=run_dir))
+    evaluator = build_ai_assertion_evaluator(settings) if requires_ai_assertion else None
+    return AndroidHarness(driver=driver, artifact_store=ArtifactStore(run_dir=run_dir), ai_assertion_evaluator=evaluator)
+
+
+def _case_requires_ai_assertion(case: FsqCase) -> bool:
+    return any(step.action_name == "assertWithAI" for step in FsqExecutableStepAdapter().to_executable_steps(case))
 
 
 def _strict_case_app_id(settings: Settings, case: FsqCase) -> str:
