@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Expose cross-platform local utility capabilities through an SDK-neutral CommonTool interface, then adapt those capabilities into OpenAI Agents SDK `FunctionTool` objects for the dynamic runtime. This module owns scoped file read/write, allowlisted runtime secret reads, bounded run-artifact search and slice reads, pure waits, CommonTool result normalization, and CommonTool run-event metadata.
+Expose cross-platform local utility capabilities through an SDK-neutral CommonTool interface, then adapt those capabilities into OpenAI Agents SDK `FunctionTool` objects for the dynamic runtime. This module owns scoped file read/write, allowlisted runtime secret reads, bounded run-artifact search and slice reads, pure waits, CommonTool result normalization, recordable CommonTool replay metadata, and CommonTool run-event metadata.
 
 The tools module does not own platform actions, AI assertions, runtime progress events, local CLI execution, or shell execution. Platform actions and `assertWithAI` are harness capabilities exposed by `core` and adapted by `agent`; progress events are runtime-internal events emitted by `agent`; provider-backed AI evaluation is owned by `providers` and injected into platform harnesses by entry-layer code.
 
@@ -35,6 +35,15 @@ The CommonTool names exposed in this SPEC cycle are:
 | `read_artifact_slice` | Read a bounded byte or line slice from one current-run artifact path. |
 | `wait_ms` | Sleep for an explicit duration without touching platform state. |
 
+Recordable CommonTool replay metadata:
+
+| Tool name | Recording behavior |
+|---|---|
+| `get_runtime_secret` | Emits safe event metadata with the requested environment variable name and sensitivity/replay markers. The value is returned to the model but never appears in event payloads, previews, artifacts, reports, generated YAML, or recording manifests. Dynamic run recording may bind later redacted harness arguments to `{runtimeSecret: NAME}` refs. |
+| `wait_ms` | Emits safe event metadata with requested duration and reason. Dynamic run recording may convert successful calls into `waitMs` strict replay commands. |
+
+`read_file`, `write_file`, `search_artifact`, and `read_artifact_slice` are diagnostic-only for recording v1 and must not be converted into replay commands.
+
 Removed from the public tools contract: `run_cli_tool`, SDK `ShellTool` construction/execution, public/common `submit_visual_assertion`, and public/common `publish_progress`.
 
 ## Internal Structure
@@ -53,7 +62,7 @@ Removed from the public tools contract: `run_cli_tool`, SDK `ShellTool` construc
 
 During SDK-managed runs, recoverable CommonTool failures return model-visible structured error JSON so the agent can retry or report failure. Invalid configuration, duplicate tool names, invalid tool names, malformed arguments, path traversal, attempts to read or write outside allowed roots, secret allowlist violations, timeout exhaustion, artifact bounds violations, and malformed outputs raise or normalize to `ToolExecutionError` from `models` depending on whether the failure happens during construction or invocation.
 
-Secret values must be redacted from `RunEvent` payloads, tool artifacts, model-facing previews, final reports, and exception messages. Secret diagnostics may include only the requested environment variable name, allowlist status, and presence status.
+Secret values must be redacted from `RunEvent` payloads, tool artifacts, model-facing previews, final reports, recording manifests, generated YAML, and exception messages. Secret diagnostics and replay metadata may include only the requested environment variable name, allowlist status, presence status, sensitivity markers, and replayability markers.
 
 ## Design Decisions
 
@@ -62,10 +71,11 @@ Secret values must be redacted from `RunEvent` payloads, tool artifacts, model-f
 - Local CLI and shell execution are removed from the first-cycle public tool surface. If command execution returns in the future, it must be redesigned as an explicitly scoped capability with its own SPEC update.
 - `publish_progress` is not a CommonTool. Runtime progress is emitted directly by `agent` as `RunEvent` values so user-visible status does not consume a model tool call or become confused with external capabilities.
 - `submit_visual_assertion` is not a CommonTool. Android `assertWithAI` is a platform assertion operation exposed by the active harness and evaluated through an injected provider-backed evaluator.
-- CommonTool run events use tool origin `common`, allowing reports to distinguish common local utilities from platform harness actions and runtime-internal records.
+- CommonTool run events use tool origin `common`, allowing reports and dynamic run recording to distinguish common local utilities from platform harness actions and runtime-internal records.
+- `get_runtime_secret` and `wait_ms` are the only recordable CommonTools in the first strict-recording cycle. The adapter should emit enough structured, safe event payload metadata for the CLI recorder to reconstruct the requested secret name or wait duration without parsing redacted previews.
 - SDK-managed CommonTools write complete raw results to per-run artifacts when CommonTool artifact output is enabled. Small and moderate current outputs may still return inline; oversized or historical outputs return artifact references, previews, and instructions to use `search_artifact` or `read_artifact_slice` only when more detail is needed.
 - Artifact read tools only resolve paths inside the current run directory and enforce bounded search/slice results so artifact recovery cannot reintroduce unbounded context growth.
-- `wait_ms` provides elapsed-time waits for FSQ pause semantics and page-load delays. It must be preferred over platform gestures when the intended action is waiting, because gestures can alter scroll position or UI state.
-- `get_runtime_secret` reads only environment variable names listed in `runtime_secrets.allowed_env_names`. It is intended for setup flows such as account sign-in where credentials must stay out of FSQ YAML and source code.
+- `wait_ms` provides elapsed-time waits for FSQ pause semantics and page-load delays. It must be preferred over platform gestures when the intended action is waiting, because gestures can alter scroll position or UI state. Successful dynamic `wait_ms` calls may be recorded as strict `waitMs` replay commands.
+- `get_runtime_secret` reads only environment variable names listed in `runtime_secrets.allowed_env_names`. It is intended for setup flows such as account sign-in where credentials must stay out of FSQ YAML and source code. Successful dynamic calls may be recorded only as runtime-secret name dependencies, never as secret values.
 - File operation tools treat `cases.dir` and configured knowledge directories as read-only inputs and write generated files only under managed output directories.
 - Platform action execution remains outside the tools module. The active harness exposes platform action schemas, and the `agent` module adapts those schemas to SDK `FunctionTool` objects.

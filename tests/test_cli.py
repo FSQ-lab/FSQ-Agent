@@ -4,6 +4,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from fsq_agent.cli._main import _task_from_goal, main
+from fsq_agent.cli._strict_case_recording import StrictCaseRecording
 from fsq_agent.models import ReportArtifact, Task, TaskResult, VerificationResult
 
 
@@ -49,11 +50,15 @@ def test_run_rejects_missing_or_conflicting_sources(tmp_path: Path) -> None:
     missing = runner.invoke(main, ["run", "--config", str(config_path)])
     conflicting = runner.invoke(main, ["run", "--config", str(config_path), "--goal", "Do it", "--case-yaml", "case.codex.yaml"])
     strict_goal = runner.invoke(main, ["run", "--config", str(config_path), "--strict", "--goal", "Do it"])
+    record_on_failure_without_record = runner.invoke(main, ["run", "--config", str(config_path), "--goal", "Do it", "--record-on-failure"])
+    strict_record = runner.invoke(main, ["run", "--config", str(config_path), "--strict", "--case-yaml", "case.codex.yaml", "--record"])
 
     assert missing.exit_code != 0
     assert "Exactly one" in missing.output
     assert conflicting.exit_code != 0
     assert strict_goal.exit_code != 0
+    assert record_on_failure_without_record.exit_code != 0
+    assert strict_record.exit_code != 0
 
 
 def test_run_case_yaml_uses_raw_file_content_without_fsq_parsing(tmp_path: Path, monkeypatch) -> None:
@@ -89,6 +94,37 @@ def test_run_case_yaml_uses_raw_file_content_without_fsq_parsing(tmp_path: Path,
     assert raw_content in task.description
     assert "The CLI has not parsed" in task.description
     assert task.key_actions == []
+
+
+def test_run_goal_record_invokes_strict_case_recorder(tmp_path: Path, monkeypatch) -> None:
+    config_path = _config(tmp_path)
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        async def run(self, task: Task, event_sink=None) -> TaskResult:
+            return TaskResult(
+                task_id=task.id,
+                status="success",
+                steps=[],
+                verification=VerificationResult(status="success", summary="ok"),
+                report=ReportArtifact(run_id="recorded-run", path=tmp_path / "report.md"),
+            )
+
+    def fake_record_dynamic_run_as_strict_case(**kwargs):
+        captured.update(kwargs)
+        recording_path = kwargs["run_dir"] / "recording.json"
+        recorded_path = kwargs["run_dir"] / "recorded.codex.yaml"
+        return StrictCaseRecording(status="recorded", recording_path=recording_path, recorded_case_path=recorded_path)
+
+    monkeypatch.setattr("fsq_agent.cli._main.FsqAgent.from_settings", lambda _settings: FakeAgent())
+    monkeypatch.setattr("fsq_agent.cli._main.record_dynamic_run_as_strict_case", fake_record_dynamic_run_as_strict_case)
+
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--goal", "Do it", "--record", "--no-stream"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["run_dir"] == tmp_path / "workspace" / "output" / "runs" / "recorded-run"
+    assert captured["allow_failure"] is False
+    assert "Recorded strict case" in result.output
 
 
 def test_run_strict_case_builds_android_harness_from_config_and_reports_paths(tmp_path: Path, monkeypatch) -> None:

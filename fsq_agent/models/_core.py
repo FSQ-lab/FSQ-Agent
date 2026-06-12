@@ -148,6 +148,25 @@ class AndroidLocator(BaseModel):
         return any(isinstance(value, str) and value.strip() for value in self.model_dump().values())
 
 
+class RuntimeSecretRef(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    env_name: str = Field(alias="runtimeSecret")
+
+    @model_validator(mode="after")
+    def _require_env_name(self) -> "RuntimeSecretRef":
+        if self.env_name.strip():
+            return self
+        raise ValueError("requires non-empty runtimeSecret name")
+
+
+class WaitMsParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int = Field(ge=1, le=60000)
+    reason: str | None = None
+
+
 class AndroidPoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

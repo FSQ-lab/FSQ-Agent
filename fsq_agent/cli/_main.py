@@ -11,6 +11,8 @@ from fsq_agent.agent import FsqAgent
 from fsq_agent.cli._core_execution import run_strict_fsq_core_case
 from fsq_agent.cli._formatting import log_result, log_run_event
 from fsq_agent.cli._logging import configure_cli_logging
+from fsq_agent.cli._strict_case_recording import StrictCaseRecording, record_dynamic_run_as_strict_case
+from fsq_agent.cli._strict_replay import resolve_strict_replay_steps
 from fsq_agent.cli._task_loader import discover_case_yaml_paths, read_raw_text_file, resolve_case_yaml_path
 from fsq_agent.config import Settings, load_settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, UiAutomator2AndroidDriver
@@ -53,6 +55,8 @@ def init(config_path: str | None, workspace_path: str | None) -> None:
 @click.option("--case-dir", "case_dir_path", type=click.Path(exists=False, file_okay=False), default=None)
 @click.option("--stream/--no-stream", "stream", default=True, show_default=True)
 @click.option("--stream-format", type=click.Choice(["rich", "jsonl"]), default="rich", show_default=True)
+@click.option("--record", is_flag=True, default=False, show_default=True)
+@click.option("--record-on-failure", is_flag=True, default=False, show_default=True)
 def run(
     config_path: str | None,
     workspace_path: str | None,
@@ -62,9 +66,18 @@ def run(
     case_dir_path: str | None,
     stream: bool,
     stream_format: str,
+    record: bool,
+    record_on_failure: bool,
 ) -> None:
     try:
-        _validate_run_inputs(strict=strict, goal=goal, case_yaml_path=case_yaml_path, case_dir_path=case_dir_path)
+        _validate_run_inputs(
+            strict=strict,
+            goal=goal,
+            case_yaml_path=case_yaml_path,
+            case_dir_path=case_dir_path,
+            record=record,
+            record_on_failure=record_on_failure,
+        )
         settings = load_settings(config_path, workspace_path)
         if strict:
             _run_strict(settings, case_yaml_path=case_yaml_path, case_dir_path=case_dir_path)
@@ -76,6 +89,8 @@ def run(
             case_dir_path=case_dir_path,
             stream=stream,
             stream_format=stream_format,
+            record=record,
+            record_on_failure=record_on_failure,
         )
     except FsqAgentError as exc:
         logger.error("Error: %s", exc)
@@ -99,12 +114,24 @@ def report(config_path: str | None, workspace_path: str | None, run_id: str, rep
         raise click.Abort() from exc
 
 
-def _validate_run_inputs(*, strict: bool, goal: str | None, case_yaml_path: str | None, case_dir_path: str | None) -> None:
+def _validate_run_inputs(
+    *,
+    strict: bool,
+    goal: str | None,
+    case_yaml_path: str | None,
+    case_dir_path: str | None,
+    record: bool = False,
+    record_on_failure: bool = False,
+) -> None:
     source_count = sum(value is not None for value in (goal, case_yaml_path, case_dir_path))
     if source_count != 1:
         raise ConfigurationError("Exactly one of --goal, --case-yaml, or --case-dir is required.")
     if strict and goal is not None:
         raise ConfigurationError("--strict requires --case-yaml or --case-dir; --goal is only supported by dynamic LLM runs.")
+    if strict and (record or record_on_failure):
+        raise ConfigurationError("--record and --record-on-failure are only supported by dynamic LLM runs.")
+    if record_on_failure and not record:
+        raise ConfigurationError("--record-on-failure requires --record.")
 
 
 def _run_dynamic(
@@ -115,40 +142,63 @@ def _run_dynamic(
     case_dir_path: str | None,
     stream: bool,
     stream_format: str,
+    record: bool,
+    record_on_failure: bool,
 ) -> None:
     if goal is not None:
-        _run_dynamic_task(settings, _task_from_goal(goal), stream, stream_format)
+        _run_dynamic_task(settings, _task_from_goal(goal), stream, stream_format, record, record_on_failure)
         return
     if case_yaml_path is not None:
         source_path, content = read_raw_text_file(case_yaml_path, settings.cases.dir)
-        _run_dynamic_task(settings, _task_from_raw_case_source(source_path, content), stream, stream_format)
+        _run_dynamic_task(settings, _task_from_raw_case_source(source_path, content), stream, stream_format, record, record_on_failure)
         return
     if case_dir_path is None:
         raise ConfigurationError("--case-dir is required for directory runs.")
     case_paths = discover_case_yaml_paths(case_dir_path, settings.cases.dir)
     tasks = [_task_from_raw_case_source(source_path, read_raw_text_file(source_path)[1]) for source_path in case_paths]
-    asyncio.run(_run_dynamic_case_tasks(settings, tasks, stream, stream_format))
+    asyncio.run(_run_dynamic_case_tasks(settings, tasks, stream, stream_format, record, record_on_failure))
 
 
-def _run_dynamic_task(settings: Settings, task: Task, stream: bool, stream_format: str) -> None:
+def _run_dynamic_task(
+    settings: Settings,
+    task: Task,
+    stream: bool,
+    stream_format: str,
+    record: bool,
+    record_on_failure: bool,
+) -> None:
     sink = (lambda event: log_run_event(event, stream_format)) if stream else None
     result = asyncio.run(FsqAgent.from_settings(settings).run(task, event_sink=sink))
     log_result(result)
+    if record:
+        _log_recording(_record_dynamic_result(settings, task, result, record_on_failure))
 
 
-async def _run_dynamic_case_tasks(settings: Settings, tasks: list[Task], stream: bool, stream_format: str) -> None:
+async def _run_dynamic_case_tasks(
+    settings: Settings,
+    tasks: list[Task],
+    stream: bool,
+    stream_format: str,
+    record: bool,
+    record_on_failure: bool,
+) -> None:
     summaries: list[dict[str, object]] = []
     for task in tasks:
         try:
             sink = (lambda event: log_run_event(event, stream_format)) if stream else None
             result = await FsqAgent.from_settings(settings).run(task, event_sink=sink)
             log_result(result)
+            recording = _record_dynamic_result(settings, task, result, record_on_failure) if record else None
+            if recording is not None:
+                _log_recording(recording)
             summaries.append(
                 {
                     "task_id": task.id,
                     "status": result.status,
                     "report_path": str(result.report.path),
                     "error": None if result.status == "success" else result.verification.summary,
+                    "recording_status": recording.status if recording else None,
+                    "recorded_case_path": str(recording.recorded_case_path) if recording and recording.recorded_case_path else None,
                 }
             )
         except Exception as exc:
@@ -184,13 +234,56 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
 
 def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id: str):
     run_dir = Path(settings.output.runs_dir) / run_id
+    steps = resolve_strict_replay_steps(FsqExecutableStepAdapter().to_executable_steps(case), settings)
     harness = _build_strict_android_harness(settings, _strict_case_app_id(settings, case), run_dir, _case_requires_ai_assertion(case))
     return run_strict_fsq_core_case(
         case_path=case_path,
         harness=harness,
         output_dir=run_dir,
         run_id=run_id,
+        steps=steps,
     )
+
+
+def _record_dynamic_result(
+    settings: Settings,
+    task: Task,
+    result,
+    record_on_failure: bool,
+) -> StrictCaseRecording:
+    run_dir = Path(settings.output.runs_dir) / result.report.run_id
+    try:
+        return record_dynamic_run_as_strict_case(
+            run_dir=run_dir,
+            task=task,
+            result=result,
+            settings=settings,
+            allow_failure=record_on_failure,
+        )
+    except Exception as exc:  # noqa: BLE001 - recording must not change dynamic run status.
+        recording_path = run_dir / "recording.json"
+        recording = StrictCaseRecording(status="failed", recording_path=recording_path, errors=[str(exc)])
+        try:
+            recording_path.parent.mkdir(parents=True, exist_ok=True)
+            recording_path.write_text(json.dumps(recording.to_json(), indent=2, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            logger.error("Unable to write recording failure manifest: %s", recording_path)
+        return recording
+
+
+def _log_recording(recording: StrictCaseRecording) -> None:
+    if recording.status == "recorded" and recording.recorded_case_path is not None:
+        logger.info("Recorded strict case: %s", recording.recorded_case_path)
+        click.echo(f"Recorded strict case: {recording.recorded_case_path}")
+        logger.info("Recording manifest: %s", recording.recording_path)
+        click.echo(f"Recording manifest: {recording.recording_path}")
+        return
+    if recording.status == "skipped":
+        logger.warning("Recording skipped: %s", "; ".join(recording.warnings) or recording.recording_path)
+        click.echo(f"Recording skipped: {recording.recording_path}")
+        return
+    logger.error("Recording failed: %s", "; ".join(recording.errors) or recording.recording_path)
+    click.echo(f"Recording failed: {recording.recording_path}")
 
 
 def _run_strict_case_batch(settings: Settings, cases: list[tuple[Path, FsqCase]]) -> dict[str, object]:

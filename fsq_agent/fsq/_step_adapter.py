@@ -7,11 +7,15 @@ from fsq_agent.models import (
     ConfigurationError,
     ExecutableStep,
     FsqCase,
+    RuntimeSecretRef,
     SourceRef,
+    WaitMsParams,
 )
 
 
 _OBSERVATION_ACTIONS = {"takeScreenshot", "startRecording", "stopRecording"}
+_WAIT_ACTION_NAME = "waitMs"
+_RUNTIME_SECRET_PLACEHOLDER = "__FSQ_RUNTIME_SECRET__"
 
 
 class FsqExecutableStepAdapter:
@@ -62,12 +66,26 @@ class FsqExecutableStepAdapter:
         return {"value": payload}
 
     def _canonical_params(self, case: FsqCase, action_name: str, params: dict[str, Any], index: int) -> dict[str, Any]:
+        if action_name == _WAIT_ACTION_NAME:
+            try:
+                parsed_wait = WaitMsParams.model_validate(params)
+            except ValidationError as exc:
+                raise ConfigurationError(
+                    "Invalid FSQ command parameters.",
+                    context={
+                        "path": str(case.path),
+                        "step_index": index,
+                        "action_name": action_name,
+                        "validation_errors": self._validation_errors(exc),
+                    },
+                ) from exc
+            return parsed_wait.model_dump(mode="json", exclude_none=True)
         action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(action_name)
         if action_definition is None:
             return params
         driver_params = {key: value for key, value in params.items() if key != "timeout"}
         try:
-            parsed = action_definition.params_model.model_validate(driver_params)
+            runtime_secret_ref = self._runtime_secret_ref(action_name, driver_params)
         except ValidationError as exc:
             raise ConfigurationError(
                 "Invalid FSQ command parameters.",
@@ -78,7 +96,34 @@ class FsqExecutableStepAdapter:
                     "validation_errors": self._validation_errors(exc),
                 },
             ) from exc
-        return parsed.model_dump(mode="json", exclude_none=True)
+        validation_params = dict(driver_params)
+        if runtime_secret_ref is not None:
+            validation_params["text"] = _RUNTIME_SECRET_PLACEHOLDER
+        try:
+            parsed = action_definition.params_model.model_validate(validation_params)
+        except ValidationError as exc:
+            raise ConfigurationError(
+                "Invalid FSQ command parameters.",
+                context={
+                    "path": str(case.path),
+                    "step_index": index,
+                    "action_name": action_name,
+                    "validation_errors": self._validation_errors(exc),
+                },
+            ) from exc
+        canonical = parsed.model_dump(mode="json", exclude_none=True)
+        if runtime_secret_ref is not None:
+            canonical["text"] = runtime_secret_ref.model_dump(mode="json", by_alias=True)["runtimeSecret"]
+            canonical["text"] = {"runtimeSecret": canonical["text"]}
+        return canonical
+
+    def _runtime_secret_ref(self, action_name: str, params: dict[str, Any]) -> RuntimeSecretRef | None:
+        if action_name != "inputText":
+            return None
+        text = params.get("text")
+        if not isinstance(text, dict) or "runtimeSecret" not in text:
+            return None
+        return RuntimeSecretRef.model_validate(text)
 
     def _timeout_ms(self, params: dict[str, Any]) -> int | None:
         timeout = params.get("timeout")
@@ -91,6 +136,8 @@ class FsqExecutableStepAdapter:
             return error.errors()
 
     def _step_kind(self, action_name: str) -> str:
+        if action_name == _WAIT_ACTION_NAME:
+            return "action"
         action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(action_name)
         if action_definition is not None:
             return action_definition.step_kind

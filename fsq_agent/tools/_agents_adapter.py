@@ -46,6 +46,7 @@ class AgentsCommonToolAdapter:
     def _handler_for(self, tool_name: str):
         async def invoke(_ctx: Any, args: str) -> str:
             started = time.perf_counter()
+            arguments: dict[str, Any] = {}
             try:
                 arguments = self._parse_args(args)
                 await self._emit_tool_started(tool_name, arguments)
@@ -58,13 +59,13 @@ class AgentsCommonToolAdapter:
                     duration_ms=int((time.perf_counter() - started) * 1000),
                 )
                 output = self._format_tool_response(result)
-                await self._emit_tool_failed(tool_name, result.error or "CommonTool failed.", started)
+                await self._emit_tool_failed(tool_name, result.error or "CommonTool failed.", started, arguments)
                 return output
             output = self._format_tool_response(result)
             if result.status == "failed":
-                await self._emit_tool_failed(tool_name, result.error or "CommonTool failed.", started)
+                await self._emit_tool_failed(tool_name, result.error or "CommonTool failed.", started, arguments)
             else:
-                await self._emit_tool_completed(tool_name, output, started, result)
+                await self._emit_tool_completed(tool_name, arguments, output, started, result)
             return output
 
         return invoke
@@ -165,12 +166,21 @@ class AgentsCommonToolAdapter:
                 message=f"Calling {tool_name}.",
                 tool_name=tool_name,
                 tool_arguments=self._redact(arguments),
-                payload={"tool_origin": "common"},
+                payload=self._event_payload(tool_name, arguments),
             )
         )
 
-    async def _emit_tool_completed(self, tool_name: str, output: str, started: float, result: CommonToolResult) -> None:
+    async def _emit_tool_completed(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        output: str,
+        started: float,
+        result: CommonToolResult,
+    ) -> None:
         preview_output = self._redact_sensitive_response(output) if result.sensitive else output
+        payload = self._event_payload(tool_name, arguments, result=result)
+        payload["artifact_path"] = str(result.artifact_path) if result.artifact_path else None
         await self._emit(
             RunEvent(
                 run_id=self.run_id,
@@ -181,11 +191,11 @@ class AgentsCommonToolAdapter:
                 tool_name=tool_name,
                 tool_output_preview=self._preview(preview_output),
                 duration_ms=result.duration_ms or int((time.perf_counter() - started) * 1000),
-                payload={"tool_origin": "common", "artifact_path": str(result.artifact_path) if result.artifact_path else None},
+                payload=payload,
             )
         )
 
-    async def _emit_tool_failed(self, tool_name: str, error: str, started: float) -> None:
+    async def _emit_tool_failed(self, tool_name: str, error: str, started: float, arguments: dict[str, Any] | None = None) -> None:
         await self._emit(
             RunEvent(
                 run_id=self.run_id,
@@ -195,9 +205,41 @@ class AgentsCommonToolAdapter:
                 message=error,
                 tool_name=tool_name,
                 duration_ms=int((time.perf_counter() - started) * 1000),
-                payload={"tool_origin": "common"},
+                payload=self._event_payload(tool_name, arguments or {}),
             )
         )
+
+    def _event_payload(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        result: CommonToolResult | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"tool_origin": "common"}
+        metadata = result.metadata if result is not None else {}
+        if tool_name == "get_runtime_secret":
+            name = metadata.get("name") or arguments.get("name")
+            payload.update(
+                {
+                    "recordable": True,
+                    "replay_kind": "runtimeSecret",
+                    "runtime_secret_name": str(name) if name else None,
+                    "sensitive": True,
+                }
+            )
+        elif tool_name == "wait_ms":
+            duration_ms = metadata.get("duration_ms") or arguments.get("duration_ms")
+            reason = metadata.get("reason") if "reason" in metadata else arguments.get("reason")
+            payload.update(
+                {
+                    "recordable": True,
+                    "replay_kind": "waitMs",
+                    "duration_ms": duration_ms,
+                    "reason": reason,
+                }
+            )
+        return payload
 
     async def _emit(self, event: RunEvent) -> None:
         if not self.event_sink or not self.run_id or not self.task_id:

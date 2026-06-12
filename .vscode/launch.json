@@ -30,6 +30,8 @@
         "config.local.yaml",
         "--goal",
         "${input:goal}",
+        "--record",
+        "--record-on-failure",
         "--stream-format",
         "jsonl"
       ],
@@ -50,6 +52,8 @@
         "config.local.yaml",
         "--case-yaml",
         "${input:caseYaml}",
+        "--record",
+        "--record-on-failure",
         "--stream-format",
         "jsonl"
       ],
@@ -70,6 +74,8 @@
         "config.local.yaml",
         "--case-dir",
         "${input:caseDir}",
+        "--record",
+        "--record-on-failure",
         "--stream-format",
         "jsonl"
       ],

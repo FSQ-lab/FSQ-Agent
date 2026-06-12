@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository and convert parsed cases into deterministic execution-core steps for strict-core execution. Dynamic LLM execution that uses a YAML file reads that file as raw text in the CLI layer and deliberately bypasses this module.
+Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository, including generated strict replay refs and pure waits, and convert parsed cases into deterministic execution-core steps for strict-core execution. Dynamic LLM execution that uses a YAML file reads that file as raw text in the CLI layer and deliberately bypasses this module.
 
 Goal-only FSQ cases may omit the command document or provide an empty command list; parsed goal-only cases produce no executable steps.
 
 ## Dependencies
 
-- `models`: Uses `FsqCase`, `FsqCaseConfig`, shared configuration errors, execution-core contracts such as `ExecutableStep`, `SourceRef`, and `EvidencePolicy`, and the shared Android action registry for deterministic Android command payload normalization and step kind classification.
+- `models`: Uses `FsqCase`, `FsqCaseConfig`, shared configuration errors, execution-core contracts such as `ExecutableStep`, `SourceRef`, and `EvidencePolicy`, strict replay refs such as `RuntimeSecretRef`, `WaitMsParams`, and the shared Android action registry for deterministic Android command payload normalization and step kind classification.
 
 ## Public Interface
 
@@ -25,7 +25,7 @@ adapter = FsqExecutableStepAdapter()
 steps = adapter.to_executable_steps(case)
 ```
 
-`FsqExecutableStepAdapter` preserves FSQ action names exactly in `ExecutableStep.action_name`, including names such as `tapOn`, `inputText`, `pressKey`, `assertVisible`, `assert`, and `performActions`. It should not translate action names into platform driver method names; platform harnesses own that mapping.
+`FsqExecutableStepAdapter` preserves FSQ action names exactly in `ExecutableStep.action_name`, including names such as `tapOn`, `inputText`, `pressKey`, `assertVisible`, `assert`, `performActions`, and generated replay command `waitMs`. It should not translate Android action names into platform driver method names; platform harnesses own that mapping. `waitMs` is not a platform driver method and is handled later as a core-owned pure wait.
 
 The adapter should normalize each known Android YAML command into `ExecutableStep.params` by looking up the action in `ANDROID_ACTION_DEFINITIONS_BY_NAME`, validating object-shaped payloads against the registry's shared parameter model, then storing `model_dump(mode="json", exclude_none=True)`. Known Android action payloads should be authored in the same field shape as their parameter models rather than relying on action-specific scalar shorthand. The first-batch canonical forms are:
 
@@ -43,6 +43,10 @@ The adapter should normalize each known Android YAML command into `ExecutableSte
 | `swipe: {...}` | `swipe` | validated `AndroidSwipeParams` dump |
 | `assert: {element: ..., text: ...}` | `assert` | validated `AndroidAssertStateParams` dump |
 | `assertWithAI: {prompt: ...}` | `assertWithAI` | validated `AndroidAssertWithAIParams` dump |
+| `inputText: {text: {runtimeSecret: TEST_PASSWORD}, ...}` | `inputText` | pre-resolution params preserving `{"text": {"runtimeSecret": "TEST_PASSWORD"}}` for strict entry resolution |
+| `waitMs: {duration_ms: 1000, reason: settle}` | `waitMs` | validated `WaitMsParams` dump |
+
+For Android commands containing `runtimeSecret` replay refs, `FsqExecutableStepAdapter` may validate the non-secret shape using placeholder text while preserving the `RuntimeSecretRef` object/dict in `ExecutableStep.params`. Final Android driver parameter validation with the real secret value is owned by the strict CLI entry after in-memory resolution.
 
 Runner-owned metadata such as valid `timeout` values should be extracted before driver parameter validation and stored in `ExecutableStep.timeout_ms`, not passed through to driver parameter models. The original raw command remains available in `ExecutableStep.metadata` for evidence and debugging.
 
@@ -54,6 +58,7 @@ The first-batch step kind mapping for known Android actions is owned by the same
 | `killApp` | `teardown` |
 | `assert`, `assertVisible`, `assertNotVisible`, `assertWithAI` | `assertion` |
 | `takeScreenshot`, `startRecording`, `stopRecording` | `observation` |
+| `waitMs` | `action` |
 | all other commands | `action` |
 
 Each generated step should include:
@@ -64,7 +69,7 @@ Each generated step should include:
 - `timeout_ms`: copied from command object `timeout` when present and valid.
 - `evidence_policy`: default shared model policy for now. Rich FSQ evidence controls are a later batch.
 
-Malformed command entries that cannot be reduced to one FSQ action must raise `ConfigurationError` with the case path and command index. Known Android command payloads that fail shared parameter model validation, including legacy scalar shorthand such as `pressKey: Enter` or `performActions: [...]`, must also raise `ConfigurationError` before execution starts, with enough context to identify the case path, command index, action name, and validation problem. Optional commands are still converted into executable steps; optional/non-blocking execution semantics belong to the core runner or a later policy layer, not this adapter.
+Malformed command entries that cannot be reduced to one FSQ action must raise `ConfigurationError` with the case path and command index. Known Android command payloads that fail shared parameter model validation, including legacy scalar shorthand such as `pressKey: Enter` or `performActions: [...]`, must also raise `ConfigurationError` before execution starts, with enough context to identify the case path, command index, action name, and validation problem. A generated `inputText.text.runtimeSecret` ref is valid only as a pre-resolution replay value; other redaction markers or unresolved secret-like objects are invalid. Optional commands are still converted into executable steps; optional/non-blocking execution semantics belong to the core runner or a later policy layer, not this adapter.
 
 ## Internal Structure
 
@@ -83,8 +88,9 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Unsupported 
 - Single-document `.codex.yaml` files containing only valid case metadata are supported as goal-only cases. Two-document cases with `[]` or an otherwise empty command list are also goal-only cases.
 - Configured `cases.dir` is treated as read-only input. Strict-core execution may parse FSQ case files from it, while dynamic LLM execution may read case files from it as raw text. Generated files and evidence must be written under the output root.
 - Markdown conversion reports are intentionally ignored and are not loaded as task inputs.
-- FSQ commands are deterministic ordered input for the strict-core execution path when converted by `FsqExecutableStepAdapter`.
-- Deterministic Android command payload normalization uses the shared Android action registry from `models`. Authored Android command payloads use the same object field names as the registry's parameter models, which keeps case parsing, future case generation, harness dispatch, and function-call schemas aligned to one payload contract while preserving FSQ action names in `ExecutableStep.action_name`.
+- FSQ commands are deterministic ordered input for the strict-core execution path when converted by `FsqExecutableStepAdapter`. Generated recorded cases may include strict replay refs and pure wait commands, but those are still deterministic authored input by the time strict execution begins.
+- Deterministic Android command payload normalization uses the shared Android action registry from `models`. Authored Android command payloads use the same object field names as the registry's parameter models, which keeps case parsing, future case generation, harness dispatch, and function-call schemas aligned to one payload contract while preserving FSQ action names in `ExecutableStep.action_name`. Strict replay refs are the sole exception: the adapter may preserve `RuntimeSecretRef` values in pre-resolution params so the CLI strict entry can resolve them before final driver validation.
+- `waitMs` is a generated strict replay command for pure elapsed-time waits. It is validated by `WaitMsParams`, converted into an `ExecutableStep`, and handled by the execution core without invoking Android harness or driver actions.
 - `assertWithAI` is parsed and validated like any other authored assertion command. This module does not evaluate AI assertions, build provider-backed evaluators, capture screenshots, or decide assertion verdicts.
 - `launchApp` and `killApp` are treated as setup and teardown step kinds for strict-core execution.
 - Commands marked `optional: true` are still converted into executable steps; optional/non-blocking execution semantics do not belong to this adapter.

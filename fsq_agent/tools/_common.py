@@ -201,7 +201,7 @@ class DefaultCommonToolProvider:
             output={"type": "runtime_secret", "name": parsed.name, "value": value, "sensitive": True},
             sensitive=True,
             duration_ms=int((time.perf_counter() - started) * 1000),
-            metadata={"name": parsed.name},
+            metadata={"name": parsed.name, "recordable": True, "replay_kind": "runtimeSecret"},
         )
 
     async def _search_artifact(self, arguments: dict[str, Any]) -> CommonToolResult:
@@ -251,6 +251,7 @@ class DefaultCommonToolProvider:
                 "reason": parsed.reason,
             },
             duration_ms=elapsed_ms,
+            metadata={"duration_ms": parsed.duration_ms, "reason": parsed.reason, "recordable": True, "replay_kind": "waitMs"},
         )
 
     def _from_file_result(self, tool_name: str, result: CommonToolResult, started: float, metadata: dict[str, Any]) -> CommonToolResult:

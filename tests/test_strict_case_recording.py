@@ -1,0 +1,99 @@
+import json
+from pathlib import Path
+
+import yaml
+
+from fsq_agent.cli._strict_case_recording import record_dynamic_run_as_strict_case
+from fsq_agent.config._settings import Settings
+from fsq_agent.models import AndroidHarnessSettings, HarnessSettings, OutputSettings, ReportArtifact, RunEvent, Task, TaskResult, VerificationResult
+
+
+def _write_event(path: Path, event: RunEvent) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(event.model_dump_json() + "\n")
+
+
+def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "recorded-run"
+    run_dir.mkdir(parents=True)
+    events_path = run_dir / "events.jsonl"
+    task = Task(id="task-1", name="Login", description="Log in")
+    result = TaskResult(
+        task_id="task-1",
+        status="success",
+        steps=[],
+        verification=VerificationResult(status="success", summary="ok"),
+        report=ReportArtifact(run_id="recorded-run", path=run_dir / "report.md"),
+    )
+    settings = Settings(
+        output=OutputSettings(runs_dir=tmp_path / "runs"),
+        harness=HarnessSettings(android=AndroidHarnessSettings(app_id="com.example")),
+    )
+
+    _write_event(
+        events_path,
+        RunEvent(
+            run_id="recorded-run",
+            task_id="task-1",
+            type="tool_call_completed",
+            title="Tool call completed",
+            tool_name="get_runtime_secret",
+            payload={
+                "tool_origin": "common",
+                "recordable": True,
+                "replay_kind": "runtimeSecret",
+                "runtime_secret_name": "TEST_ACCOUNT_PASSWORD",
+                "sensitive": True,
+            },
+        ),
+    )
+    _write_event(
+        events_path,
+        RunEvent(
+            run_id="recorded-run",
+            task_id="task-1",
+            type="tool_call_started",
+            title="Tool call started",
+            tool_name="input_text",
+            tool_call_id="call-1",
+            tool_arguments={"text": "***", "target": "Password field"},
+            payload={"tool_origin": "harness", "fsq_action_name": "inputText"},
+        ),
+    )
+    _write_event(
+        events_path,
+        RunEvent(
+            run_id="recorded-run",
+            task_id="task-1",
+            type="tool_call_completed",
+            title="Tool call completed",
+            tool_name="input_text",
+            tool_call_id="call-1",
+            payload={"tool_origin": "harness", "fsq_action_name": "inputText", "status": "passed"},
+        ),
+    )
+    _write_event(
+        events_path,
+        RunEvent(
+            run_id="recorded-run",
+            task_id="task-1",
+            type="tool_call_completed",
+            title="Tool call completed",
+            tool_name="wait_ms",
+            payload={"tool_origin": "common", "recordable": True, "replay_kind": "waitMs", "duration_ms": 1, "reason": "settle"},
+        ),
+    )
+
+    recording = record_dynamic_run_as_strict_case(run_dir=run_dir, task=task, result=result, settings=settings)
+
+    assert recording.status == "recorded"
+    assert recording.validation_status == "passed"
+    docs = list(yaml.safe_load_all((run_dir / "recorded.codex.yaml").read_text(encoding="utf-8")))
+    assert docs[0]["properties"]["recording"]["required_runtime_secret_names"] == ["TEST_ACCOUNT_PASSWORD"]
+    assert docs[1] == [
+        {"inputText": {"text": {"runtimeSecret": "TEST_ACCOUNT_PASSWORD"}, "target": "Password field"}},
+        {"waitMs": {"duration_ms": 1, "reason": "settle"}},
+    ]
+    manifest = json.loads((run_dir / "recording.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "recorded"
+    assert manifest["command_count"] == 2

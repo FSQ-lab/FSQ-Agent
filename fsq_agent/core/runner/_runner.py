@@ -1,6 +1,8 @@
 import time
 from collections.abc import Sequence
 
+from pydantic import ValidationError
+
 from fsq_agent.core.harness import HarnessInterface
 from fsq_agent.models import (
     EvidenceArtifactRef,
@@ -14,6 +16,7 @@ from fsq_agent.models import (
     RunnerStepResult,
     StepPhase,
     StepPhaseReport,
+    WaitMsParams,
 )
 
 
@@ -27,6 +30,9 @@ class StepRunner:
         return tuple(self._events)
 
     def run_step(self, run_id: str, step: ExecutableStep) -> RunnerStepResult:
+        if step.action_name == "waitMs":
+            return self._run_wait_step(run_id, step)
+
         started = time.perf_counter()
         phase_reports: list[StepPhaseReport] = []
         self._emit(run_id=run_id, event_type="step_start", step=step)
@@ -150,6 +156,56 @@ class StepRunner:
             error_message=artifact_error_message or error_message,
         )
 
+    def _run_wait_step(self, run_id: str, step: ExecutableStep) -> RunnerStepResult:
+        started = time.perf_counter()
+        phase_reports: list[StepPhaseReport] = []
+        self._emit(run_id=run_id, event_type="step_start", step=step)
+
+        self._emit(run_id=run_id, event_type="phase_start", step=step, phase="prepare")
+        phase_reports.append(StepPhaseReport(step_id=step.step_id, phase="prepare", status="passed"))
+        self._emit(run_id=run_id, event_type="phase_finish", step=step, phase="prepare")
+
+        self._emit(run_id=run_id, event_type="phase_start", step=step, phase="invoke")
+        failure_category: FailureCategory | None = None
+        error_message: str | None = None
+        metadata: dict[str, object] = {}
+        try:
+            params = WaitMsParams.model_validate(step.params)
+            time.sleep(params.duration_ms / 1000)
+            metadata = params.model_dump(mode="json", exclude_none=True)
+        except ValidationError as exc:
+            failure_category = "configuration_error"
+            error_message = "Invalid waitMs parameters."
+            metadata = {"validation_errors": self._validation_errors(exc)}
+            self._emit(run_id=run_id, event_type="step_error", step=step, phase="invoke")
+        phase_reports.append(
+            StepPhaseReport(
+                step_id=step.step_id,
+                phase="invoke",
+                status="failed" if failure_category else "passed",
+                failure_category=failure_category,
+                error_message=error_message,
+                metadata=metadata,
+            )
+        )
+        self._emit(run_id=run_id, event_type="phase_finish", step=step, phase="invoke")
+
+        self._emit(run_id=run_id, event_type="phase_start", step=step, phase="finalize")
+        phase_reports.append(StepPhaseReport(step_id=step.step_id, phase="finalize", status="passed"))
+        self._emit(run_id=run_id, event_type="phase_finish", step=step, phase="finalize")
+
+        self._emit(run_id=run_id, event_type="step_finish", step=step)
+        return RunnerStepResult(
+            step_id=step.step_id,
+            source_ref=step.source_ref,
+            status="failed" if failure_category else "passed",
+            duration_ms=self._duration_ms(started),
+            phase_reports=phase_reports,
+            max_attempts=step.retry_policy.max_attempts,
+            failure_category=failure_category,
+            error_message=error_message,
+        )
+
     def _emit(
         self,
         *,
@@ -261,6 +317,12 @@ class StepRunner:
         if action_result.output is not None:
             metadata["harness_output"] = action_result.output
         return metadata
+
+    def _validation_errors(self, error: ValidationError) -> list[dict[str, object]]:
+        try:
+            return error.errors(include_url=False, include_context=False)
+        except TypeError:
+            return error.errors()
 
     def _is_failed_result(
         self,

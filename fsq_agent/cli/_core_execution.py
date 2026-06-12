@@ -12,9 +12,11 @@ def run_fsq_core_case(
     harness: HarnessInterface,
     output_dir: str | Path,
     run_id: str,
+    steps: list[ExecutableStep] | None = None,
 ) -> EvidenceBundle:
-    case = FsqCaseLoader().load_case(Path(case_path))
-    steps = FsqExecutableStepAdapter().to_executable_steps(case)
+    if steps is None:
+        case = FsqCaseLoader().load_case(Path(case_path))
+        steps = FsqExecutableStepAdapter().to_executable_steps(case)
     normal_steps, teardown_steps = _split_trailing_teardown_steps(steps)
     recorder = EvidenceRecorder(run_id=run_id, output_dir=Path(output_dir))
     bundle = StepSequenceRunner(harness=harness, evidence_recorder=recorder).run_steps(
@@ -39,12 +41,14 @@ def run_strict_fsq_core_case(
     harness: HarnessInterface,
     output_dir: str | Path,
     run_id: str,
+    steps: list[ExecutableStep] | None = None,
 ) -> ReportArtifact:
     bundle = run_fsq_core_case(
         case_path=case_path,
         harness=harness,
         output_dir=output_dir,
         run_id=run_id,
+        steps=steps,
     )
     if bundle.manifest_path is None:
         raise ReportGenerationError(

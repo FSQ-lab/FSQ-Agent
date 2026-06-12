@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Define the shared execution-core orchestration layer for FSQ-Agent. The core module owns the StepRunner protocol boundary, harness capability interface, and evidence-recording coordination points that will let FSQ YAML execution and natural-goal execution converge before platform operations.
+Define the shared execution-core orchestration layer for FSQ-Agent. The core module owns the StepRunner protocol boundary, core-owned pure wait execution, harness capability interface, and evidence-recording coordination points that will let FSQ YAML execution and natural-goal execution converge before platform operations.
 
 The module remains implementation-first only after SPEC confirmation. Public strict-core CLI orchestration belongs to `cli`; this module owns deterministic execution contracts and must stay independent from CLI command parsing.
 
 ## Dependencies
 
-- `models`: Uses shared execution-core data structures such as executable steps, phase reports, runner events, harness context/results, artifact refs, evidence bundle manifests, execution failure/status literals, serializable harness function schemas, Android driver parameter models, and AI assertion request/result models.
+- `models`: Uses shared execution-core data structures such as executable steps, pure wait parameter models, phase reports, runner events, harness context/results, artifact refs, evidence bundle manifests, execution failure/status literals, serializable harness function schemas, Android driver parameter models, and AI assertion request/result models.
 
 The core module must not depend on `agent`, `providers`, `tools`, `cli`, `fsq`, `report`, `observation`, `knowledge`, `skills`, or concrete platform tool modules in its first contract batch.
 
@@ -42,6 +42,8 @@ events = runner.events
 
 `StepRunner` accepts any object satisfying `HarnessInterface`. Entry-layer code and future factories are responsible for constructing platform-specific harnesses such as Android, Web, iOS, or fake harnesses.
 
+`StepRunner` also handles core-owned `waitMs` steps. A step with `action_name="waitMs"` must validate `step.params` with `WaitMsParams`, execute a pure elapsed-time wait, emit ordinary runner phase/step events, and return a passed `RunnerStepResult` without calling `HarnessInterface.get_context()`, `before_action`, `invoke_action`, `after_action`, or `capture_artifact`. A malformed `waitMs` payload returns a structured failed result with `failure_category="configuration_error"`. Pure waits must not route through Android driver gestures, CommonTool execution, or platform harness actions.
+
 `HarnessInterface.action_space()` returns `list[HarnessFunctionSchema]`. Each schema describes one concrete platform harness or driver action that the harness can expose as an OpenAI-compatible function schema for both strict-core metadata and the goal-driven agent loop. It must return serializable schema data only; it must not construct OpenAI Agents SDK `FunctionTool` objects. Tool names in this action space are handler/driver method names such as `tap_on`, `input_text`, and `assert_with_ai`, not FSQ action names such as `tapOn`, `inputText`, or `assertWithAI`. When available, schemas should include `fsq_action_name` metadata so reports and adapters can relate platform methods back to authored FSQ actions.
 
 `StepRunner` owns evidence-policy timing. When `ExecutableStep.evidence_policy` requests artifact capture, the runner should call `HarnessInterface.capture_artifact` with FSQ-owned `step_id`, `phase`, and a stable reason string. The first evidence-policy implementation should support:
@@ -60,7 +62,7 @@ runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
 result = runner.run_steps(run_id="run-1", steps=executable_steps, teardown_steps=teardown_steps)
 ```
 
-`StepSequenceRunner` accepts only shared `ExecutableStep` records and must not import `fsq`, parse YAML, construct platform drivers, or generate reports. Its first behavior is intentionally small:
+`StepSequenceRunner` accepts only shared `ExecutableStep` records and must not import `fsq`, parse YAML, construct platform drivers, resolve strict replay refs, or generate reports. Its first behavior is intentionally small:
 
 - Run normal steps in list order by delegating each step to `StepRunner.run_step`.
 - Record every event emitted by each `StepRunner` into the supplied `EvidenceRecorder`.
@@ -143,6 +145,8 @@ runFlow, repeat, retry,
 takeScreenshot, startRecording, stopRecording
 ```
 
+Generated strict replay cases may also contain `waitMs`, but it is a core-owned pure wait command and is not part of the Android harness command set.
+
 The first Android contract implementation is limited to the commands currently used by the Android FSQ testcase corpus. The phase-1 driver protocol is synchronous and backend-free:
 
 ```python
@@ -180,7 +184,7 @@ The phase-1 dispatch table is owned in code by the shared `ANDROID_ACTION_DEFINI
 | `swipe` | `swipe` | driver | `AndroidSwipeParams` |
 | `assertWithAI` | `assert_with_ai` | harness | `AndroidAssertWithAIParams` |
 
-`AndroidHarness` owns validation from `ExecutableStep.params` dictionaries into the corresponding Android parameter model from `ANDROID_ACTION_DEFINITIONS_BY_NAME` before it calls a driver method or harness-owned handler. Validation failures must return `HarnessActionResult(status="failed", failure_category="configuration_error")` before any driver method side effect or evaluator call. Driver-owned actions pass typed Pydantic parameter models to the concrete driver and convert driver output dictionaries into `HarnessActionResult`. Harness-owned `assertWithAI` captures the current screenshot through harness artifact capture, builds an `AIAssertionRequest`, invokes the injected `AIAssertionEvaluatorProtocol`, and converts `AIAssertionResult` into `HarnessActionResult` evidence.
+`AndroidHarness` owns validation from resolved `ExecutableStep.params` dictionaries into the corresponding Android parameter model from `ANDROID_ACTION_DEFINITIONS_BY_NAME` before it calls a driver method or harness-owned handler. Strict replay refs such as `RuntimeSecretRef` must already be resolved by the entry layer before Android harness validation. Validation failures must return `HarnessActionResult(status="failed", failure_category="configuration_error")` before any driver method side effect or evaluator call. Driver-owned actions pass typed Pydantic parameter models to the concrete driver and convert driver output dictionaries into `HarnessActionResult`. Harness-owned `assertWithAI` captures the current screenshot through harness artifact capture, builds an `AIAssertionRequest`, invokes the injected `AIAssertionEvaluatorProtocol`, and converts `AIAssertionResult` into `HarnessActionResult` evidence.
 
 Concrete driver methods opt in to action-space discovery by using `driver_tool` or an Android-specific internal wrapper that is backed by `ANDROID_ACTION_DEFINITIONS_BY_NAME`. `AndroidHarness.action_space()` is the public access point for discovered schemas. Internally, harness schema discovery should inspect `type(driver)` and return schemas for decorated driver methods plus harness-owned schemas such as `assert_with_ai` when the harness supports them. Generic `driver_tool` should infer the Pydantic parameter model from the method annotation unless the decorator supplies `params_model` explicitly. Android-specific decoration should verify that the concrete method name and `params` annotation match the shared action registry before attaching metadata. A decorated method without a resolvable Pydantic model should fail schema discovery with `ConfigurationError`. Undecorated methods remain callable by strict harness dispatch if they are part of `AndroidDriverInterface`, but they do not appear in `action_space()`.
 
@@ -263,13 +267,14 @@ Runner phases should preserve failure boundaries:
 
 ## Design Decisions
 
-- `core` owns execution control boundaries, not shared data models.
+- `core` owns execution control boundaries, including core-owned pure waits, not shared data models.
 - `models` owns serializable execution contracts, result records, runner events, harness context/result records, evidence manifests, and status/failure taxonomies.
 - `HarnessInterface` is a protocol because it represents platform capability rather than persisted data.
 - `HarnessInterface` is the runner-facing harness contract. It is intentionally higher-level than a raw Appium, Playwright, uiautomator2, or Midscene-style primitive interface.
 - `HarnessInterface.action_space()` is a function-schema capability surface, not an SDK tool factory. It returns serializable `HarnessFunctionSchema` models so `agent` can adapt them to OpenAI Agents SDK objects without adding SDK dependencies to `core`.
 - `AIAssertionEvaluatorProtocol` is structural and provider-neutral. `core` accepts an evaluator object but never constructs Azure OpenAI, GitHub Copilot, OpenAI Agents SDK, or Responses API clients.
 - `StepRunner` should call harness capabilities through `HarnessInterface`, emit shared runner events, and return shared step result models.
+- `StepRunner` should execute `waitMs` internally as a deterministic elapsed-time wait and should not expose it through harness action-space discovery or concrete Android drivers.
 - The minimal runner slice is synchronous. Async support should be decided when real direct Appium, uiautomator2, Playwright, or other harness driver integration requires it.
 - Fake harnesses for the minimal runner slice should live in tests until a reusable product fake is needed.
 - FSQ should provide a built-in `AndroidHarness` for Android execution semantics. Extension users who want uiautomator2, direct Appium, or another backend should usually implement `AndroidDriverInterface`, not a full custom `HarnessInterface`.
@@ -277,6 +282,7 @@ Runner phases should preserve failure boundaries:
 - Driver interfaces should remain backend mechanics contracts. They may execute actions and expose raw observations, but not control when evidence is captured or how execution history is recorded.
 - Concrete drivers control their function-call exposure by decorating methods with `driver_tool`. An interface method existing in `AndroidDriverInterface` is not enough to expose that method in `action_space()`. Harness-owned schemas such as Android `assert_with_ai` are exposed by `AndroidHarness`, not by concrete drivers.
 - Android action parameter models are shared model contracts. `fsq` uses them to normalize YAML, `core` uses them to validate dispatch and generate function schemas, and concrete drivers use typed instances instead of raw dictionaries.
+- Strict replay secret refs are not Android action parameter values. Entry-layer code must resolve them before `AndroidHarness` validates and dispatches actions, and core evidence must not persist resolved secret values.
 - Android `assertWithAI` is explicit assertion evaluation. It may call an injected evaluator only because the authored step requested AI assertion; it must not be used for locator fallback, action repair, screenshot reinspection of unrelated steps, or testcase mutation.
 - Locator self-healing is not part of strict execution. Any deterministic fallback or AI-assisted repair must be represented as recovery execution so reports can compare strict truth with recovery outcome.
 - Direct custom `HarnessInterface` implementations should remain possible for advanced platform plugins, but they are not the preferred ordinary Android backend extension point.

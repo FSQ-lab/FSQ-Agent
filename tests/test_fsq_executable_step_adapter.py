@@ -114,6 +114,34 @@ def test_fsq_executable_step_adapter_normalizes_params_and_source_refs(tmp_path:
     assert steps[1].metadata["raw_command"] == case.commands[1]
 
 
+def test_fsq_executable_step_adapter_preserves_runtime_secret_refs_and_waits(tmp_path: Path) -> None:
+    case_path = tmp_path / "recorded.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Recorded Secret Case
+platform: android
+---
+- inputText:
+    text:
+      runtimeSecret: TEST_ACCOUNT_PASSWORD
+    target: Password field
+- waitMs:
+    duration_ms: 1
+    reason: settle
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    steps = FsqExecutableStepAdapter().to_executable_steps(case)
+
+    assert steps[0].params == {"text": {"runtimeSecret": "TEST_ACCOUNT_PASSWORD"}, "target": "Password field"}
+    assert steps[1].action_name == "waitMs"
+    assert steps[1].params == {"duration_ms": 1, "reason": "settle"}
+    assert steps[1].kind == "action"
+
+
 def test_fsq_executable_step_adapter_raises_for_malformed_command(tmp_path: Path) -> None:
     case_path = tmp_path / "bad.codex.yaml"
     case_path.write_text(

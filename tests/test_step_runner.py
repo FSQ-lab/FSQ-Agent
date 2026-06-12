@@ -181,6 +181,20 @@ def test_step_runner_runs_successful_step_through_three_phases() -> None:
     ]
 
 
+def test_step_runner_executes_wait_ms_without_harness_calls() -> None:
+    harness = SuccessfulHarness()
+    runner = StepRunner(harness=harness)
+    step = ExecutableStep(step_id="wait-1", kind="action", action_name="waitMs", params={"duration_ms": 1, "reason": "settle"})
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    assert result.status == "passed"
+    assert harness.calls == []
+    assert [phase.phase for phase in result.phase_reports] == ["prepare", "invoke", "finalize"]
+    assert result.phase_reports[1].metadata == {"duration_ms": 1, "reason": "settle"}
+    assert "harness_call_start" not in [event.event_type for event in runner.events]
+
+
 def test_step_runner_wraps_invoke_exception_and_still_finalizes() -> None:
     harness = InvokeFailureHarness()
     runner = StepRunner(harness=harness)

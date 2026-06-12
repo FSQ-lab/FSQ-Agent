@@ -65,8 +65,9 @@ async def test_direct_harness_execution_is_not_common_tool_owned(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_agents_common_tool_adapter_wait_ms_returns_pure_wait_result(tmp_path: Path) -> None:
     provider = _provider(tmp_path)
+    events: list[RunEvent] = []
     adapter = AgentsCommonToolAdapter(_registry(provider))
-    tools = adapter.build_tools(_FakeFunctionTool, run_id="run-1", task_id="task-1")
+    tools = adapter.build_tools(_FakeFunctionTool, run_id="run-1", task_id="task-1", event_sink=events.append)
 
     wait_tool = next(tool for tool in tools if tool.name == "wait_ms")
     output = await wait_tool.on_invoke_tool(None, json.dumps({"duration_ms": 1, "reason": "page-load pause"}))
@@ -76,6 +77,9 @@ async def test_agents_common_tool_adapter_wait_ms_returns_pure_wait_result(tmp_p
     assert payload["result"]["output"]["duration_ms"] == 1
     assert payload["result"]["output"]["elapsed_ms"] >= 0
     assert payload["result"]["output"]["reason"] == "page-load pause"
+    assert events[-1].payload["recordable"] is True
+    assert events[-1].payload["replay_kind"] == "waitMs"
+    assert events[-1].payload["duration_ms"] == 1
 
 
 @pytest.mark.asyncio
@@ -102,6 +106,9 @@ async def test_agents_common_tool_adapter_runtime_secret_is_allowlisted_and_reda
     assert payload["result"]["sensitive"] is True
     assert "secret-password" not in events[-1].tool_output_preview
     assert '"value": "***"' in events[-1].tool_output_preview
+    assert events[-1].payload["recordable"] is True
+    assert events[-1].payload["replay_kind"] == "runtimeSecret"
+    assert events[-1].payload["runtime_secret_name"] == "TEST_ACCOUNT_PASSWORD"
 
 
 @pytest.mark.asyncio

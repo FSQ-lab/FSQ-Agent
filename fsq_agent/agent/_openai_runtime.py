@@ -575,6 +575,8 @@ class OpenAIAgentsRuntime:
                 payload=payload,
             )
         if name == "tool_output":
+            output = getattr(item, "output", None)
+            payload = self._tool_output_payload(output)
             return RunEvent(
                 run_id=run_id,
                 task_id=task_id,
@@ -582,8 +584,8 @@ class OpenAIAgentsRuntime:
                 title="Tool call completed",
                 message=self._tool_output_message(item),
                 tool_call_id=self._tool_call_id(item),
-                tool_output_preview=self._preview(getattr(item, "output", None)),
-                payload={"artifact_path": self._artifact_path_from_output(getattr(item, "output", None))},
+                tool_output_preview=self._preview(output),
+                payload=payload,
             )
         if name == "reasoning_item_created":
             summary = self._reasoning_summary(item)
@@ -813,3 +815,50 @@ class OpenAIAgentsRuntime:
                 if isinstance(first_ref, dict) and first_ref.get("path"):
                     return str(first_ref["path"])
         return None
+
+    def _tool_output_payload(self, output: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {"artifact_path": self._artifact_path_from_output(output)}
+        parsed = self._json_payload(output)
+        if not isinstance(parsed, dict):
+            return payload
+        safe_keys = {
+            "tool_name",
+            "tool_origin",
+            "platform",
+            "driver_method",
+            "fsq_action_name",
+            "status",
+            "failure_category",
+            "error_message",
+            "duration_ms",
+        }
+        for key in safe_keys:
+            if key in parsed:
+                payload[key] = parsed[key]
+        metadata = parsed.get("metadata")
+        if isinstance(metadata, dict):
+            payload["metadata"] = metadata
+        result = parsed.get("result")
+        if isinstance(result, dict):
+            if "status" not in payload and result.get("status") is not None:
+                payload["status"] = result.get("status")
+            if "failure_category" not in payload and result.get("failure_category") is not None:
+                payload["failure_category"] = result.get("failure_category")
+            if "error_message" not in payload and result.get("error_message") is not None:
+                payload["error_message"] = result.get("error_message")
+            artifact_refs = result.get("artifact_refs")
+            if isinstance(artifact_refs, list) and artifact_refs:
+                payload["artifact_refs"] = artifact_refs
+        return payload
+
+    def _json_payload(self, output: Any) -> Any:
+        if isinstance(output, str):
+            text = output
+        else:
+            text = str(output) if output is not None else ""
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except Exception:
+            return None
