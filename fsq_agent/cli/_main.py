@@ -371,6 +371,8 @@ def _task_from_goal(goal: str) -> Task:
             "Final verification should judge whether the goal is complete.\n\n"
             f"Goal: {normalized_goal}"
         ),
+        planning_reference_kind="goal",
+        planning_reference_text=normalized_goal,
         acceptance_criteria=[verification_goal],
         verification_goal=verification_goal,
         verification_criteria=[VerificationCriterion(text=verification_goal, kind="goal", source="cli_goal")],
@@ -380,21 +382,30 @@ def _task_from_goal(goal: str) -> Task:
 def _task_from_raw_case_source(source_path: Path, content: str) -> Task:
     label = source_path.name
     verification_goal = f"Goal completed: Execute the referenced case content from {label}."
+    planning_reference_text = _raw_case_planning_reference(source_path, content)
     return Task(
         id=_goal_task_id(source_path.name.removesuffix(".codex.yaml")),
         name=f"Case reference: {label}",
         description=(
             "Run this case through dynamic LLM execution using the raw file content below as reference material. "
             "The CLI has not parsed, normalized, or converted this content into local steps.\n\n"
-            f"Source path: {source_path}\n\n"
-            "Raw case content:\n"
-            "```yaml\n"
-            f"{content}\n"
-            "```"
+            f"{planning_reference_text}"
         ),
+        planning_reference_kind="raw_case",
+        planning_reference_text=planning_reference_text,
         acceptance_criteria=[verification_goal],
         verification_goal=verification_goal,
         verification_criteria=[VerificationCriterion(text=verification_goal, kind="goal", source="cli_case_yaml_raw")],
+    )
+
+
+def _raw_case_planning_reference(source_path: Path, content: str) -> str:
+    return (
+        f"Source path: {source_path}\n\n"
+        "Raw case content:\n"
+        "```yaml\n"
+        f"{content}\n"
+        "```"
     )
 
 

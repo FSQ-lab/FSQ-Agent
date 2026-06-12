@@ -10,6 +10,7 @@ StepStatus = Literal["success", "failed", "skipped", "adjusted"]
 VerificationStatus = Literal["success", "failed", "inconclusive"]
 VerificationMode = Literal["strict", "normal", "goal"]
 VerificationCriterionKind = Literal["goal", "assertion", "operation"]
+PlanningReferenceKind = Literal["goal", "raw_case", "unknown"]
 
 
 class VerificationCriterion(BaseModel):
@@ -29,6 +30,8 @@ class Task(BaseModel):
     name: str = "Task"
     description: str
     acceptance_criteria: list[str] = Field(default_factory=list)
+    planning_reference_kind: PlanningReferenceKind | None = None
+    planning_reference_text: str | None = None
     key_actions: list[str] = Field(default_factory=list)
     verification_goal: str | None = None
     verification_criteria: list[VerificationCriterion] = Field(default_factory=list)

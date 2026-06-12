@@ -1,5 +1,6 @@
 import time
 import os
+import inspect
 from datetime import datetime
 from pathlib import Path
 
@@ -162,8 +163,8 @@ class FsqAgent:
         if task.key_actions:
             return task
 
-        goal = self._goal_text_for_task(task)
-        pre_plan = await self.runtime.run_pre_plan(goal, self._load_page_knowledge_index(), skills, run_id, emitter.emit)
+        reference_type, reference_text = self._planning_reference_for_task(task)
+        pre_plan = await self._run_pre_plan(reference_type, reference_text, skills, run_id, emitter)
         key_actions = [
             f"Key action {index}: {action.action.strip()}"
             for index, action in enumerate(pre_plan.key_actions, start=1)
@@ -185,7 +186,7 @@ class FsqAgent:
                     payload=payload,
                 )
             )
-            return self._ensure_goal_verification(task, goal)
+            return self._ensure_goal_verification(task, reference_text)
 
         await emitter.emit(
             RunEvent(
@@ -197,7 +198,36 @@ class FsqAgent:
                 payload=payload,
             )
         )
-        return self._ensure_goal_verification(task, goal).model_copy(update={"key_actions": key_actions})
+        return self._ensure_goal_verification(task, reference_text).model_copy(update={"key_actions": key_actions})
+
+    async def _run_pre_plan(
+        self,
+        reference_type: str,
+        reference_text: str,
+        skills: list[object],
+        run_id: str,
+        emitter: RunEventEmitter,
+    ):
+        knowledge = self._load_page_knowledge_index()
+        signature = inspect.signature(self.runtime.run_pre_plan)
+        accepts_reference_type = "reference_type" in signature.parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+        )
+        if accepts_reference_type:
+            return await self.runtime.run_pre_plan(
+                reference_text,
+                knowledge,
+                skills,
+                run_id,
+                emitter.emit,
+                reference_type=reference_type,
+            )
+        return await self.runtime.run_pre_plan(reference_text, knowledge, skills, run_id, emitter.emit)
+
+    def _planning_reference_for_task(self, task: Task) -> tuple[str, str]:
+        if task.planning_reference_text and task.planning_reference_text.strip():
+            return task.planning_reference_kind or "unknown", task.planning_reference_text.strip()
+        return "unknown", self._goal_text_for_task(task)
 
     def _goal_text_for_task(self, task: Task) -> str:
         if task.verification_goal and task.verification_goal.startswith("Goal completed: "):

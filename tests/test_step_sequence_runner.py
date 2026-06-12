@@ -1,7 +1,10 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from fsq_agent.core import EvidenceRecorder, StepSequenceRunner
+import fsq_agent.core.runner._sequence as sequence_module
 from fsq_agent.models import (
     ExecutableStep,
     FailureCategory,
@@ -10,6 +13,11 @@ from fsq_agent.models import (
     HarnessContext,
     StepPhase,
 )
+
+
+@pytest.fixture(autouse=True)
+def _skip_real_sequence_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sequence_module.time, "sleep", lambda seconds: None)
 
 
 class SequenceHarness:
@@ -131,3 +139,46 @@ def test_step_sequence_runner_runs_teardown_after_successful_normal_steps(tmp_pa
 
     assert [step.step_id for step in bundle.steps] == ["step-1", "teardown-1"]
     assert [step.status for step in bundle.steps] == ["passed", "passed"]
+
+
+def test_step_sequence_runner_waits_between_executed_steps_without_evidence_steps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = SequenceHarness()
+    sleep_calls: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        harness.calls.append(f"sleep:{seconds}")
+
+    monkeypatch.setattr(sequence_module.time, "sleep", fake_sleep)
+
+    recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
+    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+
+    bundle = runner.run_steps(
+        run_id="run-1",
+        steps=[_step("step-1", "tapOn"), _step("step-2", "inputText")],
+        teardown_steps=[_step("teardown-1", "killApp")],
+    )
+
+    assert sleep_calls == [1.0, 1.0]
+    assert [step.step_id for step in bundle.steps] == ["step-1", "step-2", "teardown-1"]
+    assert [event.event_type for event in bundle.events].count("step_start") == 3
+    assert harness.calls == [
+        "get_context",
+        "before:step-1",
+        "invoke:step-1",
+        "after:step-1:passed",
+        "sleep:1",
+        "get_context",
+        "before:step-2",
+        "invoke:step-2",
+        "after:step-2:passed",
+        "sleep:1",
+        "get_context",
+        "before:teardown-1",
+        "invoke:teardown-1",
+        "after:teardown-1:passed",
+    ]

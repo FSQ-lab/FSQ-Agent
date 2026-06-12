@@ -1,3 +1,4 @@
+import time
 from collections.abc import Sequence
 
 from fsq_agent.core.evidence import EvidenceRecorder
@@ -24,17 +25,30 @@ class StepSequenceRunner:
         steps: Sequence[ExecutableStep],
         teardown_steps: Sequence[ExecutableStep] = (),
     ) -> EvidenceBundle:
+        ran_step = False
+
+        def run_next(step: ExecutableStep):
+            nonlocal ran_step
+            if ran_step:
+                self._sleep_between_steps()
+            result = self._run_and_record(run_id, step)
+            ran_step = True
+            return result
+
         try:
             for step in steps:
-                result = self._run_and_record(run_id, step)
+                result = run_next(step)
                 if result.status in _STOP_STATUSES:
                     raise _StepSequenceFailure
         except _StepSequenceFailure:
             pass
         finally:
             for step in teardown_steps:
-                self._run_and_record(run_id, step)
+                run_next(step)
         return self.evidence_recorder.build_bundle()
+
+    def _sleep_between_steps(self) -> None:
+        time.sleep(2)
 
     def _run_and_record(self, run_id: str, step: ExecutableStep):
         step_runner = StepRunner(harness=self.harness)

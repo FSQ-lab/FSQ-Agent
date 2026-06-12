@@ -1,5 +1,7 @@
+import asyncio
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 import pytest
@@ -75,6 +77,57 @@ def _fake_harness_factory(_run_id: str) -> _FakeHarness:
     return _FakeHarness()
 
 
+class _FakeProviderSession:
+    def create_agents_provider(self, **_kwargs: Any) -> str:
+        return "provider"
+
+    async def close(self) -> None:
+        return None
+
+
+class _FakeAgent:
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+
+
+class _FakeRunConfig:
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+
+
+class _FakeToolOutputTrimmer:
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+
+
+class _FakeRunResult:
+    final_output = AgentFinalOutput(status="success", summary="Done.")
+
+    async def stream_events(self) -> Any:
+        if False:
+            yield None
+
+
+class _FakeRunner:
+    @staticmethod
+    def run_streamed(*_args: Any, **_kwargs: Any) -> _FakeRunResult:
+        return _FakeRunResult()
+
+
+def _patch_runtime_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agents
+    import agents.extensions
+    import fsq_agent.agent._openai_runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "build_model_provider_session", lambda _settings: _FakeProviderSession())
+    monkeypatch.setattr(agents, "Agent", _FakeAgent)
+    monkeypatch.setattr(agents, "FunctionTool", _FakeFunctionTool)
+    monkeypatch.setattr(agents, "RunConfig", _FakeRunConfig)
+    monkeypatch.setattr(agents, "Runner", _FakeRunner)
+    monkeypatch.setattr(agents, "set_tracing_disabled", lambda _disabled: None)
+    monkeypatch.setattr(agents.extensions, "ToolOutputTrimmer", _FakeToolOutputTrimmer)
+
+
 @pytest.mark.asyncio
 async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
@@ -92,6 +145,102 @@ async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPat
     assert results[0].status == "failed"
     assert results[0].tool_name == "openai_agents.runner"
     assert "Harness action-space discovery failed" in str(results[0].error)
+
+
+@pytest.mark.asyncio
+async def test_runtime_emits_startup_events_before_main_planning(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
+    _patch_runtime_sdk(monkeypatch)
+    runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory(), _fake_harness_factory)
+    task = Task(id="startup", name="Startup", description="Run startup.")
+    events: list[Any] = []
+
+    results = await runtime.run_task(task, KnowledgeBundle(), [], "startup-run", event_sink=events.append)
+
+    assert results[-1].status == "success"
+    titles = [event.title for event in events]
+    expected_titles = [
+        "Runtime startup started",
+        "Provider setup started",
+        "Provider setup completed",
+        "Harness setup started",
+        "Harness setup completed",
+        "Tool setup started",
+        "Tool setup completed",
+        "SDK agent ready",
+        "Planning started",
+    ]
+    for title in expected_titles:
+        assert title in titles
+    assert [titles.index(title) for title in expected_titles] == sorted(titles.index(title) for title in expected_titles)
+    harness_started = events[titles.index("Harness setup started")]
+    assert harness_started.payload["timeout_seconds"] == 60
+    assert harness_started.payload["app_id_configured"] is False
+    harness_completed = events[titles.index("Harness setup completed")]
+    assert harness_completed.payload["harness_class"] == "_FakeHarness"
+    assert "driver_class" not in harness_completed.payload
+
+
+@pytest.mark.asyncio
+async def test_runtime_harness_construction_failure_is_visible(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
+    _patch_runtime_sdk(monkeypatch)
+
+    def fail_harness(_run_id: str) -> _FakeHarness:
+        raise RuntimeError("device connect failed")
+
+    runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory(), fail_harness)
+    events: list[Any] = []
+
+    results = await runtime.run_task(Task(id="failure", description="Fail startup."), KnowledgeBundle(), [], "failure-run", events.append)
+
+    assert results[0].status == "failed"
+    assert "device connect failed" in str(results[0].error)
+    titles = [event.title for event in events]
+    assert "Harness setup started" in titles
+    assert "Harness setup completed" not in titles
+    assert titles[-1] == "SDK run failed"
+
+
+@pytest.mark.asyncio
+async def test_runtime_harness_construction_timeout_is_visible(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
+    _patch_runtime_sdk(monkeypatch)
+
+    def slow_harness(_run_id: str) -> _FakeHarness:
+        time.sleep(2)
+        return _FakeHarness()
+
+    settings = Settings(agent={"step_timeout_seconds": 1}, openai_agents=OpenAIAgentsSettings())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), slow_harness)
+    events: list[Any] = []
+
+    results = await runtime.run_task(Task(id="timeout", description="Timeout startup."), KnowledgeBundle(), [], "timeout-run", events.append)
+
+    assert results[0].status == "failed"
+    assert "Harness setup timed out after 1 seconds" in str(results[0].error)
+    titles = [event.title for event in events]
+    assert "Harness setup started" in titles
+    assert "Harness setup completed" not in titles
+    assert titles[-1] == "SDK run failed"
+
+
+def test_runtime_harness_timeout_does_not_wait_for_worker_shutdown() -> None:
+    def slow_harness(_run_id: str) -> _FakeHarness:
+        time.sleep(3)
+        return _FakeHarness()
+
+    settings = Settings(agent={"step_timeout_seconds": 1}, openai_agents=OpenAIAgentsSettings())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), slow_harness)
+
+    async def run_timeout() -> None:
+        with pytest.raises(TimeoutError, match="Harness setup timed out after 1 seconds"):
+            await runtime._build_harness_with_timeout("shutdown-run")
+
+    started = time.perf_counter()
+    asyncio.run(run_timeout())
+
+    assert time.perf_counter() - started < 1.8
 
 
 def test_runtime_builds_step_results_from_structured_pre_plan() -> None:

@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from fsq_agent.cli._core_execution import run_fsq_core_case, run_strict_fsq_core_case
+import fsq_agent.core.runner._sequence as sequence_module
 from fsq_agent.models import (
     ExecutableStep,
     FailureCategory,
@@ -11,6 +14,11 @@ from fsq_agent.models import (
     HarnessContext,
     StepPhase,
 )
+
+
+@pytest.fixture(autouse=True)
+def _skip_real_sequence_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sequence_module.time, "sleep", lambda seconds: None)
 
 
 FSQ_CASE = """

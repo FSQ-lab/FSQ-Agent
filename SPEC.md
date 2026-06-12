@@ -21,6 +21,10 @@ Dynamic LLM runs may optionally record the actual successful replayable executio
 
 Recorded strict cases may contain replay-only syntax such as `runtimeSecret` parameter references and `waitMs` pure-wait commands. Strict execution resolves `runtimeSecret` references in memory before UI actions begin and executes `waitMs` without platform driver side effects.
 
+## Dynamic Raw Case Planning Reference
+
+Dynamic LLM `--case-yaml` and `--case-dir` runs read authored case files as raw UTF-8 reference text, not as strict executable steps. The CLI-owned dynamic task construction must preserve that full raw reference in explicit planning-reference fields so the agent pre-planner derives ordered key actions from the authored case flow before using page knowledge as auxiliary grounding. Final verification criteria remain separate from planning references, and dynamic recording continues to reconstruct replayable commands only from actual run events.
+
 ## Module Table
 
 | Module | SPEC | Purpose |

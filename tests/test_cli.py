@@ -3,7 +3,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from fsq_agent.cli._main import _task_from_goal, main
+from fsq_agent.cli._main import _task_from_goal, _task_from_raw_case_source, main
 from fsq_agent.cli._strict_case_recording import StrictCaseRecording
 from fsq_agent.models import ReportArtifact, Task, TaskResult, VerificationResult
 
@@ -310,6 +310,27 @@ def test_task_from_goal_creates_goal_only_task() -> None:
 
     assert task.id == "access-downloads-through-the-overflow-menu"
     assert task.name == "Access Downloads through the overflow menu."
+    assert task.planning_reference_kind == "goal"
+    assert task.planning_reference_text == "Access Downloads through the overflow menu."
     assert task.key_actions == []
     assert task.verification_goal == "Goal completed: Access Downloads through the overflow menu."
     assert [criterion.kind for criterion in task.verification_criteria] == ["goal"]
+
+
+def test_task_from_raw_case_source_preserves_full_content_as_planning_reference(tmp_path: Path) -> None:
+    case_path = tmp_path / "verify_settings.codex.yaml"
+    content = """schemaVersion: fsq.ai-test/v1
+name: Verify Settings
+---
+- launchApp
+- tapOn: Microsoft services
+"""
+
+    task = _task_from_raw_case_source(case_path, content)
+
+    assert task.planning_reference_kind == "raw_case"
+    assert task.planning_reference_text is not None
+    assert f"Source path: {case_path}" in task.planning_reference_text
+    assert content in task.planning_reference_text
+    assert "Microsoft services" in task.planning_reference_text
+    assert task.verification_goal == "Goal completed: Execute the referenced case content from verify_settings.codex.yaml."

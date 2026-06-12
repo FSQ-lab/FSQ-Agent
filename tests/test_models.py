@@ -10,6 +10,8 @@ def test_task_defaults() -> None:
     assert task.id == "task"
     assert task.name == "Task"
     assert task.acceptance_criteria == []
+    assert task.planning_reference_kind is None
+    assert task.planning_reference_text is None
     assert task.key_actions == []
     assert task.verification_goal is None
     assert task.verification_criteria == []

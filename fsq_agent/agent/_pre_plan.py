@@ -10,7 +10,14 @@ from fsq_agent.models import GoalPrePlan, KnowledgeBundle, SkillBundle
 
 PRE_PLAN_AGENT_INSTRUCTIONS = """
 You are fsq-agent's goal pre-planner.
-Convert one natural-language goal into an ordered list of key actions using the loaded page knowledge graph.
+Convert one planning reference into an ordered list of key actions using the loaded page knowledge graph.
+
+The input contains reference_type and reference_text. For reference_type="goal", treat reference_text as the
+natural-language goal. For reference_type="raw_case", first extract the authored ordered flow from the raw case
+text, then use page knowledge to ground page semantics, locator hints, transitions, and warnings. Do not replace
+authored raw-case steps just because page knowledge is incomplete or mismatched; keep the raw authored flow primary
+and add warnings for gaps or conflicts. Lifecycle commands such as launchApp and killApp are setup or teardown
+intent unless they are semantically central to the case.
 
 This is planning only. Do not execute UI actions, do not call UI automation tools, and do not claim runtime verification.
 Your initial context contains the knowledge index only. Use read_knowledge_page to load concrete page nodes as needed.
@@ -22,8 +29,9 @@ Treat reference locators as helpful hints, not authoritative truth.
 Return only the structured GoalPrePlan output. Key actions should be actionable, ordered, and page-aware.
 Use result.to_page_id values from page element operations when describing navigation between pages.
 If the knowledge is incomplete, still return the best concise contiguous plan and add warnings. You may skip at most
-one consecutive missing key action when page or element knowledge is unavailable. If you cannot form a useful action
-chain from the available knowledge, return an empty key_actions list and explain the failure in warnings.
+one consecutive missing key action when page or element knowledge is unavailable for goal references. For raw_case
+references, preserve the authored step sequence as the backbone even when page knowledge is incomplete. If you cannot
+form a useful action chain, return an empty key_actions list and explain the failure in warnings.
 """.strip()
 
 
@@ -37,9 +45,15 @@ class ReadKnowledgePageArgs(BaseModel):
     reason: str | None = Field(default=None, description="Short reason this page is needed for planning.")
 
 
-def build_pre_plan_input(goal: str, knowledge: KnowledgeBundle, skills: list[SkillBundle]) -> str:
+def build_pre_plan_input(
+    reference_text: str,
+    knowledge: KnowledgeBundle,
+    skills: list[SkillBundle],
+    reference_type: str = "goal",
+) -> str:
     payload = {
-        "goal": goal,
+        "reference_type": reference_type,
+        "reference_text": reference_text,
         "knowledge_items": knowledge.items,
         "knowledge_warnings": knowledge.warnings,
         "skills": [

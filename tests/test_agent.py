@@ -80,18 +80,21 @@ class _GoalRunRuntime(_Runtime):
     def __init__(self) -> None:
         super().__init__()
         self.pre_plan_goal: str | None = None
+        self.pre_plan_reference_type: str | None = None
 
     async def run_pre_plan(
         self,
-        goal: str,
+        reference_text: str,
         knowledge: KnowledgeBundle,
         skills: list[object],
         run_id: str,
         event_sink: object | None = None,
+        reference_type: str = "goal",
     ) -> GoalPrePlan:
-        self.pre_plan_goal = goal
+        self.pre_plan_goal = reference_text
+        self.pre_plan_reference_type = reference_type
         return GoalPrePlan(
-            goal=goal,
+            goal=reference_text,
             summary="Generated execution actions.",
             relevant_page_ids=["edge_android_new_tab_page"],
             key_actions=[
@@ -362,6 +365,7 @@ async def test_agent_run_preplans_goal_only_task_before_execution(tmp_path: Path
 
     assert result.status == "success"
     assert runtime.pre_plan_goal == "Access Downloads"
+    assert runtime.pre_plan_reference_type == "unknown"
     assert runtime.last_task is not None
     assert runtime.last_task.key_actions == [
         "Key action 1: Open the overflow menu.",
@@ -369,6 +373,55 @@ async def test_agent_run_preplans_goal_only_task_before_execution(tmp_path: Path
     ]
     assert [criterion.text for criterion in runtime.last_task.verification_criteria] == ["Goal completed: Access Downloads"]
     assert any(event.title == "Goal pre-plan injected" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_agent_pre_plan_uses_explicit_raw_case_planning_reference(tmp_path: Path) -> None:
+    knowledge_dir = tmp_path / "knowledge"
+    knowledge_dir.mkdir(parents=True)
+    (knowledge_dir / "index.md").write_text("# Page Knowledge", encoding="utf-8")
+    runtime = _GoalRunRuntime()
+    agent = FsqAgent(
+        Settings(knowledge_dir=knowledge_dir),
+        verifier=Verifier(),
+        reporter=_Reporter(),  # type: ignore[arg-type]
+        knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
+        skill_loader=_SkillLoader(),  # type: ignore[arg-type]
+        runtime=runtime,  # type: ignore[arg-type]
+    )
+    raw_reference = """Source path: cases/settings.codex.yaml
+
+Raw case content:
+```yaml
+- tapOn: Privacy and security
+- tapOn: Microsoft services
+```
+"""
+    task = Task(
+        id="settings",
+        name="Case reference: settings.codex.yaml",
+        description="Run raw case content.",
+        planning_reference_kind="raw_case",
+        planning_reference_text=raw_reference,
+        verification_goal="Goal completed: Execute the referenced case content from settings.codex.yaml.",
+        acceptance_criteria=["Goal completed: Execute the referenced case content from settings.codex.yaml."],
+        verification_criteria=[
+            VerificationCriterion(
+                text="Goal completed: Execute the referenced case content from settings.codex.yaml.",
+                kind="goal",
+                source="test",
+            )
+        ],
+    )
+
+    result = await agent.run(task)
+
+    assert result.status == "success"
+    assert runtime.pre_plan_reference_type == "raw_case"
+    assert runtime.pre_plan_goal == raw_reference.strip()
+    assert runtime.pre_plan_goal is not None
+    assert "Microsoft services" in runtime.pre_plan_goal
+    assert "Execute the referenced case content" not in runtime.pre_plan_goal
 
 
 @pytest.mark.asyncio

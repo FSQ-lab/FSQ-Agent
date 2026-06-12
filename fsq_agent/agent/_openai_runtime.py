@@ -1,6 +1,8 @@
+import asyncio
 import json
 import os
 from pathlib import Path
+import threading
 import time
 import inspect
 from collections.abc import Callable
@@ -180,23 +182,112 @@ class OpenAIAgentsRuntime:
         except ImportError as exc:
             raise ConfigurationError("openai-agents and openai packages are required when SDK runtime is enabled.") from exc
 
-        set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
-        provider_session = build_model_provider_session(self.settings)
-        provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
+        provider_session = None
+        result = None
         try:
+            await self._emit(
+                event_sink,
+                RunEvent(
+                    run_id=run_id,
+                    task_id=task.id,
+                    type="planning_update",
+                    title="Runtime startup started",
+                    message="Preparing provider, harness, tools, and SDK agent for main execution.",
+                    payload={"platform": self.settings.harness.platform},
+                ),
+            )
+            set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+            await self._emit(
+                event_sink,
+                RunEvent(
+                    run_id=run_id,
+                    task_id=task.id,
+                    type="planning_update",
+                    title="Provider setup started",
+                    message="Creating the configured model provider session.",
+                    payload={"provider": self.settings.openai_agents.provider, "model": self.settings.openai_agents.model},
+                ),
+            )
+            provider_session = build_model_provider_session(self.settings)
+            provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
+            await self._emit(
+                event_sink,
+                RunEvent(
+                    run_id=run_id,
+                    task_id=task.id,
+                    type="planning_update",
+                    title="Provider setup completed",
+                    message="Model provider session is ready for the main execution agent.",
+                    payload={"provider": self.settings.openai_agents.provider, "model": self.settings.openai_agents.model},
+                ),
+            )
             try:
-                harness = self._build_harness(run_id)
+                await self._emit(
+                    event_sink,
+                    RunEvent(
+                        run_id=run_id,
+                        task_id=task.id,
+                        type="planning_update",
+                        title="Harness setup started",
+                        message="Constructing the platform harness for main execution.",
+                        payload=self._harness_setup_payload(),
+                    ),
+                )
+                harness = await self._build_harness_with_timeout(run_id)
+                await self._emit(
+                    event_sink,
+                    RunEvent(
+                        run_id=run_id,
+                        task_id=task.id,
+                        type="planning_update",
+                        title="Harness setup completed",
+                        message="Platform harness is ready for tool schema discovery.",
+                        payload=self._harness_setup_payload(harness),
+                    ),
+                )
+                await self._emit(
+                    event_sink,
+                    RunEvent(
+                        run_id=run_id,
+                        task_id=task.id,
+                        type="planning_update",
+                        title="Tool setup started",
+                        message="Building CommonTool and platform harness tools for the SDK agent.",
+                    ),
+                )
                 harness_adapter = HarnessToolAdapter(harness, reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES})
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name
                 common_tools = self.tool_factory.build_tools(FunctionTool, run_id=run_id, task_id=task.id, event_sink=event_sink)
                 harness_tools = harness_adapter.build_tools(FunctionTool)
+                await self._emit(
+                    event_sink,
+                    RunEvent(
+                        run_id=run_id,
+                        task_id=task.id,
+                        type="planning_update",
+                        title="Tool setup completed",
+                        message="SDK tools are ready for main execution.",
+                        payload={"common_tool_count": len(common_tools), "harness_tool_count": len(harness_tools)},
+                    ),
+                )
                 agent = Agent(
                     name=self.settings.agent.name,
                     model=self.settings.openai_agents.model,
                     instructions=self._build_instructions(knowledge, skills),
                     tools=[*common_tools, *harness_tools],
                     output_type=AgentFinalOutput,
+                )
+                await self._emit(
+                    event_sink,
+                    RunEvent(
+                        run_id=run_id,
+                        task_id=task.id,
+                        type="planning_update",
+                        title="SDK agent ready",
+                        message="Main execution agent is ready to start streamed planning.",
+                        payload={"tool_count": len(common_tools) + len(harness_tools)},
+                    ),
                 )
                 await self._emit(
                     event_sink,
@@ -241,10 +332,45 @@ class OpenAIAgentsRuntime:
                         tool_name="openai_agents.runner",
                     )
                 ]
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            await self._emit(
+                event_sink,
+                RunEvent(
+                    run_id=run_id,
+                    task_id=task.id,
+                    type="run_failed",
+                    title="SDK run failed",
+                    message=self._replace_secret_values(str(exc), self._runtime_secret_values()),
+                    duration_ms=duration_ms,
+                ),
+            )
+            return [
+                StepResult(
+                    step_id=1,
+                    status="failed",
+                    actual_outcome="OpenAI Agents SDK run failed before producing structured verification output.",
+                    duration_ms=duration_ms,
+                    error=self._replace_secret_values(str(exc), self._runtime_secret_values()),
+                    tool_name="openai_agents.runner",
+                )
+            ]
         finally:
-            await provider_session.close()
+            if provider_session is not None:
+                await provider_session.close()
 
         duration_ms = int((time.perf_counter() - started) * 1000)
+        if result is None:
+            return [
+                StepResult(
+                    step_id=1,
+                    status="failed",
+                    actual_outcome="OpenAI Agents SDK run ended before producing a streamed result.",
+                    duration_ms=duration_ms,
+                    error="OpenAI Agents SDK run ended before producing a streamed result.",
+                    tool_name="openai_agents.runner",
+                )
+            ]
         final_output = coerce_agent_final_output(result.final_output) or str(result.final_output)
         final_output = self._redact_runtime_secrets(final_output)
         serialized_final_output = serialize_agent_final_output(final_output)
@@ -262,13 +388,72 @@ class OpenAIAgentsRuntime:
             )
         ]
 
+    async def _build_harness_with_timeout(self, run_id: str) -> HarnessInterface:
+        timeout_seconds = self.settings.agent.step_timeout_seconds
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[HarnessInterface] = loop.create_future()
+
+        def set_result(harness: HarnessInterface) -> None:
+            if not future.done():
+                future.set_result(harness)
+
+        def set_exception(exc: Exception) -> None:
+            if not future.done():
+                future.set_exception(exc)
+
+        def build_harness() -> None:
+            try:
+                harness = self._build_harness(run_id)
+            except Exception as exc:
+                try:
+                    loop.call_soon_threadsafe(set_exception, exc)
+                except RuntimeError:
+                    pass
+            else:
+                try:
+                    loop.call_soon_threadsafe(set_result, harness)
+                except RuntimeError:
+                    pass
+
+        threading.Thread(target=build_harness, name=f"fsq-harness-setup-{run_id}", daemon=True).start()
+        try:
+            return await asyncio.wait_for(future, timeout=timeout_seconds)
+        except TimeoutError as exc:
+            if future.done() and not future.cancelled():
+                raise
+            future.cancel()
+            raise TimeoutError(f"Harness setup timed out after {timeout_seconds} seconds.") from exc
+
+    def _harness_setup_payload(self, harness: HarnessInterface | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "platform": self.settings.harness.platform,
+            "timeout_seconds": self.settings.agent.step_timeout_seconds,
+        }
+        if self.settings.harness.platform == "android":
+            android = self.settings.harness.android
+            payload.update(
+                {
+                    "backend": android.backend,
+                    "app_id_configured": bool(android.app_id),
+                    "serial_configured": bool(android.serial),
+                }
+            )
+        if harness is not None:
+            payload["harness_class"] = type(harness).__name__
+            driver = getattr(harness, "driver", None)
+            if driver is not None:
+                payload["driver_class"] = type(driver).__name__
+        return payload
+
     async def run_pre_plan(
         self,
-        goal: str,
+        reference_text: str,
         knowledge: KnowledgeBundle,
         skills: list[SkillBundle],
         run_id: str,
         event_sink: RunEventSink | None = None,
+        reference_type: str = "goal",
     ) -> GoalPrePlan:
         validate_runtime_settings(self.settings)
         task_id = "pre-plan"
@@ -287,7 +472,7 @@ class OpenAIAgentsRuntime:
                 task_id=task_id,
                 type="planning_started",
                 title="Pre-plan started",
-                message="Generating key actions from the goal and page knowledge.",
+                message="Generating key actions from the planning reference and page knowledge.",
             ),
         )
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
@@ -303,7 +488,7 @@ class OpenAIAgentsRuntime:
             )
             result = Runner.run_streamed(
                 agent,
-                input=build_pre_plan_input(goal, knowledge, skills),
+                input=build_pre_plan_input(reference_text, knowledge, skills, reference_type=reference_type),
                 max_turns=self.settings.openai_agents.max_turns,
                 run_config=self._build_run_config(RunConfig, ToolOutputTrimmer, provider, run_id),
             )
