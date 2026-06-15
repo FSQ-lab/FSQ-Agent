@@ -62,6 +62,29 @@ openai_agents:
     assert settings.pre_plan.knowledge_dir == tmp_path / "knowledge"
 
 
+def test_load_settings_defaults_workspace_to_config_directory(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    config_path = project_dir / "config.yaml"
+    config_path.write_text(
+        """
+cases:
+  dir: cases
+output:
+  root_dir: output
+""",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    expected_workspace = project_dir / ".fsq-agent-workspace"
+    assert settings.workspace.root_dir == expected_workspace
+    assert (expected_workspace / ".fsq-agent-workspace").exists()
+    assert settings.output.root_dir == expected_workspace / "output"
+    assert settings.output.runs_dir == expected_workspace / "output" / "runs"
+
+
 def test_load_settings_rejects_non_empty_unmarked_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

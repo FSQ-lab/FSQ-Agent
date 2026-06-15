@@ -1,4 +1,3 @@
-import os
 import platform
 import subprocess
 from pathlib import Path
@@ -7,12 +6,8 @@ from fsq_agent.config._settings import Settings
 from fsq_agent.models import ConfigurationError
 
 
-def _default_workspace_root() -> Path:
-    if platform.system() == "Windows":
-        base = os.getenv("LOCALAPPDATA")
-        if base:
-            return Path(base) / "fsq-agent" / "workspace"
-    return Path.home() / ".fsq-agent" / "workspace"
+def _default_workspace_root(base_dir: Path) -> Path:
+    return base_dir / ".fsq-agent-workspace"
 
 
 def _resolve_path(path: Path, base_dir: Path) -> Path:
@@ -38,7 +33,7 @@ def _set_hidden_best_effort(path: Path) -> None:
 
 def _ensure_workspace(settings: Settings, base_dir: Path) -> Path:
     root = settings.workspace.root_dir
-    workspace_root = _default_workspace_root() if root is None else _resolve_path(root, base_dir)
+    workspace_root = _default_workspace_root(base_dir) if root is None else _resolve_path(root, base_dir)
     marker_path = workspace_root / settings.workspace.marker_file
 
     if workspace_root.exists() and not workspace_root.is_dir():
