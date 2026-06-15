@@ -10,6 +10,7 @@ from fsq_agent.models import (
     AndroidPressKeyParams,
     AndroidSwipeParams,
     AndroidTapOnParams,
+    AndroidUiTreeParams,
     EvidenceArtifactRef,
     EvidenceBundle,
     EvidencePolicy,
@@ -127,6 +128,9 @@ def test_android_action_definitions_are_single_source_for_android_contract() -> 
     assert ANDROID_ACTION_DEFINITIONS_BY_NAME["tapOn"].step_kind == "action"
     assert ANDROID_ACTION_DEFINITIONS_BY_NAME["pressKey"].driver_method == "press_key"
     assert ANDROID_ACTION_DEFINITIONS_BY_NAME["pressKey"].params_model is AndroidPressKeyParams
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["uiTree"].driver_method == "ui_tree"
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["uiTree"].params_model is AndroidUiTreeParams
+    assert ANDROID_ACTION_DEFINITIONS_BY_NAME["uiTree"].step_kind == "observation"
     assert ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].driver_method == "assert_with_ai"
     assert ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].step_kind == "assertion"
 

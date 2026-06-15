@@ -124,7 +124,7 @@ def test_uiautomator2_driver_context_launch_kill_and_artifacts() -> None:
     assert driver.launch_app({})["status"] == "passed"
     assert driver.kill_app({})["status"] == "passed"
     assert driver.screenshot() == b"fake-png"
-    assert driver.ui_tree() == {"xml": "<hierarchy />"}
+    assert driver.ui_tree({}) == {"xml": "<hierarchy />"}
     assert device.calls == [
         ("app_start", "com.example.app", {}),
         ("app_stop", "com.example.app"),
@@ -177,6 +177,16 @@ def test_uiautomator2_driver_supports_point_based_swipe() -> None:
         "output": {"start": {"x": 800, "y": 1900}, "end": {"x": 200, "y": 1900}},
     }
     assert device.calls == [("swipe", 800, 1900, 200, 1900, 1.0)]
+
+
+def test_uiautomator2_driver_exposes_ui_tree_output() -> None:
+    device = FakeDevice()
+    driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=device)
+
+    result = driver.ui_tree({})
+
+    assert result == {"xml": "<hierarchy />"}
+    assert device.calls == [("dump_hierarchy",)]
 
 
 def test_uiautomator2_driver_rejects_malformed_point_based_swipe() -> None:
