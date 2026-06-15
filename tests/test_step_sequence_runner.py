@@ -171,14 +171,38 @@ def test_step_sequence_runner_waits_between_executed_steps_without_evidence_step
         "before:step-1",
         "invoke:step-1",
         "after:step-1:passed",
-        "sleep:1",
+        "sleep:1.0",
         "get_context",
         "before:step-2",
         "invoke:step-2",
         "after:step-2:passed",
-        "sleep:1",
+        "sleep:1.0",
         "get_context",
         "before:teardown-1",
         "invoke:teardown-1",
         "after:teardown-1:passed",
     ]
+
+
+def test_step_sequence_runner_allows_zero_step_interval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = SequenceHarness()
+    sleep_calls: list[float] = []
+
+    def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(sequence_module.time, "sleep", fake_sleep)
+
+    recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
+    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder, step_interval_seconds=0)
+
+    runner.run_steps(
+        run_id="run-1",
+        steps=[_step("step-1", "tapOn"), _step("step-2", "inputText")],
+        teardown_steps=[_step("teardown-1", "killApp")],
+    )
+
+    assert sleep_calls == []

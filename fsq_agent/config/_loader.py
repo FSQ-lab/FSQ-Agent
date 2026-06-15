@@ -12,6 +12,12 @@ from fsq_agent.models import ConfigurationError
 
 DEFAULT_CONFIG_PATHS = (Path("config.yaml"), Path("config.yml"), Path("config.example.yaml"))
 DEFAULT_ENV_PATH = Path(".env")
+ANDROID_APP_ID_ENV = "FSQ_ANDROID_APP_ID"
+ANDROID_SERIAL_ENV = "FSQ_ANDROID_SERIAL"
+AZURE_OPENAI_BASE_URL_ENV = "AZURE_OPENAI_BASE_URL"
+AZURE_OPENAI_MODEL_ENV = "AZURE_OPENAI_MODEL"
+AZURE_OPENAI_API_KEY_ENV = "AZURE_OPENAI_API_KEY"
+GITHUB_COPILOT_MODEL = "gpt-5.5"
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -43,7 +49,7 @@ def load_settings(path: str | Path | None = None, workspace: str | Path | None =
         raise ConfigurationError("Invalid configuration.", context={"errors": exc.errors()}) from exc
     if workspace is not None:
         settings.workspace.root_dir = Path(workspace)
-    _normalize_openai_provider_settings(settings, data)
+    _apply_environment_settings(settings)
     base_dir = config_path.parent if config_path is not None else Path.cwd()
     resolve_runtime_paths(settings, base_dir)
     return settings
@@ -101,12 +107,21 @@ def _strip_env_value(value: str) -> str:
     return value
 
 
-def _normalize_openai_provider_settings(settings: Settings, data: dict[str, Any]) -> None:
+def _apply_environment_settings(settings: Settings) -> None:
+    app_id = _env_value(ANDROID_APP_ID_ENV)
+    serial = _env_value(ANDROID_SERIAL_ENV)
+    if app_id:
+        settings.harness.android.app_id = app_id
+    if serial:
+        settings.harness.android.serial = serial
+
     if settings.openai_agents.provider == "github_copilot":
-        if not _openai_model_configured(data):
-            settings.openai_agents.model = "gpt-5.5"
+        settings.openai_agents.model = GITHUB_COPILOT_MODEL
+        settings.openai_agents.base_url = ""
         return
-    base_url = settings.openai_agents.base_url.strip()
+
+    settings.openai_agents.model = _env_value(AZURE_OPENAI_MODEL_ENV) or ""
+    base_url = _env_value(AZURE_OPENAI_BASE_URL_ENV) or ""
     if "/openai/responses" in base_url:
         base_url = base_url.split("/openai/responses", 1)[0] + "/openai/v1/"
     elif "/openai/v1" in base_url:
@@ -116,9 +131,12 @@ def _normalize_openai_provider_settings(settings: Settings, data: dict[str, Any]
     settings.openai_agents.base_url = base_url
 
 
-def _openai_model_configured(data: dict[str, Any]) -> bool:
-    openai_agents = data.get("openai_agents")
-    return isinstance(openai_agents, dict) and "model" in openai_agents
+def _env_value(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
 
 
 def validate_runtime_settings(settings: Settings) -> None:
@@ -134,27 +152,29 @@ def validate_strict_core_settings(settings: Settings, requires_ai_assertion: boo
 
 def _validate_openai_provider_settings(settings: Settings) -> None:
     if not settings.openai_agents.model.strip():
-        raise ConfigurationError("OpenAI Agents SDK model deployment name is required.")
+        raise ConfigurationError(
+            "OpenAI Agents SDK model deployment name is required.",
+            context={"model_env": AZURE_OPENAI_MODEL_ENV if settings.openai_agents.provider == "azure_openai" else None},
+        )
     if settings.openai_agents.provider == "azure_openai" and not settings.openai_agents.base_url.endswith("/openai/v1/"):
         raise ConfigurationError(
             "Azure OpenAI base URL must use the /openai/v1/ form.",
-            context={"base_url": settings.openai_agents.base_url},
+            context={"base_url_env": AZURE_OPENAI_BASE_URL_ENV, "base_url": settings.openai_agents.base_url},
         )
-    api_key = os.getenv(settings.openai_agents.api_key_env)
-    if settings.openai_agents.provider == "azure_openai" and settings.openai_agents.fail_without_api_key and not api_key:
+    api_key = os.getenv(AZURE_OPENAI_API_KEY_ENV)
+    if settings.openai_agents.provider == "azure_openai" and not api_key:
         raise ConfigurationError(
             "Azure OpenAI API key environment variable is not set.",
-            context={"api_key_env": settings.openai_agents.api_key_env},
+            context={"api_key_env": AZURE_OPENAI_API_KEY_ENV},
         )
     if (
         settings.openai_agents.provider == "azure_openai"
-        and settings.openai_agents.fail_without_api_key
         and api_key
         and api_key.lower().startswith("replace-with")
     ):
         raise ConfigurationError(
             "Azure OpenAI API key environment variable still contains a placeholder value.",
-            context={"api_key_env": settings.openai_agents.api_key_env},
+            context={"api_key_env": AZURE_OPENAI_API_KEY_ENV},
         )
 
 

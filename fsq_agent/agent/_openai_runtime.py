@@ -542,9 +542,13 @@ class OpenAIAgentsRuntime:
             ),
         ]
 
+    def _pre_plan_knowledge_dir(self) -> Path:
+        knowledge = self.settings.agent_context.knowledge
+        return knowledge.pre_plan.dir or knowledge.root_dir
+
     async def _read_knowledge_index_tool(self, _ctx: Any, args: str) -> str:
         ReadKnowledgeIndexArgs.model_validate_json(args or "{}")
-        knowledge_dir = self.settings.pre_plan.knowledge_dir or self.settings.knowledge_dir
+        knowledge_dir = self._pre_plan_knowledge_dir()
         path = knowledge_dir / "index.md"
         if not path.exists():
             return json.dumps({"ok": False, "error": "Knowledge index not found.", "path": "index.md"}, ensure_ascii=False)
@@ -560,12 +564,12 @@ class OpenAIAgentsRuntime:
         if parsed.file:
             relative_path = safe_page_relative_path(parsed.file)
         elif parsed.page_id:
-            knowledge_dir = self.settings.pre_plan.knowledge_dir or self.settings.knowledge_dir
+            knowledge_dir = self._pre_plan_knowledge_dir()
             index_path = knowledge_dir / "index.md"
             index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
             indexed_file = page_file_from_index(index_text, parsed.page_id)
             relative_path = safe_page_relative_path(indexed_file or f"{parsed.page_id}.md")
-        knowledge_dir = self.settings.pre_plan.knowledge_dir or self.settings.knowledge_dir
+        knowledge_dir = self._pre_plan_knowledge_dir()
         if relative_path is None:
             return json.dumps(
                 {"ok": False, "error": "A safe page_id or relative page file is required.", "page_id": parsed.page_id, "file": parsed.file},

@@ -3,6 +3,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from fsq_agent.models import (
+    AgentContextSettings,
     AgentSettings,
     CaseSettings,
     HarnessSettings,
@@ -13,7 +14,6 @@ from fsq_agent.models import (
     SkillConfig,
     WorkspaceSettings,
 )
-from fsq_agent.models._settings import DeprecatedToolSettings
 
 
 class Settings(BaseModel):
@@ -25,9 +25,25 @@ class Settings(BaseModel):
     runtime_secrets: RuntimeSecretSettings = Field(default_factory=RuntimeSecretSettings)
     workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
     cases: CaseSettings = Field(default_factory=CaseSettings)
-    cli_tools: list[DeprecatedToolSettings] = Field(default_factory=list, exclude=True)
-    shell: DeprecatedToolSettings = Field(default_factory=DeprecatedToolSettings, exclude=True)
-    skills: list[SkillConfig] = Field(default_factory=list)
     output: OutputSettings = Field(default_factory=OutputSettings)
-    pre_plan: PrePlanSettings = Field(default_factory=PrePlanSettings)
-    knowledge_dir: Path = Path("./knowledge")
+    agent_context: AgentContextSettings = Field(default_factory=AgentContextSettings)
+
+    @property
+    def skills(self) -> list[SkillConfig]:
+        return self.agent_context.knowledge.skills.items
+
+    @skills.setter
+    def skills(self, value: list[SkillConfig]) -> None:
+        self.agent_context.knowledge.skills.items = value
+
+    @property
+    def knowledge_dir(self) -> Path:
+        return self.agent_context.knowledge.root_dir
+
+    @knowledge_dir.setter
+    def knowledge_dir(self, value: str | Path) -> None:
+        self.agent_context.knowledge.root_dir = Path(value)
+
+    @property
+    def pre_plan(self) -> PrePlanSettings:
+        return PrePlanSettings(knowledge_dir=self.agent_context.knowledge.pre_plan.dir or self.knowledge_dir)

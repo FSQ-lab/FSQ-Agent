@@ -16,19 +16,23 @@ from fsq_agent.observation import ExecutionLogger
 @pytest.mark.asyncio
 async def test_agent_run_requires_configured_model_provider_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AZURE_OPENAI_BASE_URL", "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/")
+    monkeypatch.setenv("AZURE_OPENAI_MODEL", "gpt-5.4")
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-                """
+        """
 output:
   root_dir: output
-  runs_dir: runs
 workspace:
   root_dir: workspace
 cases:
   dir: cases
-knowledge_dir: knowledge
+agent_context:
+    knowledge:
+        root_dir: knowledge
 openai_agents:
-    api_key_env: FSQ_AGENT_TEST_MISSING_API_KEY
+    provider: azure_openai
 """,
         encoding="utf-8",
     )
@@ -51,6 +55,13 @@ class _KnowledgeLoader:
 class _SkillLoader:
     def load(self, skills: list[object]) -> list[object]:
         return []
+
+
+def _settings_with_knowledge(knowledge_dir: Path, pre_plan_dir: Path | None = None) -> Settings:
+    knowledge: dict[str, object] = {"root_dir": knowledge_dir}
+    if pre_plan_dir is not None:
+        knowledge["pre_plan"] = {"dir": pre_plan_dir}
+    return Settings(agent_context={"knowledge": knowledge})
 
 
 class _Runtime:
@@ -354,7 +365,7 @@ async def test_agent_run_preplans_goal_only_task_before_execution(tmp_path: Path
     runtime = _GoalRunRuntime()
     events: list[RunEvent] = []
     agent = FsqAgent(
-        Settings(knowledge_dir=knowledge_dir),
+        _settings_with_knowledge(knowledge_dir),
         verifier=Verifier(),
         reporter=_Reporter(),  # type: ignore[arg-type]
         knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
@@ -390,7 +401,7 @@ async def test_agent_pre_plan_uses_explicit_raw_case_planning_reference(tmp_path
     (knowledge_dir / "index.md").write_text("# Page Knowledge", encoding="utf-8")
     runtime = _GoalRunRuntime()
     agent = FsqAgent(
-        Settings(knowledge_dir=knowledge_dir),
+        _settings_with_knowledge(knowledge_dir),
         verifier=Verifier(),
         reporter=_Reporter(),  # type: ignore[arg-type]
         knowledge_loader=_KnowledgeLoader(),  # type: ignore[arg-type]
@@ -455,7 +466,7 @@ async def test_pre_plan_runtime_reads_page_by_index_page_id(tmp_path: Path) -> N
         encoding="utf-8",
     )
     (pages_dir / "edge_android_new_tab_page.md").write_text("# New Tab Page", encoding="utf-8")
-    runtime = OpenAIAgentsRuntime(Settings(knowledge_dir=knowledge_dir), object())  # type: ignore[arg-type]
+    runtime = OpenAIAgentsRuntime(_settings_with_knowledge(knowledge_dir), object())  # type: ignore[arg-type]
 
     output = await runtime._read_knowledge_page_tool(None, '{"page_id":"edge_android_new_tab_page"}')
 
@@ -474,7 +485,7 @@ async def test_pre_plan_runtime_reads_from_pre_plan_knowledge_dir(tmp_path: Path
     (page_knowledge_dir / "index.md").write_text("# Page Graph Index", encoding="utf-8")
     (pages_dir / "edge_android_new_tab_page.md").write_text("# New Tab Page", encoding="utf-8")
     runtime = OpenAIAgentsRuntime(
-        Settings(knowledge_dir=private_knowledge_dir, pre_plan={"knowledge_dir": page_knowledge_dir}),
+        _settings_with_knowledge(private_knowledge_dir, page_knowledge_dir),
         object(),
     )  # type: ignore[arg-type]
 

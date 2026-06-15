@@ -25,10 +25,11 @@ def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_
         verification=VerificationResult(status="success", summary="ok"),
         report=ReportArtifact(run_id="recorded-run", path=run_dir / "report.md"),
     )
-    settings = Settings(
-        output=OutputSettings(runs_dir=tmp_path / "runs"),
-        harness=HarnessSettings(android=AndroidHarnessSettings(app_id="com.example")),
-    )
+    output_settings = OutputSettings()
+    output_settings.runs_dir = tmp_path / "runs"
+    android_settings = AndroidHarnessSettings()
+    android_settings.app_id = "com.example"
+    settings = Settings(output=output_settings, harness=HarnessSettings(android=android_settings))
 
     _write_event(
         events_path,

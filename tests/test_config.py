@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import pytest
 
@@ -14,9 +15,13 @@ cases:
   dir: cases
 output:
   root_dir: output
-  runs_dir: runs
 {body}
 """
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 def test_load_settings_from_yaml(tmp_path: Path) -> None:
@@ -27,9 +32,9 @@ def test_load_settings_from_yaml(tmp_path: Path) -> None:
             """
 agent:
   name: test-agent
-cli_tools:
-  - name: echo
-    command: python
+openai_agents:
+  max_turns: 40
+  tracing_enabled: false
 """,
         ),
         encoding="utf-8",
@@ -38,13 +43,23 @@ cli_tools:
     settings = load_settings(config_path)
 
     assert settings.agent.name == "test-agent"
+    assert settings.openai_agents.provider == "github_copilot"
+    assert settings.openai_agents.model == "gpt-5.5"
+    assert settings.openai_agents.max_turns == 40
+    assert settings.openai_agents.tracing_enabled is False
     assert not hasattr(settings, "verification")
-    assert settings.cli_tools[0].name == "echo"
+    assert not hasattr(settings, "cli_tools")
+    assert not hasattr(settings, "shell")
     assert settings.workspace.root_dir == tmp_path / "workspace"
     assert (settings.workspace.root_dir / ".fsq-agent-workspace").exists()
     assert settings.output.root_dir == tmp_path / "workspace" / "output"
+    assert settings.output.runs_dir == tmp_path / "workspace" / "output" / "runs"
     assert settings.output.runs_dir.exists()
     assert settings.cases.dir == tmp_path / "cases"
+    assert settings.harness.strict_core.step_interval_seconds == 1.0
+    assert settings.agent_context.knowledge.root_dir == tmp_path / "knowledge"
+    assert settings.agent_context.knowledge.skills.dir == tmp_path / "knowledge" / "skills"
+    assert settings.pre_plan.knowledge_dir == tmp_path / "knowledge"
 
 
 def test_load_settings_rejects_non_empty_unmarked_workspace(tmp_path: Path) -> None:
@@ -58,7 +73,9 @@ def test_load_settings_rejects_non_empty_unmarked_workspace(tmp_path: Path) -> N
         load_settings(config_path)
 
 
-def test_load_settings_accepts_harness_settings(tmp_path: Path) -> None:
+def test_load_settings_accepts_android_backend_and_env_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FSQ_ANDROID_APP_ID", "com.example.app")
+    monkeypatch.setenv("FSQ_ANDROID_SERIAL", "emulator-5554")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
@@ -68,8 +85,6 @@ harness:
   platform: android
   android:
     backend: uiautomator2
-    app_id: com.example.app
-    serial: emulator-5554
 """,
         ),
         encoding="utf-8",
@@ -81,6 +96,63 @@ harness:
     assert settings.harness.android.backend == "uiautomator2"
     assert settings.harness.android.app_id == "com.example.app"
     assert settings.harness.android.serial == "emulator-5554"
+
+
+def test_load_settings_accepts_strict_core_step_interval(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  strict_core:
+    step_interval_seconds: 0
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.harness.strict_core.step_interval_seconds == 0
+
+
+def test_load_settings_rejects_negative_strict_core_step_interval(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  strict_core:
+    step_interval_seconds: -0.1
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
+
+
+def test_load_settings_rejects_android_app_and_serial_in_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  android:
+    backend: uiautomator2
+    app_id: com.example.app
+    serial: emulator-5554
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
 
 def test_load_settings_accepts_runtime_secret_allowlist(tmp_path: Path) -> None:
@@ -103,15 +175,25 @@ runtime_secrets:
     assert settings.runtime_secrets.allowed_env_names == ["TEST_ACCOUNT_EMAIL", "TEST_ACCOUNT_PASSWORD"]
 
 
-def test_load_settings_accepts_pre_plan_knowledge_dir(tmp_path: Path) -> None:
+def test_load_settings_accepts_agent_context_knowledge_structure(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
-knowledge_dir: ./knowledge
-pre_plan:
-  knowledge_dir: ./knowledge/project_android_v1
+agent_context:
+  knowledge:
+    root_dir: ./knowledge
+    skills:
+      dir: custom-skills
+      items:
+        - name: automation-basics
+          description: Semantic action and evidence guidance for local runs.
+          kind: markdown
+          path: automation-basics.md
+          required: true
+    pre_plan:
+      dir: project_android_v1
 """,
         ),
         encoding="utf-8",
@@ -120,7 +202,36 @@ pre_plan:
     settings = load_settings(config_path)
 
     assert settings.knowledge_dir == tmp_path / "knowledge"
+    assert settings.agent_context.knowledge.root_dir == tmp_path / "knowledge"
+    assert settings.agent_context.knowledge.skills.dir == tmp_path / "knowledge" / "custom-skills"
+    assert [skill.name for skill in settings.skills] == ["automation-basics"]
     assert settings.pre_plan.knowledge_dir == tmp_path / "knowledge" / "project_android_v1"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        """
+skills:
+  - name: automation-basics
+    kind: markdown
+    path: automation-basics.md
+""",
+        """
+knowledge_dir: ./knowledge
+""",
+        """
+pre_plan:
+  knowledge_dir: ./knowledge/project_android_v1
+""",
+    ],
+)
+def test_load_settings_rejects_old_agent_context_yaml_keys(tmp_path: Path, body: str) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(_base_config(tmp_path, body), encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
 
 def test_load_settings_rejects_obsolete_verification_config(tmp_path: Path) -> None:
@@ -140,14 +251,17 @@ verification:
         load_settings(config_path)
 
 
-def test_openai_agents_endpoint_is_normalized(tmp_path: Path) -> None:
+def test_azure_openai_endpoint_and_model_come_from_fixed_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_OPENAI_BASE_URL", "https://edgeqa-resource.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview")
+    monkeypatch.setenv("AZURE_OPENAI_MODEL", "gpt-5.4")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
 openai_agents:
-  base_url: https://edgeqa-resource.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview
+  provider: azure_openai
 """,
         ),
         encoding="utf-8",
@@ -155,70 +269,97 @@ openai_agents:
 
     settings = load_settings(config_path)
 
+    validate_runtime_settings(settings)
+    assert settings.openai_agents.provider == "azure_openai"
     assert settings.openai_agents.base_url == "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/"
+    assert settings.openai_agents.model == "gpt-5.4"
+    assert settings.openai_agents.api_key_env == "AZURE_OPENAI_API_KEY"
 
 
-def test_github_copilot_provider_disables_responses_and_skips_azure_key(
-  tmp_path: Path,
-  monkeypatch: pytest.MonkeyPatch,
-) -> None:
-  monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
-  config_path = tmp_path / "config.yaml"
-  config_path.write_text(
-    _base_config(
-      tmp_path,
-      """
-openai_agents:
-  provider: github_copilot
-""",
-    ),
-    encoding="utf-8",
-  )
+def test_default_github_copilot_provider_skips_azure_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(_base_config(tmp_path), encoding="utf-8")
 
-  settings = load_settings(config_path)
+    settings = load_settings(config_path)
 
-  validate_runtime_settings(settings)
-  assert settings.openai_agents.provider == "github_copilot"
-  assert settings.openai_agents.model == "gpt-5.5"
+    validate_runtime_settings(settings)
+    assert settings.openai_agents.provider == "github_copilot"
+    assert settings.openai_agents.model == "gpt-5.5"
 
 
-def test_github_copilot_provider_preserves_explicit_model(tmp_path: Path) -> None:
-  config_path = tmp_path / "config.yaml"
-  config_path.write_text(
-    _base_config(
-      tmp_path,
-      """
+def test_load_settings_rejects_explicit_openai_model_in_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   provider: github_copilot
   model: custom-copilot-model
 """,
-    ),
-    encoding="utf-8",
-  )
+        ),
+        encoding="utf-8",
+    )
 
-  settings = load_settings(config_path)
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
-  assert settings.openai_agents.model == "custom-copilot-model"
+
+def test_load_settings_rejects_azure_endpoint_fields_in_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+openai_agents:
+  provider: azure_openai
+  base_url: https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/
+  api_key_env: AZURE_OPENAI_API_KEY
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
+
+
+def test_load_settings_rejects_sensitive_tracing_in_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+openai_agents:
+  trace_include_sensitive_data: true
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
 
 def test_load_settings_rejects_invalid_provider(tmp_path: Path) -> None:
-  config_path = tmp_path / "config.yaml"
-  config_path.write_text(
-    _base_config(
-      tmp_path,
-      """
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
 openai_agents:
   provider: local_llm
 """,
-    ),
-    encoding="utf-8",
-  )
+        ),
+        encoding="utf-8",
+    )
 
-  with pytest.raises(ConfigurationError, match="Invalid configuration"):
-    load_settings(config_path)
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
 
-def test_load_settings_accepts_context_and_tool_output_policy(tmp_path: Path) -> None:
+def test_load_settings_accepts_prompt_config(tmp_path: Path) -> None:
     agent_template = tmp_path / "agent.j2"
     task_template = tmp_path / "task.j2"
     custom_instructions = tmp_path / "custom-instructions.md"
@@ -237,21 +378,6 @@ openai_agents:
     custom_instructions_path: ./custom-instructions.md
     variables:
       voice: concise
-  context_trimming:
-    enabled: true
-    recent_turns: 3
-    max_tool_output_chars: 12000
-    preview_chars: 1500
-    trimmable_tools: [run_cli_tool]
-  local_tool_output:
-    artifact_enabled: true
-    always_write_artifact: true
-    artifact_subdir: artifacts/tools
-    recent_full_output_count: 4
-    full_output_max_chars: 40000
-    historical_output_mode: artifact_reference
-    historical_preview_chars: 1500
-    model_response_max_chars: 5000
 """,
         ),
         encoding="utf-8",
@@ -259,17 +385,33 @@ openai_agents:
 
     settings = load_settings(config_path)
 
-    assert settings.openai_agents.context_trimming.recent_turns == 3
     assert settings.openai_agents.prompt.agent_template_path == agent_template.resolve()
     assert settings.openai_agents.prompt.task_template_path == task_template.resolve()
     assert settings.openai_agents.prompt.custom_instructions_path == custom_instructions.resolve()
     assert settings.openai_agents.prompt.variables == {"voice": "concise"}
-    assert settings.openai_agents.context_trimming.trimmable_tools == ["run_cli_tool"]
-    assert settings.openai_agents.local_tool_output.recent_full_output_count == 4
-    assert settings.openai_agents.local_tool_output.full_output_max_chars == 40000
 
 
-def test_load_settings_uses_default_harness(tmp_path: Path) -> None:
+def test_load_settings_rejects_internal_context_and_tool_output_policy(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+openai_agents:
+  context_trimming:
+    recent_turns: 3
+  local_tool_output:
+    recent_full_output_count: 4
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
+
+
+def test_load_settings_uses_default_harness_without_android_env(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(_base_config(tmp_path), encoding="utf-8")
 
@@ -278,34 +420,40 @@ def test_load_settings_uses_default_harness(tmp_path: Path) -> None:
     assert settings.harness.platform == "android"
     assert settings.harness.android.backend == "uiautomator2"
     assert settings.harness.android.app_id is None
+    assert settings.harness.android.serial is None
 
 
-def test_validate_runtime_settings_requires_api_key_when_enabled(tmp_path: Path) -> None:
+def test_validate_runtime_settings_requires_azure_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_OPENAI_BASE_URL", "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
 openai_agents:
-  api_key_env: FSQ_AGENT_MISSING_KEY
+  provider: azure_openai
 """,
         ),
         encoding="utf-8",
     )
     settings = load_settings(config_path)
 
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(ConfigurationError, match="model deployment"):
         validate_runtime_settings(settings)
 
 
-def test_validate_runtime_settings_requires_azure_api_key_by_default(tmp_path: Path) -> None:
+def test_validate_runtime_settings_requires_azure_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_OPENAI_BASE_URL", "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/")
+    monkeypatch.setenv("AZURE_OPENAI_MODEL", "gpt-5.4")
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
 openai_agents:
-  api_key_env: FSQ_AGENT_MISSING_KEY
+  provider: azure_openai
 """,
         ),
         encoding="utf-8",
@@ -323,7 +471,7 @@ def test_validate_strict_core_settings_does_not_require_openai_api_key(tmp_path:
             tmp_path,
             """
 openai_agents:
-  api_key_env: FSQ_AGENT_MISSING_KEY
+  provider: azure_openai
 """,
         ),
         encoding="utf-8",
@@ -333,11 +481,7 @@ openai_agents:
     validate_strict_core_settings(settings)
 
 
-def test_load_settings_accepts_deprecated_shell_without_runtime_validation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
+def test_load_settings_rejects_deprecated_shell_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
@@ -345,48 +489,54 @@ def test_load_settings_accepts_deprecated_shell_without_runtime_validation(
             """
 shell:
   enabled: true
-  mode: allowlist
-  command_allowlist: []
 """,
         ),
         encoding="utf-8",
     )
-    settings = load_settings(config_path)
 
-    validate_runtime_settings(settings)
-    assert settings.shell.enabled is True
-    assert settings.shell.mode == "allowlist"
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
 
-def test_deprecated_shell_working_dir_is_not_resolved_or_used(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
+def test_load_settings_rejects_deprecated_cli_tools_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
-shell:
-  enabled: true
-  mode: allow_all
-  command_allowlist: []
-  working_dir: .
+cli_tools:
+  - name: echo
+    command: python
 """,
         ),
         encoding="utf-8",
     )
-    settings = load_settings(config_path)
 
-    validate_runtime_settings(settings)
-    assert settings.shell.working_dir == "."
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
 
-def test_load_settings_loads_dotenv_from_config_directory(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_load_settings_rejects_output_runs_dir_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+output:
+  root_dir: output
+  runs_dir: runs
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
+
+
+def test_load_settings_loads_dotenv_from_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AZURE_OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("AZURE_OPENAI_MODEL", raising=False)
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -394,31 +544,36 @@ def test_load_settings_loads_dotenv_from_config_directory(
             tmp_path,
             """
 openai_agents:
-  api_key_env: AZURE_OPENAI_API_KEY
+  provider: azure_openai
 """,
         ),
         encoding="utf-8",
     )
-    (tmp_path / ".env").write_text("AZURE_OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "AZURE_OPENAI_BASE_URL=https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/\n"
+        "AZURE_OPENAI_MODEL=gpt-5.4\n"
+        "AZURE_OPENAI_API_KEY=from-dotenv\n",
+        encoding="utf-8",
+    )
 
     settings = load_settings(config_path)
 
     validate_runtime_settings(settings)
-    assert settings.openai_agents.api_key_env == "AZURE_OPENAI_API_KEY"
+    assert settings.openai_agents.base_url == "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/"
+    assert settings.openai_agents.model == "gpt-5.4"
 
 
-def test_load_settings_dotenv_does_not_override_existing_env(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_load_settings_dotenv_does_not_override_existing_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "from-process")
+    monkeypatch.setenv("AZURE_OPENAI_BASE_URL", "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/")
+    monkeypatch.setenv("AZURE_OPENAI_MODEL", "gpt-5.4")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
 openai_agents:
-  api_key_env: AZURE_OPENAI_API_KEY
+  provider: azure_openai
 """,
         ),
         encoding="utf-8",
@@ -427,7 +582,7 @@ openai_agents:
 
     load_settings(config_path)
 
-    assert __import__("os").environ["AZURE_OPENAI_API_KEY"] == "from-process"
+    assert os.environ["AZURE_OPENAI_API_KEY"] == "from-process"
 
 
 def test_load_settings_rejects_invalid_dotenv_line(tmp_path: Path) -> None:
@@ -439,24 +594,25 @@ def test_load_settings_rejects_invalid_dotenv_line(tmp_path: Path) -> None:
         load_settings(config_path)
 
 
-def test_validate_runtime_settings_rejects_placeholder_api_key(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("FSQ_AGENT_PLACEHOLDER_KEY", raising=False)
+def test_validate_runtime_settings_rejects_placeholder_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AZURE_OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("AZURE_OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
 openai_agents:
-  api_key_env: FSQ_AGENT_PLACEHOLDER_KEY
+  provider: azure_openai
 """,
         ),
         encoding="utf-8",
     )
     (tmp_path / ".env").write_text(
-        "FSQ_AGENT_PLACEHOLDER_KEY=replace-with-your-azure-openai-api-key\n",
+        "AZURE_OPENAI_BASE_URL=https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/\n"
+        "AZURE_OPENAI_MODEL=gpt-5.4\n"
+        "AZURE_OPENAI_API_KEY=replace-with-your-azure-openai-api-key\n",
         encoding="utf-8",
     )
     settings = load_settings(config_path)

@@ -43,9 +43,12 @@ class FsqAgent:
     @classmethod
     def from_settings(cls, settings: Settings) -> "FsqAgent":
         output_root = settings.output.root_dir
-        pre_plan_knowledge_dir = settings.pre_plan.knowledge_dir or settings.knowledge_dir
+        knowledge = settings.agent_context.knowledge
+        knowledge_root = knowledge.root_dir
+        skills_dir = knowledge.skills.dir
+        pre_plan_knowledge_dir = knowledge.pre_plan.dir or knowledge_root
         file_ops = FileOps(
-            read_roots=[settings.cases.dir, settings.knowledge_dir, pre_plan_knowledge_dir, output_root],
+            read_roots=[settings.cases.dir, knowledge_root, skills_dir, pre_plan_knowledge_dir, output_root],
             write_root=output_root / "artifacts",
         )
         common_tool_provider = DefaultCommonToolProvider(
@@ -58,8 +61,8 @@ class FsqAgent:
             CommonToolRegistry.from_providers([common_tool_provider]),
             local_tool_output_settings=settings.openai_agents.local_tool_output,
         )
-        knowledge_loader = PrivateKnowledgeLoader(settings.knowledge_dir)
-        skill_loader = SkillLoader(settings.knowledge_dir / "skills")
+        knowledge_loader = PrivateKnowledgeLoader(knowledge_root)
+        skill_loader = SkillLoader(skills_dir)
         reporter = ReportGenerator(settings.output.runs_dir, secret_values=cls._runtime_secret_values(settings))
         event_logger = ExecutionLogger(settings.output.runs_dir)
         return cls(
@@ -145,7 +148,8 @@ class FsqAgent:
     def _load_page_knowledge_index(self) -> KnowledgeBundle:
         items: dict[str, str] = {}
         warnings: list[str] = []
-        knowledge_dir = self.settings.pre_plan.knowledge_dir or self.settings.knowledge_dir
+        knowledge = self.settings.agent_context.knowledge
+        knowledge_dir = knowledge.pre_plan.dir or knowledge.root_dir
         index_path = knowledge_dir / "index.md"
         if index_path.exists():
             items["index.md"] = index_path.read_text(encoding="utf-8")

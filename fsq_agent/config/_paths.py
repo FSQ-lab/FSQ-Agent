@@ -84,9 +84,11 @@ def resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> N
     settings.output.runs_dir.mkdir(parents=True, exist_ok=True)
 
     settings.cases.dir = _resolve_path(settings.cases.dir, config_base)
-    settings.knowledge_dir = _resolve_path(settings.knowledge_dir, config_base)
-    if settings.pre_plan.knowledge_dir is not None:
-        settings.pre_plan.knowledge_dir = _resolve_path(settings.pre_plan.knowledge_dir, config_base)
+    knowledge = settings.agent_context.knowledge
+    knowledge.root_dir = _resolve_path(knowledge.root_dir, config_base)
+    knowledge.skills.dir = _resolve_path(knowledge.skills.dir, knowledge.root_dir)
+    if knowledge.pre_plan.dir is not None:
+        knowledge.pre_plan.dir = _resolve_path(knowledge.pre_plan.dir, knowledge.root_dir)
 
     prompt = settings.openai_agents.prompt
     if prompt.agent_template_path is not None:

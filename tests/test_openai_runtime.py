@@ -131,7 +131,10 @@ def _patch_runtime_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 async def test_runtime_failure_returns_failed_step(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "dummy")
-    settings = Settings(openai_agents=OpenAIAgentsSettings())
+    openai_settings = OpenAIAgentsSettings(provider="azure_openai")
+    openai_settings.base_url = "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/"
+    openai_settings.model = "gpt-5.4"
+    settings = Settings(openai_agents=openai_settings)
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory(), lambda _run_id: _FailingHarness())
     task = Task(
         id="runtime-failure",
@@ -543,7 +546,10 @@ def test_provider_session_builds_azure_openai_agents_provider(monkeypatch: pytes
             self.kwargs = kwargs
 
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-key")
-    settings = Settings(openai_agents=OpenAIAgentsSettings())
+    openai_settings = OpenAIAgentsSettings(provider="azure_openai")
+    openai_settings.base_url = "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/"
+    openai_settings.model = "gpt-5.4"
+    settings = Settings(openai_agents=openai_settings)
 
     session = build_model_provider_session(settings)
     provider = session.create_agents_provider(openai_provider_type=_OpenAIProvider, async_openai_type=_AsyncOpenAI)
@@ -615,12 +621,11 @@ def test_runtime_tool_count_filter_writes_artifact_for_trimmed_history(tmp_path:
         def __call__(self, data: Any) -> Any:
             return data.model_data
 
-    settings = Settings(
-        openai_agents=OpenAIAgentsSettings(
-            local_tool_output=LocalToolOutputSettings(recent_full_output_count=0),
-        ),
-        output=OutputSettings(runs_dir=tmp_path / "runs"),
-    )
+    openai_settings = OpenAIAgentsSettings()
+    openai_settings.local_tool_output = LocalToolOutputSettings(recent_full_output_count=0)
+    output_settings = OutputSettings()
+    output_settings.runs_dir = tmp_path / "runs"
+    settings = Settings(openai_agents=openai_settings, output=output_settings)
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
         "call_model_input_filter"
@@ -726,10 +731,9 @@ def test_runtime_input_filter_leaves_plain_screenshot_outputs_text_only(tmp_path
     screenshots_dir.mkdir(parents=True)
     screenshot_path = screenshots_dir / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
-    settings = Settings(
-        openai_agents=OpenAIAgentsSettings(),
-        output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
-    )
+    output_settings = OutputSettings(root_dir=output_root)
+    output_settings.runs_dir = output_root / "runs"
+    settings = Settings(openai_agents=OpenAIAgentsSettings(), output=output_settings)
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
         "call_model_input_filter"
@@ -774,10 +778,9 @@ def test_runtime_input_filter_does_not_attach_submitted_visual_assertion_image(t
     screenshots_dir.mkdir(parents=True)
     screenshot_path = screenshots_dir / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
-    settings = Settings(
-        openai_agents=OpenAIAgentsSettings(),
-        output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
-    )
+    output_settings = OutputSettings(root_dir=output_root)
+    output_settings.runs_dir = output_root / "runs"
+    settings = Settings(openai_agents=OpenAIAgentsSettings(), output=output_settings)
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
         "call_model_input_filter"
@@ -828,10 +831,9 @@ def test_runtime_input_filter_rejects_screenshot_images_outside_output_root(tmp_
     outside_root.mkdir()
     screenshot_path = outside_root / "screenshot.png"
     screenshot_path.write_bytes(b"\x89PNG\r\n\x1a\nimage")
-    settings = Settings(
-        openai_agents=OpenAIAgentsSettings(),
-        output=OutputSettings(root_dir=output_root, runs_dir=output_root / "runs"),
-    )
+    output_settings = OutputSettings(root_dir=output_root)
+    output_settings.runs_dir = output_root / "runs"
+    settings = Settings(openai_agents=OpenAIAgentsSettings(), output=output_settings)
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     input_filter = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider", run_id="run-1").kwargs[
         "call_model_input_filter"

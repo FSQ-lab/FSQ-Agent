@@ -80,17 +80,22 @@ from fsq_agent.models._page_knowledge import (
 )
 from fsq_agent.models._report import ReportArtifact
 from fsq_agent.models._settings import (
+    AgentContextSettings,
+    AgentKnowledgeSettings,
     AgentSettings,
     AndroidHarnessSettings,
     CaseSettings,
     ContextTrimmingSettings,
     HarnessSettings,
+    KnowledgeSkillSettings,
     LocalToolOutputSettings,
     OpenAIAgentPromptConfig,
     OpenAIAgentsSettings,
     OutputSettings,
+    PrePlanKnowledgeSettings,
     PrePlanSettings,
     RuntimeSecretSettings,
+    StrictCoreHarnessSettings,
     WorkspaceSettings,
 )
 from fsq_agent.models._skills import SkillBundle, SkillConfig
@@ -202,6 +207,11 @@ __all__ = [
     "ContextTrimmingSettings",
     "HarnessSettings",
     "AndroidHarnessSettings",
+    "StrictCoreHarnessSettings",
+    "AgentContextSettings",
+    "AgentKnowledgeSettings",
+    "KnowledgeSkillSettings",
+    "PrePlanKnowledgeSettings",
     "LocalToolOutputSettings",
     "RuntimeSecretSettings",
     "SkillConfig",

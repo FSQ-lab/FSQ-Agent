@@ -19,7 +19,7 @@ def test_build_github_copilot_client_config_uses_plan_endpoint(tmp_path) -> None
     token_cache_path = tmp_path / "auth" / "github-copilot-token.json"
     token_cache_path.parent.mkdir()
     token_cache_path.write_text(json.dumps({"access_token": "ghu_test", "expires_at": time.time() + 3600}), encoding="utf-8")
-    settings = Settings(openai_agents=OpenAIAgentsSettings(provider="github_copilot", model="gpt-5.5"))
+    settings = Settings(openai_agents=OpenAIAgentsSettings(provider="github_copilot"))
     settings.workspace.root_dir = tmp_path
     with patch.object(copilot, "_get_copilot_plan", return_value="business") as get_plan, patch.object(
         copilot,

@@ -7,6 +7,7 @@ import pytest
 from fsq_agent.cli._core_execution import run_fsq_core_case, run_strict_fsq_core_case
 import fsq_agent.core.runner._sequence as sequence_module
 from fsq_agent.models import (
+    EvidenceBundle,
     ExecutableStep,
     FailureCategory,
     HarnessActionResult,
@@ -123,6 +124,31 @@ def test_run_fsq_core_case_writes_manifest_and_returns_bundle(tmp_path: Path) ->
     assert [step["step_id"] for step in manifest["steps"]] == ["core_cli-step-001", "core_cli-step-002"]
     assert [step["status"] for step in manifest["steps"]] == ["passed", "passed"]
     assert [event["event_type"] for event in manifest["events"]].count("step_start") == 2
+
+
+def test_run_fsq_core_case_passes_step_interval_to_sequence_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, float] = {}
+
+    class FakeSequenceRunner:
+        def __init__(self, *, harness, evidence_recorder, step_interval_seconds: float) -> None:
+            captured["step_interval_seconds"] = step_interval_seconds
+
+        def run_steps(self, *, run_id: str, steps, teardown_steps):
+            return EvidenceBundle(bundle_id=f"{run_id}-bundle", run_id=run_id)
+
+    monkeypatch.setattr("fsq_agent.cli._core_execution.StepSequenceRunner", FakeSequenceRunner)
+
+    bundle = run_fsq_core_case(
+        case_path=tmp_path / "unused.codex.yaml",
+        harness=CliCoreHarness(),
+        output_dir=tmp_path / "runs" / "run-1",
+        run_id="run-1",
+        steps=[],
+        step_interval_seconds=0.25,
+    )
+
+    assert captured["step_interval_seconds"] == 0.25
+    assert bundle.manifest_path == tmp_path / "runs" / "run-1" / "evidence-manifest.json"
 
 
 def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) -> None:

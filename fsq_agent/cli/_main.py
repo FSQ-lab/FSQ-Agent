@@ -57,6 +57,7 @@ def init(config_path: str | None, workspace_path: str | None) -> None:
 @click.option("--stream-format", type=click.Choice(["rich", "jsonl"]), default="rich", show_default=True)
 @click.option("--record", is_flag=True, default=False, show_default=True)
 @click.option("--record-on-failure", is_flag=True, default=False, show_default=True)
+@click.option("--tracing/--no-tracing", "tracing", default=None)
 def run(
     config_path: str | None,
     workspace_path: str | None,
@@ -68,6 +69,7 @@ def run(
     stream_format: str,
     record: bool,
     record_on_failure: bool,
+    tracing: bool | None,
 ) -> None:
     try:
         _validate_run_inputs(
@@ -79,6 +81,8 @@ def run(
             record_on_failure=record_on_failure,
         )
         settings = load_settings(config_path, workspace_path)
+        if tracing is not None:
+            settings.openai_agents.tracing_enabled = tracing
         if strict:
             _run_strict(settings, case_yaml_path=case_yaml_path, case_dir_path=case_dir_path)
             return
@@ -242,6 +246,7 @@ def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id:
         output_dir=run_dir,
         run_id=run_id,
         steps=steps,
+        step_interval_seconds=settings.harness.strict_core.step_interval_seconds,
     )
 
 

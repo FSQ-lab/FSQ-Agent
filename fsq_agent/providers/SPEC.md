@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Own shared model provider construction and provider-backed model call access for fsq-agent. The providers module builds Azure OpenAI and GitHub Copilot OpenAI-compatible clients from validated settings, owns provider authentication and endpoint selection details, exposes OpenAI Agents SDK provider/session construction for the dynamic agent runtime, and exposes direct Responses-style model access for provider-backed AI assertion evaluators.
+Own shared model provider construction and provider-backed model call access for fsq-agent. The providers module builds Azure OpenAI and GitHub Copilot OpenAI-compatible clients from validated, resolved settings, owns provider authentication and endpoint selection details, exposes OpenAI Agents SDK provider/session construction for the dynamic agent runtime, and exposes direct Responses-style model access for provider-backed AI assertion evaluators.
 
 The module centralizes provider behavior that was previously agent-private so the main agent loop, internal pre-planner, evidence-based verifier, and platform AI assertion evaluators can reuse the same provider configuration, token cache behavior, model selection, and redaction policy.
 
@@ -41,7 +41,7 @@ Concrete type annotations may use `Any` for OpenAI Agents SDK classes at the bou
 - `__init__.py`: Public exports only.
 - `_factory.py`: Settings-based factory functions and `ModelProviderFactory` implementation.
 - `_session.py`: `ModelProviderSession` lifecycle wrapper, provider metadata, Agents SDK provider construction, direct Responses-style invocation, and cleanup.
-- `_azure_openai.py`: Azure OpenAI client construction, API-key environment lookup, endpoint normalization assumptions, and provider metadata.
+- `_azure_openai.py`: Azure OpenAI client construction from fixed environment-backed endpoint/model/API-key values, endpoint normalization assumptions, and provider metadata.
 - `_github_copilot.py`: GitHub device-code auth, OAuth token cache loading/saving, Copilot token exchange, plan detection, endpoint selection, headers, and provider metadata.
 - `_ai_assertion.py`: `AIAssertionEvaluator` implementation and model-response parsing into `AIAssertionResult`.
 - `SPEC.md`: Module design.
@@ -50,7 +50,7 @@ Concrete type annotations may use `Any` for OpenAI Agents SDK classes at the bou
 
 Provider setup failures raise `ConfigurationError` from `models` with non-secret context such as provider name, missing environment variable name, endpoint shape, token-cache path, HTTP status code, or Copilot plan value. Provider errors must never include API keys, OAuth tokens, Copilot API tokens, authorization headers, cookies, or model prompt content containing runtime secrets.
 
-GitHub Copilot device-code authorization failures should distinguish request failure, polling failure, expired device code, authorization denial, token exchange failure, and unknown plan. Azure OpenAI validation failures should distinguish missing API key environment variable, invalid base URL shape, and client construction failure.
+GitHub Copilot device-code authorization failures should distinguish request failure, polling failure, expired device code, authorization denial, token exchange failure, and unknown plan. Azure OpenAI validation failures should distinguish missing fixed environment variables, invalid base URL shape, and client construction failure.
 
 Direct evaluator invocation failures should return or raise structured diagnostics that entry-layer code can convert into failed `HarnessActionResult` values. Missing provider credentials for an explicitly authored `assertWithAI` step should produce a configuration failure, not a silent assertion pass or fallback path.
 
@@ -58,8 +58,9 @@ Direct evaluator invocation failures should return or raise structured diagnosti
 
 - Provider construction belongs in `providers`, not `agent`, because the main runner, pre-planner, verifier, and platform AI assertion evaluator need the same Azure/Copilot behavior.
 - `providers` may depend on `config` because it consumes resolved `Settings`, but `config` must not depend on `providers`.
-- The configured `openai_agents.provider` and `openai_agents.model` are the first-cycle provider/model source for AI assertions. There is no separate AI assertion model override in this SPEC cycle.
-- All configured providers use the Responses API. GitHub Copilot mode must keep the existing device-code OAuth flow, token cache under the fsq-agent workspace, Copilot token exchange, plan-specific endpoint selection, and Copilot headers.
+- The resolved `openai_agents.provider` and provider model are the first-cycle provider/model source for AI assertions. There is no separate AI assertion model override in this SPEC cycle.
+- All configured providers use the Responses API. GitHub Copilot mode is the default provider path, uses Copilot model `gpt-5.5`, and must keep the existing device-code OAuth flow, token cache under the fsq-agent workspace, Copilot token exchange, plan-specific endpoint selection, and Copilot headers.
+- Azure OpenAI remains available when config explicitly selects `azure_openai`, but endpoint, model/deployment name, and API key are supplied by fixed environment variables resolved by `config`: `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_MODEL`, and `AZURE_OPENAI_API_KEY`. Provider diagnostics may name those variables when missing but must never include values.
 - The providers module owns provider client lifecycle so callers do not leave `AsyncOpenAI` clients open.
 - `AIAssertionEvaluator.evaluate` is synchronous to satisfy the current `core` harness protocol. It may internally bridge to asynchronous provider calls, but that detail must not leak into `core`.
 - OpenAI Agents SDK runtime objects are not shared models. Provider sessions may construct SDK objects, while `models` stores only serializable settings, requests, results, and metadata.

@@ -15,9 +15,17 @@ class _StepSequenceFailure(Exception):
 
 
 class StepSequenceRunner:
-    def __init__(self, harness: HarnessInterface, evidence_recorder: EvidenceRecorder) -> None:
+    def __init__(
+        self,
+        harness: HarnessInterface,
+        evidence_recorder: EvidenceRecorder,
+        step_interval_seconds: float = 1.0,
+    ) -> None:
+        if step_interval_seconds < 0:
+            raise ValueError("step_interval_seconds must be non-negative")
         self.harness = harness
         self.evidence_recorder = evidence_recorder
+        self.step_interval_seconds = step_interval_seconds
 
     def run_steps(
         self,
@@ -48,7 +56,8 @@ class StepSequenceRunner:
         return self.evidence_recorder.build_bundle()
 
     def _sleep_between_steps(self) -> None:
-        time.sleep(2)
+        if self.step_interval_seconds > 0:
+            time.sleep(self.step_interval_seconds)
 
     def _run_and_record(self, run_id: str, step: ExecutableStep):
         step_runner = StepRunner(harness=self.harness)

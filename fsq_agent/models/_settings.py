@@ -1,17 +1,16 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+
+from fsq_agent.models._skills import SkillConfig
 
 
 class AgentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = "fsq-agent"
-    model: str = "gpt-5.4"
-    max_steps: int = Field(default=50, ge=1)
     step_timeout_seconds: int = Field(default=60, ge=1)
-    max_retries: int = Field(default=3, ge=0)
 
 
 class ContextTrimmingSettings(BaseModel):
@@ -57,12 +56,61 @@ class PrePlanSettings(BaseModel):
     knowledge_dir: Path | None = None
 
 
+class PrePlanKnowledgeSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dir: Path | None = None
+
+
+class KnowledgeSkillSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dir: Path = Path("skills")
+    items: list[SkillConfig] = Field(default_factory=list)
+
+
+class AgentKnowledgeSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root_dir: Path = Path("./knowledge")
+    skills: KnowledgeSkillSettings = Field(default_factory=KnowledgeSkillSettings)
+    pre_plan: PrePlanKnowledgeSettings = Field(default_factory=PrePlanKnowledgeSettings)
+
+
+class AgentContextSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    knowledge: AgentKnowledgeSettings = Field(default_factory=AgentKnowledgeSettings)
+
+
 class AndroidHarnessSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     backend: Literal["uiautomator2"] = "uiautomator2"
-    app_id: str | None = None
-    serial: str | None = None
+    _app_id: str | None = PrivateAttr(default=None)
+    _serial: str | None = PrivateAttr(default=None)
+
+    @property
+    def app_id(self) -> str | None:
+        return self._app_id
+
+    @app_id.setter
+    def app_id(self, value: str | None) -> None:
+        self._app_id = value
+
+    @property
+    def serial(self) -> str | None:
+        return self._serial
+
+    @serial.setter
+    def serial(self, value: str | None) -> None:
+        self._serial = value
+
+
+class StrictCoreHarnessSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_interval_seconds: float = Field(default=1.0, ge=0)
 
 
 class HarnessSettings(BaseModel):
@@ -70,6 +118,7 @@ class HarnessSettings(BaseModel):
 
     platform: Literal["android"] = "android"
     android: AndroidHarnessSettings = Field(default_factory=AndroidHarnessSettings)
+    strict_core: StrictCoreHarnessSettings = Field(default_factory=StrictCoreHarnessSettings)
 
 
 class OpenAIAgentPromptConfig(BaseModel):
@@ -85,39 +134,66 @@ class OpenAIAgentPromptConfig(BaseModel):
 class OpenAIAgentsSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["azure_openai", "github_copilot"] = "azure_openai"
-    base_url: str = "https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/"
-    api_key_env: str = "AZURE_OPENAI_API_KEY"
-    model: str = "gpt-5.4"
+    provider: Literal["azure_openai", "github_copilot"] = "github_copilot"
     max_turns: int = Field(default=50, ge=1)
-    tracing_enabled: bool = False
-    trace_include_sensitive_data: bool = False
-    fail_without_api_key: bool = True
+    tracing_enabled: bool = True
     prompt: OpenAIAgentPromptConfig = Field(default_factory=OpenAIAgentPromptConfig)
-    context_trimming: ContextTrimmingSettings = Field(default_factory=ContextTrimmingSettings)
-    local_tool_output: LocalToolOutputSettings = Field(default_factory=LocalToolOutputSettings)
+    _base_url: str = PrivateAttr(default="")
+    _model: str = PrivateAttr(default="gpt-5.5")
+    _context_trimming: ContextTrimmingSettings = PrivateAttr(default_factory=ContextTrimmingSettings)
+    _local_tool_output: LocalToolOutputSettings = PrivateAttr(default_factory=LocalToolOutputSettings)
 
+    @property
+    def base_url(self) -> str:
+        return self._base_url
 
-class ShellSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    @base_url.setter
+    def base_url(self, value: str) -> None:
+        self._base_url = value
 
-    enabled: bool = False
-    mode: Literal["allowlist", "allow_all"] = "allowlist"
-    command_allowlist: list[str] = Field(default_factory=list)
-    timeout_seconds: int = Field(default=60, ge=1)
-    working_dir: Path = Path(".")
+    @property
+    def api_key_env(self) -> str:
+        return "AZURE_OPENAI_API_KEY"
 
+    @property
+    def model(self) -> str:
+        return self._model
 
-class DeprecatedToolSettings(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    @model.setter
+    def model(self, value: str) -> None:
+        self._model = value
+
+    @property
+    def context_trimming(self) -> ContextTrimmingSettings:
+        return self._context_trimming
+
+    @context_trimming.setter
+    def context_trimming(self, value: ContextTrimmingSettings | dict[str, Any]) -> None:
+        self._context_trimming = ContextTrimmingSettings.model_validate(value)
+
+    @property
+    def local_tool_output(self) -> LocalToolOutputSettings:
+        return self._local_tool_output
+
+    @local_tool_output.setter
+    def local_tool_output(self, value: LocalToolOutputSettings | dict[str, Any]) -> None:
+        self._local_tool_output = LocalToolOutputSettings.model_validate(value)
 
 
 class WorkspaceSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     root_dir: Path | None = None
-    marker_file: str = ".fsq-agent-workspace"
-    auto_init: bool = True
+    _marker_file: str = PrivateAttr(default=".fsq-agent-workspace")
+    _auto_init: bool = PrivateAttr(default=True)
+
+    @property
+    def marker_file(self) -> str:
+        return self._marker_file
+
+    @property
+    def auto_init(self) -> bool:
+        return self._auto_init
 
 
 class CaseSettings(BaseModel):
@@ -130,4 +206,12 @@ class OutputSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     root_dir: Path = Path("output")
-    runs_dir: Path = Path("runs")
+    _runs_dir: Path = PrivateAttr(default=Path("runs"))
+
+    @property
+    def runs_dir(self) -> Path:
+        return self._runs_dir
+
+    @runs_dir.setter
+    def runs_dir(self, value: str | Path) -> None:
+        self._runs_dir = Path(value)

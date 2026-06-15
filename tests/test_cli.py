@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from fsq_agent.cli._main import _task_from_goal, _task_from_raw_case_source, main
@@ -31,12 +32,16 @@ cases:
   dir: {cases_dir.as_posix()}
 output:
   root_dir: output
-  runs_dir: runs
 {body}
 """,
         encoding="utf-8",
     )
     return config_path
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 def test_only_public_commands_are_registered() -> None:
@@ -66,7 +71,7 @@ def test_run_case_yaml_uses_raw_file_content_without_fsq_parsing(tmp_path: Path,
     case_path = tmp_path / "cases" / "raw.codex.yaml"
     raw_content = "not: [valid yaml"
     case_path.write_text(raw_content, encoding="utf-8")
-    captured: dict[str, Task] = {}
+    captured: dict[str, object] = {}
 
     class FakeAgent:
         async def run(self, task: Task, event_sink=None) -> TaskResult:
@@ -83,13 +88,19 @@ def test_run_case_yaml_uses_raw_file_content_without_fsq_parsing(tmp_path: Path,
         def __init__(self) -> None:
             raise AssertionError("dynamic case-yaml must not construct FsqCaseLoader")
 
-    monkeypatch.setattr("fsq_agent.cli._main.FsqAgent.from_settings", lambda _settings: FakeAgent())
+    def fake_agent_from_settings(settings):
+        captured["tracing_enabled"] = settings.openai_agents.tracing_enabled
+        return FakeAgent()
+
+    monkeypatch.setattr("fsq_agent.cli._main.FsqAgent.from_settings", fake_agent_from_settings)
     monkeypatch.setattr("fsq_agent.cli._main.FsqCaseLoader", RaisingLoader)
 
-    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--case-yaml", "raw.codex.yaml", "--no-stream"])
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--case-yaml", "raw.codex.yaml", "--no-stream", "--no-tracing"])
 
     assert result.exit_code == 0, result.output
+    assert captured["tracing_enabled"] is False
     task = captured["task"]
+    assert isinstance(task, Task)
     assert task.name == "Case reference: raw.codex.yaml"
     assert raw_content in task.description
     assert "The CLI has not parsed" in task.description
@@ -127,18 +138,18 @@ def test_run_goal_record_invokes_strict_case_recorder(tmp_path: Path, monkeypatc
     assert "Recorded strict case" in result.output
 
 
-def test_run_strict_case_builds_android_harness_from_config_and_reports_paths(tmp_path: Path, monkeypatch) -> None:
+def test_run_strict_case_builds_android_harness_from_env_and_reports_paths(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("FSQ_ANDROID_APP_ID", "com.example.config")
+    monkeypatch.setenv("FSQ_ANDROID_SERIAL", "device-1")
     config_path = _config(
         tmp_path,
-        """
+                """
 harness:
-  platform: android
-  android:
-    backend: uiautomator2
-    app_id: com.example.config
-    serial: device-1
-openai_agents:
-  api_key_env: FSQ_AGENT_MISSING_KEY
+    platform: android
+    android:
+        backend: uiautomator2
+    strict_core:
+        step_interval_seconds: 0.25
 """,
     )
     case_path = tmp_path / "cases" / "strict_cli.codex.yaml"
@@ -170,11 +181,13 @@ openai_agents:
     assert calls["strict"]["case_path"] == case_path.resolve()
     assert calls["strict"]["run_id"] == "strict_cli"
     assert calls["strict"]["output_dir"] == tmp_path / "workspace" / "output" / "runs" / "strict_cli"
+    assert calls["strict"]["step_interval_seconds"] == 0.25
     assert "core-report.md" in result.output
     assert "evidence-manifest.json" in result.output
 
 
 def test_run_strict_case_falls_back_to_case_app_id(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("FSQ_ANDROID_SERIAL", "device-1")
     config_path = _config(
         tmp_path,
         """
@@ -182,7 +195,6 @@ harness:
   platform: android
   android:
     backend: uiautomator2
-    serial: device-1
 """,
     )
     case_path = tmp_path / "cases" / "strict_cli.codex.yaml"
@@ -226,6 +238,8 @@ def test_run_strict_case_requires_config_or_case_app_id_before_driver_constructi
 
 
 def test_run_strict_case_dir_continues_and_writes_summary(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("FSQ_ANDROID_APP_ID", "com.example.config")
+    monkeypatch.setenv("FSQ_ANDROID_SERIAL", "device-1")
     config_path = _config(
         tmp_path,
         """
@@ -233,8 +247,6 @@ harness:
   platform: android
   android:
     backend: uiautomator2
-    app_id: com.example.config
-    serial: device-1
 """,
     )
     cases_dir = tmp_path / "cases"

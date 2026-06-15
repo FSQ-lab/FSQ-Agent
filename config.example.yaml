@@ -1,107 +1,34 @@
-agent:
-  name: fsq-agent
-  model: gpt-5.4
-  max_steps: 50
-  step_timeout_seconds: 60
-  max_retries: 3
-
 openai_agents:
-  # Provider selector: azure_openai or github_copilot.
-  # github_copilot runs GitHub device-code auth on first use and caches the
-  # OAuth token under workspace.root_dir/auth/github-copilot-token.json.
-  # When provider is github_copilot, use model: gpt-5.5 and no API-key env is required.
-  provider: azure_openai
-  # Azure OpenAI only: normalized /openai/v1/ endpoint used when provider is azure_openai.
-  base_url: https://edgeqa-resource.cognitiveservices.azure.com/openai/v1/
-  # Azure OpenAI only: environment variable containing the Azure OpenAI API key.
-  api_key_env: AZURE_OPENAI_API_KEY
-  # Azure OpenAI: Azure deployment name. GitHub Copilot: use Copilot model gpt-5.5.
-  model: gpt-5.4
-  max_turns: 50
-  tracing_enabled: false
-  trace_include_sensitive_data: false
-  fail_without_api_key: true
-  prompt:
-    agent_template_path: ./fsq_agent/agent/templates/agent_instructions.j2
-    task_template_path: ./fsq_agent/agent/templates/task_input.j2
-    # Optional: put long operator guidance in a Markdown/text file instead of inline YAML.
-    # custom_instructions_path: ./fsq_agent/agent/templates/openai-agent-custom-instructions.md
-    custom_instructions: []
-    variables: {}
-  context_trimming:
-    enabled: true
-    recent_turns: 2
-    max_tool_output_chars: 8000
-    preview_chars: 1000
-    trimmable_tools: []
-  local_tool_output:
-    artifact_enabled: true
-    always_write_artifact: true
-    artifact_subdir: artifacts/tools
-    recent_full_output_count: 3
-    full_output_max_chars: 30000
-    historical_output_mode: artifact_reference
-    historical_preview_chars: 1000
-    model_response_max_chars: 4000
+  provider: github_copilot
+  tracing_enabled: true
 
 harness:
   platform: android
   android:
     backend: uiautomator2
-    # Required for dynamic LLM runs and strict cases that do not provide appId in FSQ case metadata.
-    # Microsoft Edge Android package id:
-    app_id: com.microsoft.emmx
-    # Optional uiautomator2 device serial. Leave null when exactly one device is connected.
-    serial: null
+  strict_core:
+    step_interval_seconds: 1.0
 
 runtime_secrets:
-  # The get_runtime_secret tool may only read names listed here. Values come from
-  # process env or .env, never from config YAML. For sign-in cases, use:
-  # allowed_env_names:
-  #   - TEST_ACCOUNT_EMAIL
-  #   - TEST_ACCOUNT_PASSWORD
-  allowed_env_names: []
+  allowed_env_names:
+    - TEST_ACCOUNT_EMAIL
+    - TEST_ACCOUNT_PASSWORD
 
-skills:
-  - name: automation-basics
-    description: Describes how the agent should use configured harness and local tools for automation tasks.
-    kind: markdown
-    path: automation-basics.md
-    required: true
-  - name: android-harness
-    description: Android harness action selection and recovery guidance.
-    kind: markdown
-    path: android-harness.md
-    required: true
-
-shell:
-  enabled: false
-  # Use allowlist for normal operation. Use allow_all only for intentionally unrestricted local runs.
-  mode: allowlist
-  command_allowlist: [python, node, npm, npx]
-  timeout_seconds: 60
-  working_dir: .
-
-workspace:
-  root_dir: ./.fsq-agent-workspace
-  marker_file: .fsq-agent-workspace
-  auto_init: true
-
-cases:
-  dir: ./cases
-
-cli_tools:
-  - name: echo
-    command: python
-    args: ["-c", "import sys; print(' '.join(sys.argv[1:]))"]
-    description: Echo arguments for smoke tests.
-    timeout_seconds: 10
-
-output:
-  root_dir: output
-  runs_dir: runs
-
-knowledge_dir: ./knowledge
-
-pre_plan:
-  knowledge_dir: ./knowledge/project_android_v1
+agent_context:
+  knowledge:
+    root_dir: ./knowledge
+    skills:
+      dir: skills
+      items:
+        - name: automation-basics
+          description: Semantic action and evidence guidance for local runs.
+          kind: markdown
+          path: automation-basics.md
+          required: true
+        - name: android-harness
+          description: Android harness action selection and recovery guidance.
+          kind: markdown
+          path: android-harness.md
+          required: true
+    pre_plan:
+      dir: project_android_v1

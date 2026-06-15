@@ -5,6 +5,8 @@ import os
 from fsq_agent.config import Settings
 from fsq_agent.models import ConfigurationError
 
+AZURE_OPENAI_API_KEY_ENV = "AZURE_OPENAI_API_KEY"
+
 
 @dataclass(frozen=True)
 class ProviderClientConfig:
@@ -18,16 +20,16 @@ class ProviderClientConfig:
 
 def build_azure_openai_client_config(settings: Settings) -> ProviderClientConfig:
     openai_settings = settings.openai_agents
-    api_key = os.getenv(openai_settings.api_key_env)
+    api_key = os.getenv(AZURE_OPENAI_API_KEY_ENV)
     if not api_key:
         raise ConfigurationError(
             "Azure OpenAI API key environment variable is not set.",
-            context={"api_key_env": openai_settings.api_key_env},
+            context={"api_key_env": AZURE_OPENAI_API_KEY_ENV},
         )
     if api_key.lower().startswith("replace-with"):
         raise ConfigurationError(
             "Azure OpenAI API key environment variable still contains a placeholder value.",
-            context={"api_key_env": openai_settings.api_key_env},
+            context={"api_key_env": AZURE_OPENAI_API_KEY_ENV},
         )
     base_url = openai_settings.base_url.strip()
     if not base_url.endswith("/openai/v1/"):
