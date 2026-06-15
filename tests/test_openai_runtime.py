@@ -281,7 +281,7 @@ def test_runtime_builds_step_results_from_structured_pre_plan() -> None:
     assert "Used keyboard shortcut" in steps[1].actual_outcome
 
 
-def test_runtime_task_input_requests_derived_acceptance_criteria() -> None:
+def test_runtime_task_input_uses_goal_only_verification_contract() -> None:
     settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
     task = Task(id="derive", name="Derive", description="Open the page and verify it loads.")
@@ -290,8 +290,8 @@ def test_runtime_task_input_requests_derived_acceptance_criteria() -> None:
 
     assert "Structured task input:" in task_input
     assert '"schema_version": "task_input_v1"' in task_input
-    assert "Task acceptance criteria: none" in task_input
-    assert "Derive acceptance criteria" in task_input
+    assert "Final verification goal: none provided" in task_input
+    assert "verification_goal" in task_input
 
 
 def test_runtime_instructions_include_custom_operator_instructions() -> None:
@@ -361,7 +361,7 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
     renderer = PromptRenderer(settings)
 
     agent_model = builder.build_agent_prompt(KnowledgeBundle(), [])
-    task_model = builder.build_task_prompt(Task(id="task-1", description="Do it.", acceptance_criteria=["Done."]))
+    task_model = builder.build_task_prompt(Task(id="task-1", description="Do it.", verification_goal="Done."))
 
     assert "Custom operator instructions:" in renderer.render_agent_prompt(agent_model)
     assert "- Custom." in renderer.render_agent_prompt(agent_model)
@@ -370,7 +370,8 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
     rendered_task = renderer.render_task_prompt(task_model)
     assert "Structured task input:" in rendered_task
     assert '"id": "task-1"' in rendered_task
-    assert "- Done." in renderer.render_task_prompt(task_model)
+    assert "Final verification goal:" in rendered_task
+    assert "Done." in rendered_task
 
 
 def test_prompt_model_builder_loads_custom_instructions_file(tmp_path: Path) -> None:
@@ -448,7 +449,7 @@ def test_verification_evidence_builder_uses_text_only_after_runner_visual_assert
     task = Task(
         id="visual",
         description="Verify the page visually.",
-        acceptance_criteria=["Key action 1: assertWithAI Verify the logo is visible."],
+        verification_goal="Verify the logo is visible.",
     )
     results = [
         StepResult(
@@ -475,8 +476,9 @@ def test_verification_evidence_builder_uses_text_only_after_runner_visual_assert
 
     assert isinstance(model_input, str)
     evidence = json.loads(model_input)
-    assert evidence["verification_mode"] == "normal"
-    assert evidence["blocking_criteria"][0]["text"] == "Key action 1: assertWithAI Verify the logo is visible."
+    assert evidence["verification_goal"] == "Verify the logo is visible."
+    assert "verification_mode" not in evidence
+    assert "blocking_criteria" not in evidence
     assert "visual_artifacts" not in evidence
     assert evidence["agent_claims"]["status"] == "success"
     assert "Runner inspected submitted screenshot" in evidence["agent_claims"]["evidence"][0]

@@ -43,7 +43,7 @@ class TaskPromptModel:
     description: str
     acceptance_criteria: list[str] = field(default_factory=list)
     key_actions: list[str] = field(default_factory=list)
-    verification_criteria: list[dict[str, Any]] = field(default_factory=list)
+    verification_goal: str | None = None
     input_json: str = ""
     variables: dict[str, Any] = field(default_factory=dict)
 
@@ -86,19 +86,15 @@ class PromptModelBuilder:
 
     def build_task_prompt(self, task: Task, runtime_policy: list[str] | None = None) -> TaskPromptModel:
         acceptance_policy = (
-            "Use the provided key actions as execution guidance and the structured verification criteria as final success criteria."
-            if task.key_actions or task.verification_criteria
-            else (
-                "Use the provided task acceptance criteria as required success criteria."
-                if task.acceptance_criteria
-                else "Derive acceptance criteria from the task description, private knowledge, and loaded skills. If the task is too broad, use successful flow completion with enough evidence as the success standard."
-            )
+            "Use the provided key actions as execution guidance and the verification_goal as the only final success target."
+            if task.key_actions or task.verification_goal
+            else "Use successful flow completion with enough evidence as the success standard."
         )
         task_input = AgentTaskInput(
             task=task,
             acceptance_criteria=list(task.acceptance_criteria),
             key_actions=list(task.key_actions),
-            verification_criteria=list(task.verification_criteria),
+            verification_goal=task.verification_goal,
             runtime_policy=list(runtime_policy or []),
             acceptance_policy=acceptance_policy,
         )
@@ -108,7 +104,7 @@ class PromptModelBuilder:
             description=task.description,
             acceptance_criteria=list(task.acceptance_criteria),
             key_actions=list(task.key_actions),
-            verification_criteria=[criterion.model_dump(mode="json") for criterion in task.verification_criteria],
+            verification_goal=task.verification_goal,
             input_json=task_input.model_dump_json(indent=2),
             variables=dict(self.settings.variables),
         )

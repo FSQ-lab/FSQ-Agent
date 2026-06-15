@@ -58,7 +58,7 @@ Captured artifact refs should be attached to the corresponding `StepPhaseReport.
 The first sequence runner implementation exposes a narrow synchronous API:
 
 ```python
-runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder, step_interval_seconds=1.0)
 result = runner.run_steps(run_id="run-1", steps=executable_steps, teardown_steps=teardown_steps)
 ```
 
@@ -69,7 +69,7 @@ result = runner.run_steps(run_id="run-1", steps=executable_steps, teardown_steps
 - Record every `RunnerStepResult` into the supplied `EvidenceRecorder`.
 - Stop normal-step execution on the first step whose result status is `failed`, `cancelled`, or `skipped`.
 - Always execute supplied `teardown_steps` after normal execution stops or completes, including after failed, cancelled, skipped, or exception-converted normal steps.
-- Sleep for one second before each subsequent executed step, including between normal steps and before teardown steps when a prior step already ran. This pacing is not a `waitMs` FSQ command, must not call the harness, and must not add synthetic step results to evidence.
+- Sleep for `step_interval_seconds` before each subsequent executed step when that interval is greater than zero, including between normal steps and before teardown steps when a prior step already ran. The default interval is one second, and entry-layer configuration may pass a different non-negative interval. This pacing is not a `waitMs` FSQ command, must not call the harness, and must not add synthetic step results to evidence.
 - Build and return the current `EvidenceBundle` after execution stops or all steps pass.
 - Leave manifest persistence to the caller by requiring an explicit `EvidenceRecorder.write_manifest()` call after `run_steps` when disk output is desired.
 

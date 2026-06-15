@@ -2,21 +2,21 @@
 
 ## Purpose
 
-Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, shared model provider selection, Azure OpenAI model deployment, GitHub Copilot local provider authentication, final verification policy, harness/driver construction, strict-core Android execution, strict replay secret resolution, CommonTool safety policy, automation skills, runtime secret allowlists, case input directories, internal goal-planning page knowledge, the fsq-agent workspace, and output directories.
+Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, shared model provider selection, Azure OpenAI model deployment, GitHub Copilot local provider authentication, harness/driver construction, strict-core Android execution and pacing, strict replay secret resolution, CommonTool safety policy, automation skills, runtime secret allowlists, case input directories, internal goal-planning page knowledge, the fsq-agent workspace, and output directories.
 
 ## Dependencies
 
-- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `VerificationSettings`, `HarnessSettings`, `AndroidHarnessSettings`, `WorkspaceSettings`, `CaseSettings`, `SkillConfig`, `OutputSettings`, `PrePlanSettings`, `LocalToolOutputSettings`, and `ConfigurationError`.
+- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `StrictCoreSettings`, `HarnessSettings`, `AndroidHarnessSettings`, `WorkspaceSettings`, `CaseSettings`, `SkillConfig`, `OutputSettings`, `PrePlanSettings`, `LocalToolOutputSettings`, and `ConfigurationError`.
 
 ## Public Interface
 
 Target `__init__.py` exports via `__all__` after this change:
 
-- `Settings`: Runtime settings aggregate model that combines agent, OpenAI Agents SDK provider selection, configurable prompt text, context trimming, CommonTool output artifact policy, harness/driver construction, strict-core Android execution settings, final verification policy, runtime secret allowlists, workspace, case directory, skills, output, normal task knowledge, and internal goal-planning page knowledge configuration.
+- `Settings`: Runtime settings aggregate model that combines agent, OpenAI Agents SDK provider selection, configurable prompt text, context trimming, CommonTool output artifact policy, harness/driver construction, strict-core Android execution settings including inter-step pacing, runtime secret allowlists, workspace, case directory, skills, output, normal task knowledge, and internal goal-planning page knowledge configuration.
 - `load_settings(path: str | Path | None = None, workspace: str | Path | None = None) -> Settings`: Loads `.env` values without overriding existing environment variables, then loads YAML configuration from the provided path or default search locations. The optional workspace argument overrides `workspace.root_dir`.
 - `resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> None`: Ensures the fsq-agent workspace is initialized and marked, resolves case and knowledge directories, and creates output directories under the workspace.
 - `validate_runtime_settings(settings: Settings) -> None`: Validates provider-specific secrets or auth requirements, Azure OpenAI base URL shape when selected, model deployment name, LLM harness/driver settings, CommonTool policy, and local path constraints before a default LLM run starts.
-- `validate_strict_core_settings(settings: Settings, requires_ai_assertion: bool = False) -> None`: Validates strict-core harness/driver settings and mode-level settings not provided by a case file. It does not require provider credentials unless the caller knows the strict run contains an authored `assertWithAI` step or otherwise requires a provider-backed AI assertion evaluator. Strict replay runtime-secret refs are validated by entry-layer code after the case is parsed because the referenced names come from the case, not from static settings.
+- `validate_strict_core_settings(settings: Settings, requires_ai_assertion: bool = False) -> None`: Validates strict-core harness/driver settings not provided by a case file. It does not require provider credentials unless the caller knows the strict run contains an authored `assertWithAI` step or otherwise requires a provider-backed AI assertion evaluator. Strict replay runtime-secret refs are validated by entry-layer code after the case is parsed because the referenced names come from the case, not from static settings.
 
 ## Internal Structure
 
@@ -28,7 +28,7 @@ Target `__init__.py` exports via `__all__` after this change:
 
 ## Error Handling
 
-Invalid or missing configuration raises `ConfigurationError` from `models`. Low-level YAML, path, workspace marker, or validation exceptions are wrapped with actionable context.
+Invalid or missing configuration raises `ConfigurationError` from `models`. Low-level YAML, path, workspace marker, or validation exceptions are wrapped with actionable context. Obsolete `verification` configuration, including `verification.mode`, is rejected instead of ignored.
 
 ## Design Decisions
 
@@ -48,8 +48,9 @@ Invalid or missing configuration raises `ConfigurationError` from `models`. Low-
 - `harness.android.app_id` optionally supplies the Android application id for dynamic LLM runs and strict-core runs. Strict-core may fall back to `appId` from parsed FSQ case metadata when the config value is absent. There are no public CLI app-id overrides.
 - `harness.android.serial` optionally selects the Android device serial passed to the uiautomator2 backend.
 - Strict-core execution remains deterministic except for explicitly authored `assertWithAI` assertion steps. When a strict run contains `assertWithAI`, entry-layer code may request provider validation and inject a provider-backed evaluator into the platform harness. Missing provider readiness for such a step is a configuration failure. No AI recovery, locator fallback, or testcase mutation is enabled by this setting.
+- `strict_core.step_interval_seconds` controls the implicit sleep before each subsequent executed strict-core step, including before teardown after a prior step has run. The default is `1.0` second to preserve existing pacing intent; `0` disables implicit pacing. This setting must not create `waitMs` commands, synthetic evidence steps, or report entries.
 - Strict replay secret refs remain deterministic configuration inputs. After parsing a strict case, entry-layer code validates each referenced `runtimeSecret` name against `runtime_secrets.allowed_env_names` and verifies the value is present in environment or `.env` before UI actions begin. Missing allowlist entries or values are configuration failures. Secret values are substituted only in memory and must not be written to settings, generated YAML, events, manifests, or reports.
-- `verification.mode` selects final verification strictness. The default `normal` verifies the goal and assertion-style criteria. `strict` verifies the goal plus all required ordered key actions, including operation-style criteria. `goal` verifies only the goal-level criteria. The setting affects final verification only; the execution agent still receives all key actions as task context.
+- Dynamic LLM final verification is not configurable through settings. The runtime verifies the single pre-plan-derived `verification_goal`; `verification.mode` is obsolete and must not be accepted.
 - Non-interactive execution is the default. Any human-in-the-loop SDK feature must be disabled or backed by deterministic programmatic approval.
 - Output directory creation is part of config resolution so later modules can assume directories are writable. Reports, run event timelines, CommonTool artifacts, and generated files must be placed under `output.root_dir`; completed run reports are stored under `output.runs_dir`.
 - Platform action schemas are not configured through external tool servers. They are discovered from the active harness through `HarnessInterface.action_space()` and adapted by the agent runtime into SDK `FunctionTool` objects.

@@ -91,7 +91,6 @@ from fsq_agent.models._settings import (
     OutputSettings,
     PrePlanSettings,
     RuntimeSecretSettings,
-    VerificationSettings,
     WorkspaceSettings,
 )
 from fsq_agent.models._skills import SkillBundle, SkillConfig
@@ -101,9 +100,6 @@ from fsq_agent.models._task import (
     StepResult,
     Task,
     TaskResult,
-    VerificationCriterion,
-    VerificationCriterionKind,
-    VerificationMode,
     VerificationResult,
     VerificationStatus,
 )
@@ -125,9 +121,6 @@ __all__ = [
     "AIAssertionRequest",
     "AIAssertionResult",
     "Task",
-    "VerificationCriterion",
-    "VerificationCriterionKind",
-    "VerificationMode",
     "VerificationStatus",
     "ExecutionPlan",
     "ExecutionStep",
@@ -211,7 +204,6 @@ __all__ = [
     "AndroidHarnessSettings",
     "LocalToolOutputSettings",
     "RuntimeSecretSettings",
-    "VerificationSettings",
     "SkillConfig",
     "SkillBundle",
     "AgentSettings",

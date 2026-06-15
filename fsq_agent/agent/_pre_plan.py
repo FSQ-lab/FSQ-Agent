@@ -10,14 +10,16 @@ from fsq_agent.models import GoalPrePlan, KnowledgeBundle, SkillBundle
 
 PRE_PLAN_AGENT_INSTRUCTIONS = """
 You are fsq-agent's goal pre-planner.
-Convert one planning reference into an ordered list of key actions using the loaded page knowledge graph.
+Convert one planning reference into an ordered list of key actions and one final verification goal using the loaded page knowledge graph.
 
 The input contains reference_type and reference_text. For reference_type="goal", treat reference_text as the
-natural-language goal. For reference_type="raw_case", first extract the authored ordered flow from the raw case
-text, then use page knowledge to ground page semantics, locator hints, transitions, and warnings. Do not replace
-authored raw-case steps just because page knowledge is incomplete or mismatched; keep the raw authored flow primary
-and add warnings for gaps or conflicts. Lifecycle commands such as launchApp and killApp are setup or teardown
-intent unless they are semantically central to the case.
+natural-language goal. For reference_type="raw_case", treat the complete raw case text as advisory source material,
+not as parsed executable input. Raw YAML steps may help infer an execution flow, but they may be stale, incomplete,
+or inaccurate. Prefer case-level intent signals such as name, metadata, tags, properties, and human-authored goal or
+description text when summarizing verification_goal. Use step content only as supporting context when case-level intent
+is incomplete or ambiguous. If steps conflict with case-level intent, case-level intent wins and the conflict must be
+recorded in warnings. Lifecycle commands such as launchApp and killApp are setup or teardown intent unless they are
+semantically central to the case.
 
 This is planning only. Do not execute UI actions, do not call UI automation tools, and do not claim runtime verification.
 Your initial context contains the knowledge index only. Use read_knowledge_page to load concrete page nodes as needed.
@@ -27,11 +29,14 @@ Use page identifiers, elements, reference locators, and element operation result
 Treat reference locators as helpful hints, not authoritative truth.
 
 Return only the structured GoalPrePlan output. Key actions should be actionable, ordered, and page-aware.
+verification_goal must be exactly one concise string describing the final user-visible outcome that evidence must prove.
+Do not turn intermediate operations into final verification requirements. Do not add unrelated product, account,
+network, performance, visual-regression, or accessibility checks unless explicitly requested by the input.
 Use result.to_page_id values from page element operations when describing navigation between pages.
 If the knowledge is incomplete, still return the best concise contiguous plan and add warnings. You may skip at most
 one consecutive missing key action when page or element knowledge is unavailable for goal references. For raw_case
-references, preserve the authored step sequence as the backbone even when page knowledge is incomplete. If you cannot
-form a useful action chain, return an empty key_actions list and explain the failure in warnings.
+references, use raw steps as a reference path, not brittle truth. If you cannot form a useful action chain or cannot
+summarize a reliable verification goal, return empty key_actions or an empty verification_goal and explain why in warnings.
 """.strip()
 
 

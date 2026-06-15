@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Generate human-readable and machine-readable reports under the fsq-agent output directory from dynamic LLM task results and strict-core evidence manifests, including CommonTool/harness tool provenance and provider-backed AI assertion verdict metadata. Provide one lookup path so CLI can print a stored LLM or strict-core report by run id.
+Generate human-readable and machine-readable reports under the fsq-agent output directory from dynamic LLM task results and strict-core evidence manifests, including the checked dynamic `verification_goal`, CommonTool/harness tool provenance, and provider-backed AI assertion verdict metadata. Provide one lookup path so CLI can print a stored LLM or strict-core report by run id.
 
 ## Dependencies
 
@@ -55,7 +55,7 @@ Stored report lookup raises `ReportGenerationError` when no report exists for th
 ## Design Decisions
 
 - Markdown and JSON reports are part of the design because they are easy to inspect in CI and IDEs.
-- JSON reports are structured by lifecycle concern: `task`, `agent_output`, `execution`, `verification`, and `failure_classification`. The `agent_output` section contains the typed `AgentFinalOutput` when available. The `execution.tool_calls` collection contains normalized `ToolCallRecord` values for real harness and CommonTool calls reconstructed from run events; tool origins are `harness`, `common`, `runtime`, or `unknown`. Runtime-only records such as progress events, pre-plan reconstruction, provider setup, and SDK runner summaries are not represented as real tool calls. Step records use `source` for runtime/provenance labels rather than overloading it as a tool name. Failure classification may use both verification output and normalized real tool-call output previews so tool usage failures can be distinguished from planning failures.
+- JSON reports are structured by lifecycle concern: `task`, `agent_output`, `execution`, `verification`, and `failure_classification`. The `task` and `verification` sections should make the single checked dynamic `verification_goal` visible for LLM runs. The `agent_output` section contains the typed `AgentFinalOutput` when available. The `execution.tool_calls` collection contains normalized `ToolCallRecord` values for real harness and CommonTool calls reconstructed from run events; tool origins are `harness`, `common`, `runtime`, or `unknown`. Runtime-only records such as progress events, pre-plan reconstruction, provider setup, and SDK runner summaries are not represented as real tool calls. Step records use `source` for runtime/provenance labels rather than overloading it as a tool name. Failure classification may use both verification output and normalized real tool-call output previews so tool usage failures can be distinguished from planning failures.
 - Reports must preserve AI assertion evidence emitted by harness actions. For Android `assertWithAI`, reports should include the prompt summary, verdict status, explanation, provider/model metadata safe for display, latency/token diagnostics when safe, screenshot artifact references, and any evaluator error. Reports must not re-inspect screenshot pixels or include hidden model reasoning.
 - Report artifacts are stored below `output.runs_dir/<run-id>` so installed CLI usage does not create report files in the caller's current directory.
 - LLM and strict-core reports intentionally keep separate internal shapes. CLI unifies only lookup and printing through `resolve_report_path`.

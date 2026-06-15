@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from fsq_agent.models._task import StepStatus, Task, VerificationCriterion, VerificationStatus
+from fsq_agent.models._task import StepStatus, Task, VerificationStatus
 
 
 AGENT_FINAL_OUTPUT_SCHEMA_VERSION = "task_run_v1"
@@ -17,7 +17,7 @@ class AgentTaskInput(BaseModel):
     task: Task
     acceptance_criteria: list[str] = Field(default_factory=list)
     key_actions: list[str] = Field(default_factory=list)
-    verification_criteria: list[VerificationCriterion] = Field(default_factory=list)
+    verification_goal: str | None = None
     runtime_policy: list[str] = Field(default_factory=list)
     acceptance_policy: str
     output_contract: Literal["task_run_v1"] = AGENT_FINAL_OUTPUT_SCHEMA_VERSION

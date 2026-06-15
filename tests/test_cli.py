@@ -313,8 +313,7 @@ def test_task_from_goal_creates_goal_only_task() -> None:
     assert task.planning_reference_kind == "goal"
     assert task.planning_reference_text == "Access Downloads through the overflow menu."
     assert task.key_actions == []
-    assert task.verification_goal == "Goal completed: Access Downloads through the overflow menu."
-    assert [criterion.kind for criterion in task.verification_criteria] == ["goal"]
+    assert task.verification_goal is None
 
 
 def test_task_from_raw_case_source_preserves_full_content_as_planning_reference(tmp_path: Path) -> None:
@@ -333,4 +332,4 @@ name: Verify Settings
     assert f"Source path: {case_path}" in task.planning_reference_text
     assert content in task.planning_reference_text
     assert "Microsoft services" in task.planning_reference_text
-    assert task.verification_goal == "Goal completed: Execute the referenced case content from verify_settings.codex.yaml."
+    assert task.verification_goal is None

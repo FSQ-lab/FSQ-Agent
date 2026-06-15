@@ -621,7 +621,6 @@ class OpenAIAgentsRuntime:
             task,
             execution_results,
             events_path,
-            mode=self.settings.verification.mode,
         )
         evidence_input = self._replace_secret_values(evidence_input, self._runtime_secret_values())
         set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)

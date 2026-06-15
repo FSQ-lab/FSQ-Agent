@@ -10,17 +10,9 @@ Execution key actions:
 Execution key actions: none provided. Derive the execution path from the description and knowledge.
 {% endif %}
 
-{% if task.verification_criteria %}
-Final verification criteria:
-{% for criterion in task.verification_criteria %}
-- [{{ criterion.kind }}] {{ criterion.text }}{% if not criterion.required %} (optional){% endif %}
-{% endfor %}
-Verification mode is applied only during the final verifier stage. Execute the full key-action flow above even when some operation criteria may be non-blocking later.
-{% elif task.acceptance_criteria %}
-Task acceptance criteria:
-{% for criterion in task.acceptance_criteria %}
-- {{ criterion }}
-{% endfor %}
+{% if task.verification_goal %}
+Final verification goal:
+{{ task.verification_goal }}
 {% else %}
-Task acceptance criteria: none. Derive acceptance criteria from the description and knowledge. If the description is too broad, use successful flow completion as the success standard.
+Final verification goal: none provided. Finish with clear evidence for the executable task flow and report inconclusive if the final goal cannot be proven.
 {% endif %}

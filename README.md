@@ -1,6 +1,6 @@
 # fsq-agent
 
-fsq-agent is a goal-driven automated testing agent for FSQ YAML-guided tasks. It uses OpenAI Agents SDK with Azure OpenAI, executes harness-generated platform actions plus configured local utilities, captures evidence, verifies acceptance criteria, and generates reports.
+fsq-agent is a goal-driven automated testing agent for FSQ YAML-guided tasks. It uses OpenAI Agents SDK with Azure OpenAI or GitHub Copilot, executes harness-generated platform actions plus configured local utilities, captures evidence, verifies one pre-plan-derived goal, and generates reports.
 
 The project follows spec-driven development. See root [SPEC.md](SPEC.md) and each relevant module `SPEC.md` before changing public interfaces.
 
@@ -49,7 +49,7 @@ runtime_secrets:
 
 Existing process environment variables take precedence over `.env` values. Secret values must not be stored in config YAML.
 
-Final verification strictness is configured with `verification.mode`. The default `normal` verifies the case goal and assertion key actions, `strict` verifies the goal plus every key action including operations, and `goal` verifies only the case goal. Execution still receives the full key-action flow in every mode.
+Dynamic LLM runs do not expose a verification-mode setting. Before UI actions begin, pre-plan summarizes the input into ordered execution key actions plus one `verification_goal`; the final verifier checks that single goal against execution evidence. Existing configs that still contain `verification` or `verification.mode` fail validation so the obsolete setting is not silently ignored.
 
 ## Running Tasks
 
@@ -61,7 +61,7 @@ fsq-agent run \
 	--goal "Access Downloads through the browser overflow menu from the New Tab Page, then return to the New Tab Page."
 ```
 
-Use `run --case-yaml` or `run --case-dir` for dynamic LLM execution from FSQ YAML reference material. In this mode the CLI reads each `.codex.yaml` file as raw UTF-8 text; it does not parse YAML, extract key actions, or convert commands into local steps.
+Use `run --case-yaml` or `run --case-dir` for dynamic LLM execution from FSQ YAML reference material. In this mode the CLI reads each `.codex.yaml` file as raw UTF-8 text; it does not parse YAML, extract key actions, derive final verifier requirements, or convert commands into local steps. YAML steps are advisory and may be inaccurate; pre-plan prefers case-level intent when summarizing the final `verification_goal`.
 
 ```bash
 fsq-agent run --config config.local.yaml --case-yaml path/to/case.codex.yaml

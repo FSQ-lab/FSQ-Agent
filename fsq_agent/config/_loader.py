@@ -36,6 +36,7 @@ def load_settings(path: str | Path | None = None, workspace: str | Path | None =
     config_path = Path(path) if path is not None else _find_default_config()
     _load_env_files(config_path)
     data = _read_yaml(config_path) if config_path else {}
+    _reject_obsolete_settings(data)
     try:
         settings = Settings.model_validate(data)
     except ValidationError as exc:
@@ -46,6 +47,14 @@ def load_settings(path: str | Path | None = None, workspace: str | Path | None =
     base_dir = config_path.parent if config_path is not None else Path.cwd()
     resolve_runtime_paths(settings, base_dir)
     return settings
+
+
+def _reject_obsolete_settings(data: dict[str, Any]) -> None:
+    if "verification" in data:
+        raise ConfigurationError(
+            "Obsolete verification configuration is no longer supported.",
+            context={"config_key": "verification", "removed_key": "verification.mode"},
+        )
 
 
 def _load_env_files(config_path: Path | None) -> None:

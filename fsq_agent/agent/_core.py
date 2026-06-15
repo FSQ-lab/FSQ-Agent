@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fsq_agent.config import Settings, load_settings
 from fsq_agent.knowledge import PrivateKnowledgeLoader
-from fsq_agent.models import KnowledgeBundle, RunEvent, RunEventSink, Task, TaskResult, VerificationCriterion
+from fsq_agent.models import KnowledgeBundle, PlanningError, RunEvent, RunEventSink, Task, TaskResult
 from fsq_agent.observation import ExecutionLogger
 from fsq_agent.report import ReportGenerator
 from fsq_agent.skills import SkillLoader
@@ -103,7 +103,7 @@ class FsqAgent:
             run_verification_task = getattr(self.runtime, "_run_verification_task", None)
             if callable(run_verification_task):
                 results.extend(await run_verification_task(task, results, run_id, events_path, emitter.emit))
-            verification = await self.verifier.verify(task, results, events_path=events_path, mode=self.settings.verification.mode)
+            verification = await self.verifier.verify(task, results, events_path=events_path)
             report = self.reporter.generate(run_id, task, results, verification)
             duration_ms = int((time.perf_counter() - started) * 1000)
             result = TaskResult(
@@ -160,18 +160,21 @@ class FsqAgent:
         run_id: str,
         emitter: RunEventEmitter,
     ) -> Task:
-        if task.key_actions:
+        if task.key_actions and self._usable_text(task.verification_goal):
             return task
 
         reference_type, reference_text = self._planning_reference_for_task(task)
         pre_plan = await self._run_pre_plan(reference_type, reference_text, skills, run_id, emitter)
-        key_actions = [
+        generated_key_actions = [
             f"Key action {index}: {action.action.strip()}"
             for index, action in enumerate(pre_plan.key_actions, start=1)
             if action.action.strip()
         ]
+        key_actions = list(task.key_actions) or generated_key_actions
+        verification_goal = pre_plan.verification_goal.strip()
         payload = {
             "key_action_count": len(key_actions),
+            "verification_goal_present": bool(verification_goal),
             "relevant_page_ids": pre_plan.relevant_page_ids,
             "warnings": pre_plan.warnings,
         }
@@ -182,11 +185,23 @@ class FsqAgent:
                     task_id=task.id,
                     type="planning_update",
                     title="Goal pre-plan produced no key actions",
-                    message="Continuing with goal-only execution because no useful key-action chain was generated.",
+                    message="Pre-plan did not produce a useful key-action chain.",
                     payload=payload,
                 )
             )
-            return self._ensure_goal_verification(task, reference_text)
+            raise PlanningError("Goal pre-plan did not produce useful key actions.", context=payload)
+        if not verification_goal:
+            await emitter.emit(
+                RunEvent(
+                    run_id=run_id,
+                    task_id=task.id,
+                    type="planning_update",
+                    title="Goal pre-plan produced no verification goal",
+                    message="Pre-plan did not produce a usable final verification goal.",
+                    payload=payload,
+                )
+            )
+            raise PlanningError("Goal pre-plan did not produce a usable verification goal.", context=payload)
 
         await emitter.emit(
             RunEvent(
@@ -194,11 +209,11 @@ class FsqAgent:
                 task_id=task.id,
                 type="planning_update",
                 title="Goal pre-plan injected",
-                message=pre_plan.summary or f"Generated {len(key_actions)} key actions for goal-only execution.",
+                message=pre_plan.summary or f"Generated {len(key_actions)} key actions and one verification goal.",
                 payload=payload,
             )
         )
-        return self._ensure_goal_verification(task, reference_text).model_copy(update={"key_actions": key_actions})
+        return task.model_copy(update={"key_actions": key_actions, "verification_goal": verification_goal})
 
     async def _run_pre_plan(
         self,
@@ -234,14 +249,5 @@ class FsqAgent:
             return task.verification_goal.removeprefix("Goal completed: ").strip()
         return task.name if task.name and task.name != "Task" else task.description
 
-    def _ensure_goal_verification(self, task: Task, goal: str) -> Task:
-        if task.verification_criteria or task.verification_goal or task.acceptance_criteria:
-            return task
-        verification_goal = f"Goal completed: {goal}"
-        return task.model_copy(
-            update={
-                "verification_goal": verification_goal,
-                "acceptance_criteria": [verification_goal],
-                "verification_criteria": [VerificationCriterion(text=verification_goal, kind="goal", source="goal_task")],
-            }
-        )
+    def _usable_text(self, value: str | None) -> bool:
+        return bool(value and value.strip())

@@ -8,19 +8,7 @@ from fsq_agent.models._report import ReportArtifact
 
 StepStatus = Literal["success", "failed", "skipped", "adjusted"]
 VerificationStatus = Literal["success", "failed", "inconclusive"]
-VerificationMode = Literal["strict", "normal", "goal"]
-VerificationCriterionKind = Literal["goal", "assertion", "operation"]
 PlanningReferenceKind = Literal["goal", "raw_case", "unknown"]
-
-
-class VerificationCriterion(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    text: str
-    kind: VerificationCriterionKind
-    required: bool = True
-    source: str | None = None
-    key_action_index: int | None = Field(default=None, ge=1)
 
 
 class Task(BaseModel):
@@ -34,28 +22,9 @@ class Task(BaseModel):
     planning_reference_text: str | None = None
     key_actions: list[str] = Field(default_factory=list)
     verification_goal: str | None = None
-    verification_criteria: list[VerificationCriterion] = Field(default_factory=list)
     timeout_seconds: int = Field(default=300, ge=1)
     max_retries: int = Field(default=3, ge=0)
     knowledge_refs: list[str] = Field(default_factory=list)
-
-    def required_verification_criteria(self) -> list[VerificationCriterion]:
-        if self.verification_criteria:
-            return [criterion for criterion in self.verification_criteria if criterion.required]
-        if self.verification_goal:
-            return [VerificationCriterion(text=self.verification_goal, kind="goal", source="verification_goal")]
-        return [
-            VerificationCriterion(text=criterion, kind="goal", source="acceptance_criteria")
-            for criterion in self.acceptance_criteria
-        ]
-
-    def blocking_verification_criteria(self, mode: VerificationMode = "normal") -> list[VerificationCriterion]:
-        criteria = self.required_verification_criteria()
-        if mode == "strict":
-            return criteria
-        if mode == "goal":
-            return [criterion for criterion in criteria if criterion.kind == "goal"]
-        return [criterion for criterion in criteria if criterion.kind in {"goal", "assertion"}]
 
 
 class ExecutionStep(BaseModel):

@@ -108,6 +108,7 @@ class GoalPrePlan(BaseModel):
     schema_version: Literal["goal_pre_plan_v1"] = GOAL_PRE_PLAN_SCHEMA_VERSION
     goal: str
     key_actions: list[GoalKeyAction] = Field(default_factory=list)
+    verification_goal: str
     relevant_page_ids: list[str] = Field(default_factory=list)
     summary: str = ""
     warnings: list[str] = Field(default_factory=list)

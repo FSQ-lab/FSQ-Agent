@@ -9,7 +9,7 @@ from fsq_agent import FsqAgent, Task
 from fsq_agent.agent import Verifier
 from fsq_agent.agent._openai_runtime import OpenAIAgentsRuntime, _RecentToolOutputInputFilter
 from fsq_agent.config import Settings
-from fsq_agent.models import ConfigurationError, GoalPrePlan, KnowledgeBundle, ReportArtifact, RunEvent, StepResult, VerificationCriterion
+from fsq_agent.models import ConfigurationError, GoalPrePlan, KnowledgeBundle, ReportArtifact, RunEvent, StepResult
 from fsq_agent.observation import ExecutionLogger
 
 
@@ -95,6 +95,7 @@ class _GoalRunRuntime(_Runtime):
         self.pre_plan_reference_type = reference_type
         return GoalPrePlan(
             goal=reference_text,
+            verification_goal=f"Verify planned outcome for {reference_type}: {reference_text.splitlines()[0]}",
             summary="Generated execution actions.",
             relevant_page_ids=["edge_android_new_tab_page"],
             key_actions=[
@@ -112,7 +113,7 @@ class _GoalRunRuntime(_Runtime):
         event_sink: object | None = None,
     ) -> list[StepResult]:
         self.last_task = task
-        satisfied = task.blocking_verification_criteria("goal")[0].text
+        satisfied = task.verification_goal or "Verification goal missing."
         return [
             StepResult(
                 step_id=1,
@@ -173,6 +174,7 @@ async def test_agent_run_id_uses_friendly_timestamp_suffix() -> None:
         description="Record a smoke test task.",
         acceptance_criteria=["A report exists."],
         key_actions=["Key action 1: Record report existence."],
+        verification_goal="A report exists.",
     )
 
     result = await agent.run(task)
@@ -299,6 +301,7 @@ async def test_agent_run_emits_and_persists_live_events(tmp_path: Path) -> None:
         description="Record a smoke test task.",
         acceptance_criteria=["A report exists."],
         key_actions=["Key action 1: Record report existence."],
+        verification_goal="A report exists.",
     )
 
     result = await agent.run(task, event_sink=events.append)
@@ -322,7 +325,13 @@ async def test_agent_run_persists_run_failed_for_cancellation(tmp_path: Path) ->
         runtime=_CancelledRuntime(),  # type: ignore[arg-type]
         event_logger=ExecutionLogger(tmp_path),
     )
-    task = Task(id="smoke", name="Smoke", description="Record a smoke test task.", key_actions=["Key action 1: Start smoke task."])
+    task = Task(
+        id="smoke",
+        name="Smoke",
+        description="Record a smoke test task.",
+        key_actions=["Key action 1: Start smoke task."],
+        verification_goal="Start smoke task.",
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await agent.run(task, event_sink=events.append)
@@ -358,7 +367,6 @@ async def test_agent_run_preplans_goal_only_task_before_execution(tmp_path: Path
         description="Access Downloads through the overflow menu.",
         verification_goal="Goal completed: Access Downloads",
         acceptance_criteria=["Goal completed: Access Downloads"],
-        verification_criteria=[VerificationCriterion(text="Goal completed: Access Downloads", kind="goal", source="test")],
     )
 
     result = await agent.run(task, event_sink=events.append)
@@ -371,7 +379,7 @@ async def test_agent_run_preplans_goal_only_task_before_execution(tmp_path: Path
         "Key action 1: Open the overflow menu.",
         "Key action 2: Tap Downloads.",
     ]
-    assert [criterion.text for criterion in runtime.last_task.verification_criteria] == ["Goal completed: Access Downloads"]
+    assert runtime.last_task.verification_goal == "Verify planned outcome for unknown: Access Downloads"
     assert any(event.title == "Goal pre-plan injected" for event in events)
 
 
@@ -405,13 +413,6 @@ Raw case content:
         planning_reference_text=raw_reference,
         verification_goal="Goal completed: Execute the referenced case content from settings.codex.yaml.",
         acceptance_criteria=["Goal completed: Execute the referenced case content from settings.codex.yaml."],
-        verification_criteria=[
-            VerificationCriterion(
-                text="Goal completed: Execute the referenced case content from settings.codex.yaml.",
-                kind="goal",
-                source="test",
-            )
-        ],
     )
 
     result = await agent.run(task)
@@ -422,6 +423,8 @@ Raw case content:
     assert runtime.pre_plan_goal is not None
     assert "Microsoft services" in runtime.pre_plan_goal
     assert "Execute the referenced case content" not in runtime.pre_plan_goal
+    assert runtime.last_task is not None
+    assert runtime.last_task.verification_goal.startswith("Verify planned outcome for raw_case:")
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,6 @@ from fsq_agent.models import (
     PrePlanSettings,
     RuntimeSecretSettings,
     SkillConfig,
-    VerificationSettings,
     WorkspaceSettings,
 )
 from fsq_agent.models._settings import DeprecatedToolSettings
@@ -23,7 +22,6 @@ class Settings(BaseModel):
     agent: AgentSettings = Field(default_factory=AgentSettings)
     openai_agents: OpenAIAgentsSettings = Field(default_factory=OpenAIAgentsSettings)
     harness: HarnessSettings = Field(default_factory=HarnessSettings)
-    verification: VerificationSettings = Field(default_factory=VerificationSettings)
     runtime_secrets: RuntimeSecretSettings = Field(default_factory=RuntimeSecretSettings)
     workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
     cases: CaseSettings = Field(default_factory=CaseSettings)

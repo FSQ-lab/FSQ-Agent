@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from fsq_agent.models import AgentFinalOutput, StepResult, Task, ToolCallRecord, VerificationMode
+from fsq_agent.models import AgentFinalOutput, StepResult, Task, ToolCallRecord
 
 from fsq_agent.agent._structured_output import coerce_agent_final_output
 
@@ -13,10 +13,8 @@ class VerificationEvidenceBundle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str = "verification_evidence_v1"
-    verification_mode: VerificationMode = "normal"
+    verification_goal: str
     task: dict[str, Any]
-    blocking_criteria: list[dict[str, Any]] = Field(default_factory=list)
-    nonblocking_criteria: list[dict[str, Any]] = Field(default_factory=list)
     agent_claims: dict[str, Any] | None = None
     execution_steps: list[dict[str, Any]] = Field(default_factory=list)
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
@@ -34,19 +32,13 @@ class VerificationEvidenceBuilder:
         results: list[StepResult],
         events_path: Path | None = None,
         image_root: Path | None = None,
-        mode: VerificationMode = "normal",
     ) -> VerificationEvidenceBundle:
         _ = image_root
         report_dir = events_path.parent if events_path else None
         tool_calls = self._load_tool_calls(events_path)
-        blocking_criteria = task.blocking_verification_criteria(mode)
-        blocking_texts = {criterion.text for criterion in blocking_criteria}
-        all_criteria = task.required_verification_criteria()
         return VerificationEvidenceBundle(
-            verification_mode=mode,
+            verification_goal=task.verification_goal or "",
             task=task.model_dump(mode="json"),
-            blocking_criteria=[criterion.model_dump(mode="json") for criterion in blocking_criteria],
-            nonblocking_criteria=[criterion.model_dump(mode="json") for criterion in all_criteria if criterion.text not in blocking_texts],
             agent_claims=self._agent_claims(results),
             execution_steps=[self._step_record(step) for step in results],
             tool_calls=tool_calls,
@@ -54,18 +46,17 @@ class VerificationEvidenceBuilder:
             instructions=[
                 "Use only the supplied evidence bundle.",
                 "Treat agent_claims as claims, not proof.",
-                "Mark a criterion satisfied only when supplied events, tool outputs, or artifact excerpts support it.",
-                "Mark a criterion unmet only when supplied evidence proves it did not happen or the required final state is false.",
-                "If evidence is missing, truncated, ambiguous, or outside the supplied bundle, mark the criterion unknown by leaving it out of both satisfied_criteria and unmet_criteria and use status=inconclusive.",
+                "Check exactly the supplied verification_goal and do not infer extra final goals from key actions.",
+                "Mark the verification_goal satisfied only when supplied events, tool outputs, or artifact excerpts support it.",
+                "Mark the verification_goal unmet only when supplied evidence proves it did not happen or the required final state is false.",
+                "If evidence is missing, truncated, ambiguous, or outside the supplied bundle, use status=inconclusive.",
                 "For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. Verify that execution evidence contains the harness-owned AI assertion tool result, including verdict metadata and screenshot artifact references, and that no supplied evidence contradicts that result.",
-                "Do not depend on fixed key-action text formats; infer the intended requirement from the task/case content provided in the bundle.",
-                "Apply verification_mode only to final status. In strict mode, all required goal, assertion, and operation criteria are blocking. In normal mode, only goal and assertion criteria are blocking. In goal mode, only goal criteria are blocking.",
-                "Nonblocking criteria may be discussed as evidence or diagnostics, but they must not make the final status failed or inconclusive when every blocking criterion is satisfied.",
+                "Do not transform key actions into independent final verification requirements.",
             ],
         )
 
-    def build_json(self, task: Task, results: list[StepResult], events_path: Path | None = None, mode: VerificationMode = "normal") -> str:
-        return self.build(task, results, events_path, mode=mode).model_dump_json(indent=2)
+    def build_json(self, task: Task, results: list[StepResult], events_path: Path | None = None) -> str:
+        return self.build(task, results, events_path).model_dump_json(indent=2)
 
     def build_model_input(
         self,
@@ -73,9 +64,8 @@ class VerificationEvidenceBuilder:
         results: list[StepResult],
         events_path: Path | None = None,
         image_root: Path | None = None,
-        mode: VerificationMode = "normal",
     ) -> str:
-        bundle = self.build(task, results, events_path, image_root, mode)
+        bundle = self.build(task, results, events_path, image_root)
         return bundle.model_dump_json(indent=2)
 
     def _agent_claims(self, results: list[StepResult]) -> dict[str, Any] | None:
@@ -194,19 +184,18 @@ class VerificationEvidenceBuilder:
 
 VERIFICATION_AGENT_INSTRUCTIONS = """You are an evidence-based automation result verifier.
 
-Your only job is to determine whether the completed automation run satisfied the supplied task/case requirements.
+Your only job is to determine whether the completed automation run satisfied the supplied verification_goal.
 
 Rules:
-- Use only the evidence bundle in the input. Do not assume facts that are not present in task text, execution records, tool outputs, or artifact excerpts.
+- Use only the evidence bundle in the input. Do not assume facts that are not present in the verification goal, task text, execution records, tool outputs, or artifact excerpts.
 - Treat the main agent's final output as a claim, not proof.
-- Do not rely on hard-coded key-action formats. The case loader may change action syntax and fields; infer the intended requirement from the supplied task and acceptance criteria.
-- Apply the supplied verification_mode when deciding the final status: strict means all required goal/assertion/operation criteria are blocking; normal means only required goal/assertion criteria are blocking; goal means only required goal criteria are blocking.
-- Always use the supplied blocking_criteria list as the final blocking set. Nonblocking criteria can support diagnostics but must not by themselves cause failed or inconclusive status.
-- Mark criteria as satisfied only when the supplied evidence supports them.
-- Mark criteria as unmet only when the supplied evidence proves the required action/state did not occur or a permanent execution failure prevents it.
-- If evidence is insufficient or ambiguous, leave the criterion out of satisfied_criteria and unmet_criteria, explain it in evidence/errors, and use status=inconclusive unless another criterion is proven unmet.
+- Check exactly one final target: verification_goal.
+- Do not infer extra final goals from key actions, planning records, file names, or intermediate operations.
+- Mark the verification_goal as satisfied only when the supplied evidence supports it.
+- Mark the verification_goal as unmet only when the supplied evidence proves the required action/state did not occur or a permanent execution failure prevents it.
+- If evidence is insufficient or ambiguous, explain it in evidence/errors and use status=inconclusive unless the verification_goal is proven unmet.
 - For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. The execution stage evaluates authored visual assertions through the harness-owned platform AI assertion action. Verify that execution records contain the harness AI assertion result, verdict metadata, and screenshot artifact reference, that the main agent's structured output reports the corresponding result, and that no supplied evidence contradicts that result.
-- Final status must be success only when every required criterion is satisfied; failed only when at least one required criterion is proven unmet; inconclusive when there are unknown criteria and no proven unmet criteria.
+- Final status must be success only when verification_goal is satisfied; failed only when verification_goal is proven unmet; inconclusive when verification_goal is not proven either way.
 
 Return only the configured structured final output. Do not perform external actions.
 """

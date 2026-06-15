@@ -38,7 +38,7 @@ cli_tools:
     settings = load_settings(config_path)
 
     assert settings.agent.name == "test-agent"
-    assert settings.verification.mode == "normal"
+    assert not hasattr(settings, "verification")
     assert settings.cli_tools[0].name == "echo"
     assert settings.workspace.root_dir == tmp_path / "workspace"
     assert (settings.workspace.root_dir / ".fsq-agent-workspace").exists()
@@ -123,7 +123,7 @@ pre_plan:
     assert settings.pre_plan.knowledge_dir == tmp_path / "knowledge" / "project_android_v1"
 
 
-def test_load_settings_accepts_verification_mode(tmp_path: Path) -> None:
+def test_load_settings_rejects_obsolete_verification_config(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
@@ -136,25 +136,7 @@ verification:
         encoding="utf-8",
     )
 
-    settings = load_settings(config_path)
-
-    assert settings.verification.mode == "strict"
-
-
-def test_load_settings_rejects_invalid_verification_mode(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        _base_config(
-            tmp_path,
-            """
-verification:
-  mode: loose
-""",
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+    with pytest.raises(ConfigurationError, match="Obsolete verification configuration"):
         load_settings(config_path)
 
 

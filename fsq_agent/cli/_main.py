@@ -17,7 +17,7 @@ from fsq_agent.cli._task_loader import discover_case_yaml_paths, read_raw_text_f
 from fsq_agent.config import Settings, load_settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, UiAutomator2AndroidDriver
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import ConfigurationError, FsqAgentError, FsqCase, Task, VerificationCriterion
+from fsq_agent.models import ConfigurationError, FsqAgentError, FsqCase, Task
 from fsq_agent.providers import build_ai_assertion_evaluator
 from fsq_agent.report import resolve_report_path
 
@@ -361,7 +361,6 @@ def _task_from_goal(goal: str) -> Task:
     if not normalized_goal:
         raise ConfigurationError("Goal cannot be empty.")
     task_id = _goal_task_id(normalized_goal)
-    verification_goal = f"Goal completed: {normalized_goal}"
     return Task(
         id=task_id,
         name=normalized_goal,
@@ -373,15 +372,11 @@ def _task_from_goal(goal: str) -> Task:
         ),
         planning_reference_kind="goal",
         planning_reference_text=normalized_goal,
-        acceptance_criteria=[verification_goal],
-        verification_goal=verification_goal,
-        verification_criteria=[VerificationCriterion(text=verification_goal, kind="goal", source="cli_goal")],
     )
 
 
 def _task_from_raw_case_source(source_path: Path, content: str) -> Task:
     label = source_path.name
-    verification_goal = f"Goal completed: Execute the referenced case content from {label}."
     planning_reference_text = _raw_case_planning_reference(source_path, content)
     return Task(
         id=_goal_task_id(source_path.name.removesuffix(".codex.yaml")),
@@ -393,9 +388,6 @@ def _task_from_raw_case_source(source_path: Path, content: str) -> Task:
         ),
         planning_reference_kind="raw_case",
         planning_reference_text=planning_reference_text,
-        acceptance_criteria=[verification_goal],
-        verification_goal=verification_goal,
-        verification_criteria=[VerificationCriterion(text=verification_goal, kind="goal", source="cli_case_yaml_raw")],
     )
 
 

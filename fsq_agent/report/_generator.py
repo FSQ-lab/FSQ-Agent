@@ -71,7 +71,7 @@ class ReportGenerator:
                 "runtime_steps": [self._step_record(step) for step in steps],
                 "tool_calls": tool_calls,
             },
-            "verification": verification.model_dump(mode="json"),
+            "verification": {"verification_goal": task.verification_goal, **verification.model_dump(mode="json")},
             "failure_classification": self.failure_analyzer.classify(steps, verification, tool_calls),
         }
 
@@ -221,6 +221,10 @@ class ReportGenerator:
             "## Summary",
             "",
             verification.summary,
+            "",
+            "## Verification Goal",
+            "",
+            task.verification_goal or "No verification goal was recorded.",
             "",
             "## Plan",
             "",

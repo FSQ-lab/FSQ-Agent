@@ -1,7 +1,7 @@
 import pytest
 
 import fsq_agent.models as models
-from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, HarnessSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, SkillConfig, Task, VerificationCriterion, VerificationSettings
+from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ExecutionStep, GoalPrePlan, HarnessSettings, LocalToolOutputSettings, OpenAIAgentsSettings, PageKnowledgeIndex, PageKnowledgePage, SkillConfig, Task
 
 
 def test_task_defaults() -> None:
@@ -14,7 +14,6 @@ def test_task_defaults() -> None:
     assert task.planning_reference_text is None
     assert task.key_actions == []
     assert task.verification_goal is None
-    assert task.verification_criteria == []
     assert task.timeout_seconds == 300
     assert task.max_retries == 3
     assert task.knowledge_refs == []
@@ -44,13 +43,13 @@ def test_agent_task_input_wraps_task_contract() -> None:
         id="task-1",
         description="Do a thing",
         key_actions=["Key action 1: tap button"],
-        verification_criteria=[VerificationCriterion(text="Goal completed: Do a thing", kind="goal")],
+        verification_goal="Verify that doing the thing is complete.",
     )
     task_input = AgentTaskInput(
         task=task,
         acceptance_criteria=task.acceptance_criteria,
         key_actions=task.key_actions,
-        verification_criteria=task.verification_criteria,
+        verification_goal=task.verification_goal,
         acceptance_policy="Use provided criteria.",
     )
 
@@ -58,13 +57,7 @@ def test_agent_task_input_wraps_task_contract() -> None:
     assert task_input.output_contract == "task_run_v1"
     assert task_input.task.id == "task-1"
     assert task_input.key_actions == ["Key action 1: tap button"]
-    assert task_input.verification_criteria[0].kind == "goal"
-
-
-def test_verification_settings_default_to_normal() -> None:
-    settings = VerificationSettings()
-
-    assert settings.mode == "normal"
+    assert task_input.verification_goal == "Verify that doing the thing is complete."
 
 
 def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:
@@ -104,9 +97,15 @@ def test_models_public_surface_does_not_export_removed_tool_execution_settings()
     assert "ShellSettings" not in models.__all__
     assert "CLIToolConfig" not in models.__all__
     assert "DeprecatedToolSettings" not in models.__all__
+    assert "VerificationCriterion" not in models.__all__
+    assert "VerificationMode" not in models.__all__
+    assert "VerificationSettings" not in models.__all__
     assert not hasattr(models, "ShellSettings")
     assert not hasattr(models, "CLIToolConfig")
     assert not hasattr(models, "DeprecatedToolSettings")
+    assert not hasattr(models, "VerificationCriterion")
+    assert not hasattr(models, "VerificationMode")
+    assert not hasattr(models, "VerificationSettings")
 
 
 def test_local_tool_output_rejects_artifact_subdir_escape() -> None:
@@ -170,9 +169,11 @@ def test_page_knowledge_index_and_goal_pre_plan_defaults() -> None:
     plan = GoalPrePlan(
         goal="Open downloads",
         key_actions=[{"step_id": 1, "action": "Open browser menu", "source_page_ids": ["edge_android_new_tab_page"]}],
+        verification_goal="Verify that Downloads can be opened from the browser menu.",
     )
 
     assert index.schema_version == "page_knowledge_index_v1"
     assert index.pages[0].page_id == "edge_android_new_tab_page"
     assert plan.schema_version == "goal_pre_plan_v1"
     assert plan.key_actions[0].step_id == 1
+    assert plan.verification_goal == "Verify that Downloads can be opened from the browser menu."

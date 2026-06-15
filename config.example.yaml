@@ -54,10 +54,6 @@ harness:
     # Optional uiautomator2 device serial. Leave null when exactly one device is connected.
     serial: null
 
-verification:
-  # strict: goal + all key actions; normal: goal + assertion key actions; goal: goal only.
-  mode: normal
-
 runtime_secrets:
   # The get_runtime_secret tool may only read names listed here. Values come from
   # process env or .env, never from config YAML. For sign-in cases, use:

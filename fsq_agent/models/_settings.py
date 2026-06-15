@@ -3,8 +3,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from fsq_agent.models._task import VerificationMode
-
 
 class AgentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -45,12 +43,6 @@ class LocalToolOutputSettings(BaseModel):
         if path.is_absolute() or ".." in path.parts:
             raise ValueError("artifact_subdir must be a relative path inside the run directory")
         return value
-
-
-class VerificationSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    mode: VerificationMode = "normal"
 
 
 class RuntimeSecretSettings(BaseModel):
