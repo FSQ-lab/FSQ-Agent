@@ -369,6 +369,8 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
     assert "Custom operator instructions:" in renderer.render_agent_prompt(agent_model)
     assert "- Custom." in renderer.render_agent_prompt(agent_model)
     assert "Preserve the semantic fidelity of ordered key actions." in renderer.render_agent_prompt(agent_model)
+    assert "launch_app harness tool" not in renderer.render_agent_prompt(agent_model)
+    assert "kill_app harness tool" not in renderer.render_agent_prompt(agent_model)
     assert "tool usage error" in renderer.render_agent_prompt(agent_model)
     rendered_task = renderer.render_task_prompt(task_model)
     assert "Structured task input:" in rendered_task

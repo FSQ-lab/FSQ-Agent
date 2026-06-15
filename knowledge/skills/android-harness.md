@@ -8,6 +8,8 @@ Use this skill when the configured harness platform is Android. Treat it as runt
 
 | FSQ semantic action | Preferred harness/local path | Notes |
 |---|---|---|
+| Launch app | `launch_app` | Use at the start of each Android case to foreground the configured target app before business actions. |
+| Kill app | `kill_app` | Use at the end of each Android case after final evidence is collected to clean up app state. |
 | Find visible UI | `assert_visible`, `assert_not_visible`, or current harness evidence | Prefer resource id or accessibility id, then xpath. |
 | Tap element | `tap_on` | Re-evaluate stale or missing targets before retrying. |
 | Enter text | `input_text` | Verify the target field before setting text. |
@@ -20,6 +22,7 @@ Use this skill when the configured harness platform is Android. Treat it as runt
 
 - Follow the active harness tool schema exactly. Do not add backend-only fields that are not exposed by the tool schema.
 - Do not call session management from the agent loop; session ownership belongs to the harness and driver.
+- Treat `launchApp` and `killApp` as case lifecycle setup and teardown. Use `launch_app` before the main case path and `kill_app` before finishing the case when those tools are exposed. Do not report either lifecycle action as satisfying a business key action unless the case explicitly tests launch or kill behavior.
 - Do not use gestures, close buttons, or app lifecycle cleanup as proof that a required `pressKey` action succeeded.
 - Do not use gestures as waits. For FSQ `performActions` pause or page-load delays, call `wait_ms` with the required duration so waiting does not scroll, tap, long-press, or otherwise change UI state.
 - Treat the tool output text and harness result metadata as the executed action. If the result contradicts the intended key action, do not count it as satisfied.

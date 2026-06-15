@@ -34,6 +34,9 @@ def test_repository_android_harness_skill_documents_tool_usage_recovery() -> Non
     assert "Correct Key Examples" in bundles[0].instructions
     assert "press_key" in bundles[0].instructions
     assert "active harness tool schema" in bundles[0].instructions
+    assert "Use at the start of each Android case" in bundles[0].instructions
+    assert "Use at the end of each Android case" in bundles[0].instructions
+    assert "case lifecycle setup and teardown" in bundles[0].instructions
     assert '"key": "Back"' in bundles[0].instructions
     assert '"key": "Enter"' in bundles[0].instructions
     assert '"key": "BACK"' in bundles[0].instructions
