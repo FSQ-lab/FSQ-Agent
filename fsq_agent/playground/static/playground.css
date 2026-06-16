@@ -11,6 +11,10 @@ body {
   overflow: hidden;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 button,
 select,
 textarea {
@@ -77,6 +81,25 @@ button:disabled {
   border-bottom: 1px solid #e5e9f0;
 }
 
+.preview-tabs {
+  display: inline-flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tab-button {
+  min-height: 32px;
+  padding: 4px 10px;
+  border-color: #c8d1df;
+  background: #f8fafc;
+}
+
+.tab-button.active {
+  background: #0f6cbd;
+  border-color: #0f6cbd;
+  color: #ffffff;
+}
+
 h1,
 h2,
 p {
@@ -104,6 +127,7 @@ h2 {
 }
 
 select,
+input,
 textarea {
   width: 100%;
   box-sizing: border-box;
@@ -112,6 +136,27 @@ textarea {
   padding: 8px;
   background: #ffffff;
   color: #15171a;
+}
+
+input {
+  margin-bottom: 8px;
+}
+
+.run-mode-row {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.run-mode-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.run-mode-row input {
+  width: auto;
+  margin: 0;
 }
 
 textarea {
@@ -214,6 +259,30 @@ textarea {
   background: #1f2937;
 }
 
+.tab-pane {
+  min-height: 0;
+}
+
+.report-pane {
+  flex: 1;
+  overflow: hidden;
+  background: #0f172a;
+}
+
+.report-content {
+  height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 16px;
+  color: #f8fafc;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 #screenshot {
   display: none;
   max-width: 100%;
@@ -223,10 +292,6 @@ textarea {
 
 #preview-empty {
   color: #d1d5db;
-}
-
-.report-section {
-  border-bottom: 0;
 }
 
 @media (max-width: 900px) {

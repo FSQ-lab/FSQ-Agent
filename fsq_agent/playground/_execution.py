@@ -19,16 +19,18 @@ def start_dynamic_goal_execution(
 	settings: Settings,
 	state: PlaygroundState,
 	request_id: str,
-	goal: str,
+	goal: str | None = None,
+	case_yaml_path: str | None = None,
 	device_id: str | None,
 ) -> threading.Thread:
 	thread = threading.Thread(
-		target=_run_dynamic_goal,
+		target=_run_dynamic_task,
 		kwargs={
 			"settings": settings,
 			"state": state,
 			"request_id": request_id,
 			"goal": goal,
+			"case_yaml_path": case_yaml_path,
 			"device_id": device_id,
 		},
 		name=f"fsq-playground-{request_id}",
@@ -50,12 +52,52 @@ def task_from_goal(goal: str) -> Task:
 	)
 
 
-def _run_dynamic_goal(
+def task_from_case_yaml(path_text: str, settings: Settings) -> Task:
+	source_path, content = _read_case_yaml_text(path_text, settings)
+	display_path = str(source_path)
+	name = f"Case reference: {source_path.name}"
+	description = (
+		"Run this raw FSQ YAML reference through dynamic LLM execution.\n\n"
+		"The playground has not parsed this YAML into strict executable steps. "
+		"Treat the full file content as advisory planning reference material.\n\n"
+		f"Source path: {display_path}\n\n"
+		"Raw file content:\n"
+		f"{content}"
+	)
+	reference_text = f"Source path: {display_path}\n\nRaw file content:\n{content}"
+	slug_source = source_path.stem or "case-yaml"
+	slug = re.sub(r"[^a-z0-9]+", "-", slug_source.lower()).strip("-") or "case-yaml"
+	return Task(
+		id=slug[:80],
+		name=name,
+		description=description,
+		planning_reference_kind="raw_case",
+		planning_reference_text=reference_text,
+	)
+
+
+def _read_case_yaml_text(path_text: str, settings: Settings) -> tuple[Path, str]:
+	requested = Path(path_text.strip())
+	candidates = []
+	if requested.is_absolute():
+		candidates.append(requested)
+	else:
+		candidates.append(settings.cases.dir / requested)
+		candidates.append(Path.cwd() / requested)
+	for candidate in candidates:
+		if candidate.exists() and candidate.is_file():
+			resolved = candidate.resolve()
+			return resolved, resolved.read_text(encoding="utf-8")
+	raise FileNotFoundError(f"Case YAML not found: {path_text}")
+
+
+def _run_dynamic_task(
 	*,
 	settings: Settings,
 	state: PlaygroundState,
 	request_id: str,
-	goal: str,
+	goal: str | None,
+	case_yaml_path: str | None,
 	device_id: str | None,
 ) -> None:
 	run_settings = settings.model_copy(deep=True)
@@ -63,7 +105,12 @@ def _run_dynamic_goal(
 		run_settings.harness.android.serial = device_id
 	try:
 		validate_runtime_settings(run_settings)
-		task = task_from_goal(goal)
+		if goal:
+			task = task_from_goal(goal)
+		elif case_yaml_path:
+			task = task_from_case_yaml(case_yaml_path, run_settings)
+		else:
+			raise ValueError("goal or case_yaml_path is required")
 		result = asyncio.run(
 			FsqAgent.from_settings(run_settings).run(
 				task,

@@ -5,7 +5,7 @@ from urllib.request import urlopen
 from fsq_agent.config import Settings
 from fsq_agent.models import ReportArtifact, RunEvent, TaskResult, VerificationResult
 from fsq_agent.playground._android import AndroidTarget, parse_adb_devices, resolve_auto_session
-from fsq_agent.playground._execution import task_from_goal
+from fsq_agent.playground._execution import task_from_case_yaml, task_from_goal
 from fsq_agent.playground._server import PlaygroundServer, PlaygroundServerOptions
 from fsq_agent.playground._state import BusyError, PlaygroundState
 
@@ -32,6 +32,24 @@ def test_task_from_goal_matches_dynamic_goal_contract() -> None:
     assert task.planning_reference_kind == "goal"
     assert task.planning_reference_text == "Open rewards panel"
     assert task.verification_goal is None
+
+
+def test_task_from_case_yaml_preserves_raw_reference(tmp_path: Path) -> None:
+    cases_dir = tmp_path / "cases"
+    cases_dir.mkdir()
+    case_path = cases_dir / "sample.codex.yaml"
+    content = "schemaVersion: fsq.ai-test/v1\nname: Sample\n---\n- launchApp\n"
+    case_path.write_text(content, encoding="utf-8")
+    settings = Settings()
+    settings.cases.dir = cases_dir
+
+    task = task_from_case_yaml("sample.codex.yaml", settings)
+
+    assert task.name == "Case reference: sample.codex.yaml"
+    assert task.planning_reference_kind == "raw_case"
+    assert task.planning_reference_text is not None
+    assert str(case_path.resolve()) in task.planning_reference_text
+    assert content in task.planning_reference_text
 
 
 def test_auto_session_uses_configured_serial_when_online(monkeypatch) -> None:
@@ -179,6 +197,19 @@ def test_playground_execute_requires_session() -> None:
     assert "No active" in payload["error"]
 
 
+def test_playground_execute_requires_exactly_one_source() -> None:
+    server = PlaygroundServer(Settings())
+    server.state.create_session("device-1")
+
+    missing_status, missing_payload = server.handle_post("/execute", {})
+    both_status, both_payload = server.handle_post("/execute", {"goal": "Do it", "caseYamlPath": "case.codex.yaml"})
+
+    assert missing_status == 400
+    assert "Exactly one" in missing_payload["error"]
+    assert both_status == 400
+    assert "Exactly one" in both_payload["error"]
+
+
 def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:
     monkeypatch.setattr(
         "fsq_agent.playground._android.discover_adb_targets",
@@ -236,6 +267,10 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     styles = (static_dir / "playground.css").read_text(encoding="utf-8")
 
     assert html.index('class="section progress-section"') < html.index("<h2>Session</h2>")
+    assert "preview-tab" in html
+    assert "report-tab" in html
+    assert "report-content" in html
+    assert "preview-pane" in html
     assert "progressSequence" in script
     assert "event.sequence" in script
     assert "backendSequence" in script
@@ -243,6 +278,16 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "tool_output_preview" in script
     assert "event.payload" in script
     assert "eventDetails" in script
+    assert 'name="run-mode"' in html
+    assert "caseYaml" in script
+    assert "runYaml" in script
+    assert "runSelected" in script
+    assert "currentRunMode" in script
+    assert "updateRunMode" in script
+    assert "caseYamlPath" in script
+    assert "loadReport" in script
+    assert "?format=markdown" in script
+    assert "showRightTab" in script
     assert "eventStatus" in script
     assert "statusFromValue" in script
     assert "progress-status-${status}" in script
@@ -258,3 +303,8 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "#ef4444" in styles
     assert "grid-template-rows: auto minmax(0, 1fr) auto auto" in styles
     assert "grid-template-rows: auto minmax(420px, 62vh) auto auto" in styles
+    assert "run-mode-row" in styles
+    assert "report-pane" in styles
+    assert "report-content" in styles
+    assert "tab-button.active" in styles
+    assert "[hidden]" in styles

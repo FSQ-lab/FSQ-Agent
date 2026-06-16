@@ -12,13 +12,19 @@ const els = {
   destroySession: document.getElementById('destroy-session'),
   sessionMessage: document.getElementById('session-message'),
   goal: document.getElementById('goal'),
-  runGoal: document.getElementById('run-goal'),
+  caseYaml: document.getElementById('case-yaml'),
+  runSelected: document.getElementById('run-selected'),
+  runModeInputs: Array.from(document.querySelectorAll('input[name="run-mode"]')),
   progress: document.getElementById('progress'),
   runtimeInfo: document.getElementById('runtime-info'),
   refreshScreenshot: document.getElementById('refresh-screenshot'),
   screenshot: document.getElementById('screenshot'),
   previewEmpty: document.getElementById('preview-empty'),
-  reportLink: document.getElementById('report-link'),
+  previewTab: document.getElementById('preview-tab'),
+  reportTab: document.getElementById('report-tab'),
+  previewPane: document.getElementById('preview-pane'),
+  reportPane: document.getElementById('report-pane'),
+  reportContent: document.getElementById('report-content'),
 };
 
 async function api(path, options = {}) {
@@ -48,7 +54,7 @@ async function refreshStatus() {
   try {
     const status = await api('/status');
     els.status.textContent = status.busy ? 'Running' : 'Ready';
-    els.runGoal.disabled = Boolean(status.busy);
+    els.runSelected.disabled = Boolean(status.busy);
     if (status.session?.connected) {
       els.sessionMessage.textContent = `Connected to ${status.session.displayName || status.session.deviceId}`;
     } else {
@@ -150,13 +156,42 @@ async function destroySession() {
 async function runGoal() {
   const goal = els.goal.value.trim();
   if (!goal) return;
+  await startExecution({ goal });
+}
+
+async function runYaml() {
+  const caseYamlPath = els.caseYaml.value.trim();
+  if (!caseYamlPath) return;
+  await startExecution({ caseYamlPath });
+}
+
+async function runSelected() {
+  if (currentRunMode() === 'yaml') {
+    await runYaml();
+    return;
+  }
+  await runGoal();
+}
+
+function currentRunMode() {
+  return els.runModeInputs.find((input) => input.checked)?.value || 'goal';
+}
+
+function updateRunMode() {
+  const mode = currentRunMode();
+  const isYaml = mode === 'yaml';
+  els.goal.hidden = isYaml;
+  els.caseYaml.hidden = !isYaml;
+  els.runSelected.textContent = 'Run';
+}
+
+async function startExecution(payload) {
   if (!(await ensureSession())) return;
   state.progressSequence = 0;
   els.progress.innerHTML = '';
-  els.reportLink.textContent = 'No report yet';
-  els.reportLink.removeAttribute('href');
+  els.reportContent.textContent = 'No report yet.';
   try {
-    const result = await api('/execute', { method: 'POST', body: JSON.stringify({ goal }) });
+    const result = await api('/execute', { method: 'POST', body: JSON.stringify(payload) });
     state.currentRequestId = result.requestId;
     startProgressPolling();
     await refreshStatus();
@@ -186,8 +221,7 @@ async function refreshProgress() {
       appendProgress(`Finished: ${progress.status}`, null, [], statusFromValue(progress.status));
       if (progress.error) appendProgress(`Error: ${progress.error}`, null, [], 'failed');
       if (progress.result?.runId) {
-        els.reportLink.href = `/reports/${encodeURIComponent(progress.result.runId)}`;
-        els.reportLink.textContent = `Open ${progress.result.runId}`;
+        await loadReport(progress.result.runId);
       }
       await refreshStatus();
       await refreshRuntime();
@@ -195,6 +229,27 @@ async function refreshProgress() {
   } catch (error) {
     appendProgress(`Progress error: ${error.message}`, null, [], 'failed');
   }
+}
+
+async function loadReport(runId) {
+  try {
+    els.reportContent.textContent = 'Loading report...';
+    const report = await api(`/reports/${encodeURIComponent(runId)}?format=markdown`);
+    els.reportContent.textContent = report.content || 'Report is empty.';
+  } catch (error) {
+    els.reportContent.textContent = `Unable to load report: ${error.message}`;
+  }
+}
+
+function showRightTab(tabName) {
+  const showReport = tabName === 'report';
+  els.previewPane.hidden = showReport;
+  els.reportPane.hidden = !showReport;
+  els.previewTab.classList.toggle('active', !showReport);
+  els.reportTab.classList.toggle('active', showReport);
+  els.previewTab.setAttribute('aria-selected', String(!showReport));
+  els.reportTab.setAttribute('aria-selected', String(showReport));
+  els.refreshScreenshot.hidden = showReport;
 }
 
 function appendProgress(text, backendSequence = null, details = [], status = 'neutral') {
@@ -341,7 +396,14 @@ async function refreshScreenshot() {
 els.refresh.addEventListener('click', refreshAll);
 els.createSession.addEventListener('click', createSession);
 els.destroySession.addEventListener('click', destroySession);
-els.runGoal.addEventListener('click', runGoal);
+els.runSelected.addEventListener('click', runSelected);
+for (const input of els.runModeInputs) {
+  input.addEventListener('change', updateRunMode);
+}
+els.previewTab.addEventListener('click', () => showRightTab('preview'));
+els.reportTab.addEventListener('click', () => showRightTab('report'));
 els.refreshScreenshot.addEventListener('click', refreshScreenshot);
 
+updateRunMode();
+showRightTab('preview');
 refreshAll();

@@ -125,19 +125,24 @@ class PlaygroundServer:
                 return 409, {"error": str(exc)}
         if path == "/execute":
             goal = body.get("goal")
-            if not isinstance(goal, str) or not goal.strip():
-                return 400, {"error": "goal is required."}
+            case_yaml_path = body.get("caseYamlPath")
+            has_goal = isinstance(goal, str) and bool(goal.strip())
+            has_case_yaml = isinstance(case_yaml_path, str) and bool(case_yaml_path.strip())
+            if has_goal == has_case_yaml:
+                return 400, {"error": "Exactly one of goal or caseYamlPath is required."}
             if not self.state.session.connected:
                 return 409, {"error": "No active Android session. Create a session before execution."}
+            task_label = goal.strip() if has_goal else f"Case YAML: {case_yaml_path.strip()}"
             try:
-                request_id = self.state.start_task(goal.strip())
+                request_id = self.state.start_task(task_label)
             except BusyError as exc:
                 return 409, {"error": str(exc)}
             start_dynamic_goal_execution(
                 settings=self.settings,
                 state=self.state,
                 request_id=request_id,
-                goal=goal.strip(),
+                goal=goal.strip() if has_goal else None,
+                case_yaml_path=case_yaml_path.strip() if has_case_yaml else None,
                 device_id=self.state.session.device_id,
             )
             return 202, {"requestId": request_id}

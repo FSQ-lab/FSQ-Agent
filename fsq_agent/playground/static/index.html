@@ -33,28 +33,35 @@
         </section>
 
         <section class="section run-section">
-          <h2>Goal</h2>
+          <h2>Run</h2>
+          <div class="run-mode-row" role="radiogroup" aria-label="Run mode">
+            <label><input type="radio" name="run-mode" value="goal" checked /> Goal</label>
+            <label><input type="radio" name="run-mode" value="yaml" /> YAML</label>
+          </div>
           <textarea id="goal" rows="5" placeholder="Describe the Android task to run..."></textarea>
-          <button id="run-goal" type="button" class="primary">Run Goal</button>
+          <input id="case-yaml" type="text" placeholder="Path to .codex.yaml..." hidden />
+          <button id="run-selected" type="button" class="primary">Run</button>
         </section>
       </section>
 
       <section class="panel preview-panel">
         <header class="preview-header">
           <div>
-            <h2>Preview</h2>
+            <div class="preview-tabs" role="tablist" aria-label="Preview and report">
+              <button id="preview-tab" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="preview-pane">Preview</button>
+              <button id="report-tab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="report-pane">Report</button>
+            </div>
             <p id="runtime-info" class="muted">No runtime info yet.</p>
           </div>
           <button id="refresh-screenshot" type="button">Screenshot</button>
         </header>
-        <div class="preview-frame">
+        <div id="preview-pane" class="tab-pane preview-frame" role="tabpanel" aria-labelledby="preview-tab">
           <img id="screenshot" alt="Android screenshot preview" />
           <p id="preview-empty">Screenshot preview will appear here.</p>
         </div>
-        <section class="section report-section">
-          <h2>Report</h2>
-          <a id="report-link" href="#" target="_blank" rel="noreferrer">No report yet</a>
-        </section>
+        <div id="report-pane" class="tab-pane report-pane" role="tabpanel" aria-labelledby="report-tab" hidden>
+          <pre id="report-content" class="report-content">No report yet.</pre>
+        </div>
       </section>
     </main>
     <script src="/playground.js"></script>
