@@ -83,21 +83,40 @@ button:disabled {
 
 .preview-tabs {
   display: inline-flex;
-  gap: 6px;
-  margin-bottom: 4px;
+  gap: 18px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #d8dee8;
 }
 
 .tab-button {
-  min-height: 32px;
-  padding: 4px 10px;
-  border-color: #c8d1df;
-  background: #f8fafc;
+  position: relative;
+  min-height: 30px;
+  padding: 0 0 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #5c6573;
+  font-weight: 600;
 }
 
 .tab-button.active {
+  background: transparent;
+  color: #0f4c81;
+}
+
+.tab-button.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 999px 999px 0 0;
   background: #0f6cbd;
-  border-color: #0f6cbd;
-  color: #ffffff;
+}
+
+.tab-button:hover {
+  color: #0f4c81;
 }
 
 h1,
@@ -182,12 +201,13 @@ textarea {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  background: #111827;
-  color: #f9fafb;
+  background: #f8fafc;
+  color: #1f2937;
+  border: 1px solid #d8dee8;
   border-radius: 6px;
   padding: 10px;
   font-family: Consolas, monospace;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .progress-item {
@@ -195,8 +215,8 @@ textarea {
   grid-template-columns: 42px 14px 1fr;
   align-items: start;
   gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 6px 0;
+  border-bottom: 1px solid #e5e9f0;
 }
 
 .progress-number {
@@ -244,8 +264,8 @@ textarea {
   margin: 0;
   padding: 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #e5e7eb;
+  background: #eef2f7;
+  color: #1f2937;
   white-space: pre-wrap;
   word-break: break-word;
 }
