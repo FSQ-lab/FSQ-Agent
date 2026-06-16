@@ -45,7 +45,38 @@ def _isolate_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_only_public_commands_are_registered() -> None:
-    assert set(main.commands) == {"init", "run", "report"}
+    assert set(main.commands) == {"init", "run", "report", "playground"}
+
+
+def test_playground_command_loads_settings_and_starts_server(tmp_path: Path, monkeypatch) -> None:
+    config_path = _config(tmp_path)
+    captured = {}
+
+    def fake_run_playground(settings, options):
+        captured["settings"] = settings
+        captured["options"] = options
+
+    monkeypatch.setattr("fsq_agent.cli._main.run_playground", fake_run_playground)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "playground",
+            "--config",
+            str(config_path),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "9999",
+            "--no-open-browser",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["settings"].workspace.root_dir == tmp_path / "workspace"
+    assert captured["options"].host == "127.0.0.1"
+    assert captured["options"].port == 9999
+    assert captured["options"].open_browser is False
 
 
 def test_run_rejects_missing_or_conflicting_sources(tmp_path: Path) -> None:

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>fsq-agent Playground</title>
+    <link rel="stylesheet" href="/playground.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel control-panel">
+        <header class="topbar">
+          <div>
+            <h1>fsq-agent Playground</h1>
+            <p id="server-status">Connecting...</p>
+          </div>
+          <button id="refresh" type="button">Refresh</button>
+        </header>
+
+        <section class="section progress-section">
+          <h2>Progress</h2>
+          <div id="progress" class="progress-log"></div>
+        </section>
+
+        <section class="section">
+          <h2>Session</h2>
+          <div class="session-row">
+            <select id="device-select" aria-label="ADB device"></select>
+            <button id="create-session" type="button">Use Selected</button>
+            <button id="destroy-session" type="button">Disconnect</button>
+          </div>
+          <p id="session-message" class="muted"></p>
+        </section>
+
+        <section class="section run-section">
+          <h2>Goal</h2>
+          <textarea id="goal" rows="5" placeholder="Describe the Android task to run..."></textarea>
+          <button id="run-goal" type="button" class="primary">Run Goal</button>
+        </section>
+      </section>
+
+      <section class="panel preview-panel">
+        <header class="preview-header">
+          <div>
+            <h2>Preview</h2>
+            <p id="runtime-info" class="muted">No runtime info yet.</p>
+          </div>
+          <button id="refresh-screenshot" type="button">Screenshot</button>
+        </header>
+        <div class="preview-frame">
+          <img id="screenshot" alt="Android screenshot preview" />
+          <p id="preview-empty">Screenshot preview will appear here.</p>
+        </div>
+        <section class="section report-section">
+          <h2>Report</h2>
+          <a id="report-link" href="#" target="_blank" rel="noreferrer">No report yet</a>
+        </section>
+      </section>
+    </main>
+    <script src="/playground.js"></script>
+  </body>
+</html>

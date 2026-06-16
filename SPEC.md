@@ -46,6 +46,7 @@ Default local LLM runs use GitHub Copilot provider authentication with Copilot m
 | report | fsq_agent/report/SPEC.md | Generates LLM task reports, strict-core evidence reports, and resolves stored reports by run id. |
 | core | fsq_agent/core/SPEC.md | Defines shared execution-core orchestration boundaries, StepRunner protocol, pure waits, harness interface, and evidence coordination. |
 | agent | fsq_agent/agent/SPEC.md | Orchestrates dynamic goal/reference execution through OpenAI Agents SDK, verification, replayable event metadata, and report generation. |
+| playground | fsq_agent/playground/SPEC.md | Serves a local Python playground UI/API for Android session setup, dynamic goal execution, event progress polling, screenshot preview, and report lookup. |
 | cli | fsq_agent/cli/SPEC.md | Exposes the public `init`, `run`, `report`, strict replay, and dynamic-run recording workflows. |
 
 ## Architecture Diagram
@@ -59,6 +60,12 @@ flowchart TD
     CLI --> Providers[providers]
     CLI --> Models[models]
     CLI --> Report[report]
+    CLI --> Playground[playground]
+    Playground --> Agent
+    Playground --> Core
+    Playground --> Config
+    Playground --> Models
+    Playground --> Report
     Agent --> Core[core]
     Agent --> Config[config]
     Agent --> Providers[providers]
@@ -87,6 +94,7 @@ flowchart TD
 - Shared data structures and exceptions live only in the `models` module.
 - Module imports must follow the DAG in the architecture diagram.
 - Provider construction lives in `providers`; `core` must use provider-neutral protocols and must not import provider/runtime modules.
+- `playground` is an entry-layer module like `cli`: it may compose `agent`, `core`, `config`, and `report`, but no leaf module may depend on it.
 - Cross-platform local utilities live behind the CommonTool interface in `tools`; platform actions and AI assertions belong to harnesses.
 - Public interface changes require `SPEC.md` update and user confirmation before implementation.
 - `CLAUDE.md` and `AGENTS.md` are agent entry points only. They must point to this root `SPEC.md` and must not duplicate project specification content.
