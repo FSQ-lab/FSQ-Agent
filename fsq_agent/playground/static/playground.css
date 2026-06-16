@@ -220,7 +220,7 @@ textarea {
 }
 
 .progress-number {
-  color: #93c5fd;
+  color: #1d4ed8;
   font-variant-numeric: tabular-nums;
 }
 
@@ -252,7 +252,7 @@ textarea {
 }
 
 .progress-detail summary {
-  color: #bfdbfe;
+  color: #1e3a8a;
   cursor: pointer;
   font-weight: 600;
   margin-bottom: 4px;
@@ -263,9 +263,10 @@ textarea {
   overflow: auto;
   margin: 0;
   padding: 8px;
+  border: 1px solid #cbd5e1;
   border-radius: 4px;
-  background: #eef2f7;
-  color: #1f2937;
+  background: #e2e8f0;
+  color: #111827;
   white-space: pre-wrap;
   word-break: break-word;
 }
