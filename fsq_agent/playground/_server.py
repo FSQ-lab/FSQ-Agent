@@ -126,13 +126,20 @@ class PlaygroundServer:
         if path == "/execute":
             goal = body.get("goal")
             case_yaml_path = body.get("caseYamlPath")
+            strict_case_yaml_path = body.get("strictCaseYamlPath")
             has_goal = isinstance(goal, str) and bool(goal.strip())
             has_case_yaml = isinstance(case_yaml_path, str) and bool(case_yaml_path.strip())
-            if has_goal == has_case_yaml:
-                return 400, {"error": "Exactly one of goal or caseYamlPath is required."}
+            has_strict_case_yaml = isinstance(strict_case_yaml_path, str) and bool(strict_case_yaml_path.strip())
+            if sum([has_goal, has_case_yaml, has_strict_case_yaml]) != 1:
+                return 400, {"error": "Exactly one of goal, caseYamlPath, or strictCaseYamlPath is required."}
             if not self.state.session.connected:
                 return 409, {"error": "No active Android session. Create a session before execution."}
-            task_label = goal.strip() if has_goal else f"Case YAML: {case_yaml_path.strip()}"
+            if has_goal:
+                task_label = goal.strip()
+            elif has_case_yaml:
+                task_label = f"Case YAML: {case_yaml_path.strip()}"
+            else:
+                task_label = f"Strict YAML: {strict_case_yaml_path.strip()}"
             try:
                 request_id = self.state.start_task(task_label)
             except BusyError as exc:
@@ -143,6 +150,7 @@ class PlaygroundServer:
                 request_id=request_id,
                 goal=goal.strip() if has_goal else None,
                 case_yaml_path=case_yaml_path.strip() if has_case_yaml else None,
+                strict_case_yaml_path=strict_case_yaml_path.strip() if has_strict_case_yaml else None,
                 device_id=self.state.session.device_id,
             )
             return 202, {"requestId": request_id}

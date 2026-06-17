@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Serve a local, single-user fsq-agent playground. The playground owns a Python HTTP API and static browser UI for inspecting runtime status, selecting an Android session target, submitting dynamic natural-language goals or raw FSQ YAML references, polling execution progress from `RunEvent` values, viewing a screenshot preview when available, and resolving generated reports.
+Serve a local, single-user fsq-agent playground. The playground owns a Python HTTP API and static browser UI for inspecting runtime status, selecting an Android session target, submitting dynamic natural-language goals, raw FSQ YAML references, or strict FSQ YAML cases, polling execution progress from `RunEvent` values, viewing a screenshot preview when available, and resolving generated reports.
 
 The playground is an entry-layer convenience surface. It reuses existing fsq-agent execution, configuration, Android harness, event, report, and recording contracts rather than implementing a separate agent loop or platform runner.
 
@@ -11,7 +11,8 @@ The playground is an entry-layer convenience surface. It reuses existing fsq-age
 - `models`: Uses `Task`, `TaskResult`, `RunEvent`, report artifacts, and shared configuration/error models.
 - `config`: Loads settings and applies the same runtime/provider/strict validation policy used by CLI entry points.
 - `agent`: Runs dynamic goal/raw-reference tasks through `FsqAgent.run` and receives live events through an event sink.
-- `core`: Uses Android harness/driver capabilities for session metadata and screenshot capture when the configured backend supports it.
+- `fsq`: Loads strict FSQ YAML cases and converts them into executable steps for strict mode.
+- `core`: Uses Android harness/driver capabilities for session metadata, screenshot capture, and strict-core step execution.
 - `report`: Resolves generated report paths for completed runs.
 - `recording`: Records completed playground dynamic runs into run-local strict replay YAML artifacts using the post-run recorder.
 
@@ -36,12 +37,12 @@ Initial HTTP API:
 | `POST /session` | Select/create one Android session by device id when no task is running. |
 | `DELETE /session` | Clear active session metadata when no task is running. |
 | `GET /runtime-info` | Return platform/runtime metadata, preview capability, app id presence, selected device id, and last run summary. |
-| `POST /execute` | Start one dynamic goal or raw YAML-reference execution and return a request id immediately. |
+| `POST /execute` | Start one dynamic goal, raw YAML-reference, or strict YAML execution and return a request id immediately. |
 | `GET /task-progress/{request_id}` | Return accumulated progress events and final result metadata for one request id. |
 | `GET /screenshot` | Return a base64 screenshot and timestamp when available, or a structured unavailable/error response. |
 | `GET /reports/{run_id}` | Resolve a stored Markdown or JSON report for one run id and return safe metadata or content. |
 
-`POST /execute` accepts exactly one of `goal` or `caseYamlPath`. `goal` constructs a dynamic `Task` equivalent to CLI `--goal`. `caseYamlPath` resolves against `settings.cases.dir` first, then the current working directory, reads the complete UTF-8 file as raw text, and constructs a dynamic raw-case reference task equivalent to CLI non-strict `--case-yaml`; it must not parse YAML into strict executable steps. Playground execution should attempt post-run recording with `allow_failure=True`, matching CLI `--record --record-on-failure` behavior.
+`POST /execute` accepts exactly one of `goal`, `caseYamlPath`, or `strictCaseYamlPath`. `goal` constructs a dynamic `Task` equivalent to CLI `--goal`. `caseYamlPath` resolves against `settings.cases.dir` first, then the current working directory, reads the complete UTF-8 file as raw text, and constructs a dynamic raw-case reference task equivalent to CLI non-strict `--case-yaml`; it must not parse YAML into strict executable steps. `strictCaseYamlPath` resolves the same way but parses the YAML, resolves strict replay references, executes steps through the deterministic core runner, and writes `core-report.md/json` plus `evidence-manifest.json`. Playground dynamic execution should attempt post-run recording with `allow_failure=True`, matching CLI `--record --record-on-failure`; strict YAML execution does not record again.
 
 ## Internal Structure
 
@@ -49,7 +50,7 @@ Initial HTTP API:
 - `_server.py`: Local HTTP server, JSON route dispatch, static serving, lifecycle, and safe path handling.
 - `_state.py`: In-memory session/task state, one-task lock, progress event buffering, final result summaries, and request id generation.
 - `_android.py`: ADB discovery, setup schema generation, Android session metadata, and screenshot helper boundaries.
-- `_execution.py`: Dynamic goal/raw-case execution adapter around `FsqAgent.run`, event capture, result/report shaping, recording, and error normalization.
+- `_execution.py`: Dynamic goal/raw-case execution adapter around `FsqAgent.run`, strict YAML execution adapter around core runner contracts, event capture, result/report shaping, recording, and error normalization.
 - `static/`: Package-owned browser assets.
 - `SPEC.md`: Module design.
 
@@ -61,4 +62,5 @@ The playground returns JSON errors for API failures and does not expose tracebac
 
 - Goal execution follows CLI `run --goal` task construction semantics.
 - YAML execution follows CLI non-strict `run --case-yaml` semantics: raw UTF-8 reference material, no strict YAML parsing for execution.
+- Strict YAML execution follows strict-core semantics: parse authored YAML, execute deterministic steps through the configured Android harness, and generate core evidence reports.
 - Playground records completed dynamic runs using the post-run recorder with `allow_failure=True`.

@@ -163,11 +163,15 @@ async function runGoal() {
 async function runYaml() {
   const caseYamlPath = els.caseYaml.value.trim();
   if (!caseYamlPath) return;
+  if (currentRunMode() === 'strict-yaml') {
+    await startExecution({ strictCaseYamlPath: caseYamlPath });
+    return;
+  }
   await startExecution({ caseYamlPath });
 }
 
 async function runSelected() {
-  if (currentRunMode() === 'yaml') {
+  if (currentRunMode() === 'yaml' || currentRunMode() === 'strict-yaml') {
     await runYaml();
     return;
   }
@@ -180,7 +184,7 @@ function currentRunMode() {
 
 function updateRunMode() {
   const mode = currentRunMode();
-  const isYaml = mode === 'yaml';
+  const isYaml = mode === 'yaml' || mode === 'strict-yaml';
   els.goal.hidden = isYaml;
   els.caseYaml.hidden = !isYaml;
   els.runSelected.textContent = 'Run';

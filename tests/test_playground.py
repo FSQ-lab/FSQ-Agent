@@ -203,11 +203,33 @@ def test_playground_execute_requires_exactly_one_source() -> None:
 
     missing_status, missing_payload = server.handle_post("/execute", {})
     both_status, both_payload = server.handle_post("/execute", {"goal": "Do it", "caseYamlPath": "case.codex.yaml"})
+    strict_both_status, strict_both_payload = server.handle_post("/execute", {"caseYamlPath": "case.codex.yaml", "strictCaseYamlPath": "case.codex.yaml"})
 
     assert missing_status == 400
     assert "Exactly one" in missing_payload["error"]
     assert both_status == 400
     assert "Exactly one" in both_payload["error"]
+    assert strict_both_status == 400
+    assert "Exactly one" in strict_both_payload["error"]
+
+
+def test_playground_execute_starts_strict_yaml(monkeypatch) -> None:
+    captured = {}
+
+    def fake_start_dynamic_goal_execution(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("fsq_agent.playground._server.start_dynamic_goal_execution", fake_start_dynamic_goal_execution)
+    server = PlaygroundServer(Settings())
+    server.state.create_session("device-1")
+
+    status, payload = server.handle_post("/execute", {"strictCaseYamlPath": "case.codex.yaml"})
+
+    assert status == 202
+    assert payload["requestId"]
+    assert captured["goal"] is None
+    assert captured["case_yaml_path"] is None
+    assert captured["strict_case_yaml_path"] == "case.codex.yaml"
 
 
 def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:
@@ -282,12 +304,15 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "event.payload" in script
     assert "eventDetails" in script
     assert 'name="run-mode"' in html
+    assert "strict-yaml" in html
     assert "caseYaml" in script
     assert "runYaml" in script
     assert "runSelected" in script
+    assert "currentRunMode() === 'strict-yaml'" in script
     assert "currentRunMode" in script
     assert "updateRunMode" in script
     assert "caseYamlPath" in script
+    assert "strictCaseYamlPath" in script
     assert "loadReport" in script
     assert "?format=markdown" in script
     assert "renderMarkdown" in script
