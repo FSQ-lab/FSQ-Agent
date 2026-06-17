@@ -235,10 +235,91 @@ async function loadReport(runId) {
   try {
     els.reportContent.textContent = 'Loading report...';
     const report = await api(`/reports/${encodeURIComponent(runId)}?format=markdown`);
-    els.reportContent.textContent = report.content || 'Report is empty.';
+    els.reportContent.innerHTML = renderMarkdown(report.content || 'Report is empty.');
   } catch (error) {
     els.reportContent.textContent = `Unable to load report: ${error.message}`;
   }
+}
+
+function renderMarkdown(markdown) {
+  const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
+  const html = [];
+  let inCode = false;
+  let codeLines = [];
+  let inList = false;
+
+  const closeList = () => {
+    if (inList) {
+      html.push('</ul>');
+      inList = false;
+    }
+  };
+  const flushCode = () => {
+    html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+    codeLines = [];
+  };
+
+  for (const line of lines) {
+    if (line.trim().startsWith('```')) {
+      if (inCode) {
+        inCode = false;
+        flushCode();
+      } else {
+        closeList();
+        inCode = true;
+        codeLines = [];
+      }
+      continue;
+    }
+    if (inCode) {
+      codeLines.push(line);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.*)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      html.push(`<h${level}>${formatInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    if (bullet) {
+      if (!inList) {
+        html.push('<ul>');
+        inList = true;
+      }
+      html.push(`<li>${formatInlineMarkdown(bullet[1])}</li>`);
+      continue;
+    }
+
+    if (!line.trim()) {
+      closeList();
+      continue;
+    }
+
+    closeList();
+    html.push(`<p>${formatInlineMarkdown(line)}</p>`);
+  }
+  if (inCode) flushCode();
+  closeList();
+  return html.join('\n');
+}
+
+function formatInlineMarkdown(value) {
+  return escapeHtml(value)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function showRightTab(tabName) {
@@ -252,7 +333,7 @@ function showRightTab(tabName) {
   els.refreshScreenshot.hidden = showReport;
 }
 
-function appendProgress(text, backendSequence = null, details = [], status = 'neutral') {
+function appendProgress(content, backendSequence = null, details = [], status = 'neutral') {
   const hasBackendSequence = Number.isInteger(backendSequence) && backendSequence >= 0;
   if (hasBackendSequence) {
     state.progressSequence = Math.max(state.progressSequence, backendSequence);
@@ -270,7 +351,7 @@ function appendProgress(text, backendSequence = null, details = [], status = 'ne
   statusDot.title = status;
   const body = document.createElement('span');
   body.className = 'progress-text';
-  body.textContent = text;
+  renderProgressText(body, content);
   item.appendChild(number);
   item.appendChild(statusDot);
   item.appendChild(body);
@@ -279,6 +360,33 @@ function appendProgress(text, backendSequence = null, details = [], status = 'ne
   }
   els.progress.appendChild(item);
   els.progress.scrollTop = els.progress.scrollHeight;
+}
+
+function renderProgressText(root, content) {
+  const normalized = typeof content === 'string' ? { title: content, message: '', toolName: '' } : content;
+  const titleRow = document.createElement('div');
+  titleRow.className = 'progress-title-row';
+
+  const title = document.createElement('span');
+  title.className = 'progress-title';
+  title.textContent = normalized.title || 'Event';
+  titleRow.appendChild(title);
+
+  if (normalized.toolName) {
+    const tool = document.createElement('span');
+    tool.className = 'progress-tool';
+    tool.textContent = normalized.toolName;
+    titleRow.appendChild(tool);
+  }
+
+  root.appendChild(titleRow);
+
+  if (normalized.message) {
+    const message = document.createElement('div');
+    message.className = 'progress-message';
+    message.textContent = normalized.message;
+    root.appendChild(message);
+  }
 }
 
 function eventStatus(event) {
@@ -316,10 +424,11 @@ function parseMaybeJson(value) {
 }
 
 function eventLabel(event) {
-  const title = event.title || event.type || 'Event';
-  const message = event.message ? `: ${event.message}` : '';
-  const tool = event.tool_name ? ` [${event.tool_name}]` : '';
-  return `${title}${tool}${message}`;
+  return {
+    title: event.title || event.type || 'Event',
+    message: event.message || '',
+    toolName: event.tool_name || '',
+  };
 }
 
 function eventDetails(event) {

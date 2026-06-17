@@ -227,6 +227,43 @@ textarea {
 .progress-text {
   min-width: 0;
   overflow-wrap: anywhere;
+  display: grid;
+  gap: 3px;
+}
+
+.progress-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.progress-title {
+  color: #111827;
+  font-weight: 650;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.progress-message {
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.progress-tool {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .progress-status-dot {
@@ -287,7 +324,7 @@ textarea {
 .report-pane {
   flex: 1;
   overflow: hidden;
-  background: #0f172a;
+  background: #f8fafc;
 }
 
 .report-content {
@@ -295,13 +332,63 @@ textarea {
   overflow: auto;
   box-sizing: border-box;
   margin: 0;
-  padding: 16px;
-  color: #f8fafc;
-  white-space: pre-wrap;
+  padding: 20px 24px;
+  color: #1f2937;
   word-break: break-word;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.report-content h1,
+.report-content h2,
+.report-content h3,
+.report-content h4 {
+  color: #0f172a;
+  margin: 16px 0 8px;
+}
+
+.report-content h1 {
+  font-size: 22px;
+}
+
+.report-content h2 {
+  font-size: 18px;
+}
+
+.report-content p {
+  margin: 8px 0;
+}
+
+.report-content ul {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+
+.report-content li {
+  margin: 4px 0;
+}
+
+.report-content code {
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #0f172a;
+  padding: 1px 5px;
   font-family: Consolas, monospace;
   font-size: 13px;
-  line-height: 1.45;
+}
+
+.report-content pre {
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #eef2f7;
+  padding: 12px;
+}
+
+.report-content pre code {
+  background: transparent;
+  padding: 0;
 }
 
 #screenshot {

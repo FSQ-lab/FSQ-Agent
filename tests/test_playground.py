@@ -287,7 +287,11 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "caseYamlPath" in script
     assert "loadReport" in script
     assert "?format=markdown" in script
+    assert "renderMarkdown" in script
+    assert "escapeHtml" in script
     assert "showRightTab" in script
+    assert "renderProgressText" in script
+    assert "toolName" in script
     assert "eventStatus" in script
     assert "statusFromValue" in script
     assert "progress-status-${status}" in script
@@ -295,6 +299,9 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "ensureSession" in script
     assert "padStart(3, '0')" in script
     assert "progress-number" in styles
+    assert "progress-title" in styles
+    assert "progress-message" in styles
+    assert "progress-tool" in styles
     assert "progress-detail" in styles
     assert "progress-status-dot" in styles
     assert "progress-status-success" in styles
