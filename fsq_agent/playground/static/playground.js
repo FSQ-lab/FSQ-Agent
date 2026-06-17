@@ -16,6 +16,7 @@ const els = {
   caseYaml: document.getElementById('case-yaml'),
   runSelected: document.getElementById('run-selected'),
   runModeInputs: Array.from(document.querySelectorAll('input[name="run-mode"]')),
+  progressRunId: document.getElementById('progress-run-id'),
   progress: document.getElementById('progress'),
   runtimeInfo: document.getElementById('runtime-info'),
   refreshScreenshot: document.getElementById('refresh-screenshot'),
@@ -49,6 +50,34 @@ async function refreshAll() {
   await autoCreateSessionIfPossible({ silent: true });
   await refreshStatus();
   await refreshRuntime();
+}
+
+function clearPage() {
+  if (state.progressTimer) {
+    window.clearInterval(state.progressTimer);
+    state.progressTimer = null;
+  }
+  state.currentRequestId = null;
+  state.progressSequence = 0;
+  state.progressDetailOpenState.clear();
+
+  els.goal.value = '';
+  els.caseYaml.value = '';
+  clearRunId();
+  els.progress.innerHTML = '';
+  els.runtimeInfo.textContent = '';
+  els.reportContent.textContent = '';
+  els.previewEmpty.textContent = '';
+  els.previewEmpty.style.display = 'block';
+  els.screenshot.removeAttribute('src');
+  els.screenshot.style.display = 'none';
+  els.runSelected.disabled = false;
+
+  const goalMode = els.runModeInputs.find((input) => input.value === 'goal');
+  if (goalMode) goalMode.checked = true;
+  updateRunMode();
+  showRightTab('preview');
+  refreshStatus();
 }
 
 async function refreshStatus() {
@@ -194,6 +223,7 @@ async function startExecution(payload) {
   if (!(await ensureSession())) return;
   state.progressSequence = 0;
   state.progressDetailOpenState.clear();
+  clearRunId();
   els.progress.innerHTML = '';
   els.reportContent.textContent = 'No report yet.';
   try {
@@ -220,6 +250,7 @@ async function refreshProgress() {
     els.progress.innerHTML = '';
     state.progressSequence = 0;
     for (const event of progress.events || []) {
+      if (event.type === 'run_started') setRunId(event.run_id || event.runId);
       appendProgress(eventLabel(event), event.sequence, eventDetails(event), eventStatus(event));
     }
     if (progress.status !== 'running') {
@@ -228,6 +259,7 @@ async function refreshProgress() {
       appendProgress(`Finished: ${progress.status}`, null, [], statusFromValue(progress.status));
       if (progress.error) appendProgress(`Error: ${progress.error}`, null, [], 'failed');
       if (progress.result?.runId) {
+        setRunId(progress.result.runId);
         await loadReport(progress.result.runId);
       }
       await refreshStatus();
@@ -236,6 +268,17 @@ async function refreshProgress() {
   } catch (error) {
     appendProgress(`Progress error: ${error.message}`, null, [], 'failed');
   }
+}
+
+function setRunId(runId) {
+  if (!runId) return;
+  els.progressRunId.textContent = `Run ID: ${runId}`;
+  els.progressRunId.hidden = false;
+}
+
+function clearRunId() {
+  els.progressRunId.textContent = '';
+  els.progressRunId.hidden = true;
 }
 
 async function loadReport(runId) {
@@ -522,7 +565,7 @@ async function refreshScreenshot() {
   }
 }
 
-els.refresh.addEventListener('click', refreshAll);
+els.refresh.addEventListener('click', clearPage);
 els.createSession.addEventListener('click', createSession);
 els.destroySession.addEventListener('click', destroySession);
 els.runSelected.addEventListener('click', runSelected);

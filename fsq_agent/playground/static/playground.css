@@ -197,6 +197,20 @@ textarea {
   overflow: hidden;
 }
 
+.progress-run-id {
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+  border: 1px solid #b8c0cc;
+  border-radius: 6px;
+  background: #eef6ff;
+  color: #0f4c81;
+  padding: 8px 10px;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
 .progress-log {
   flex: 1;
   min-height: 0;

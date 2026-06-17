@@ -154,7 +154,10 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		request_id,
 		RunEvent(run_id=run_id, task_id=case.id, type="run_started", title="Strict YAML started", message=str(case_path)),
 	)
-	steps = _resolve_strict_replay_steps(FsqExecutableStepAdapter().to_executable_steps(case), settings)
+	steps = _resolve_strict_replay_steps(
+		FsqExecutableStepAdapter(default_evidence_policy=settings.harness.strict_core.evidence_policy()).to_executable_steps(case),
+		settings,
+	)
 	harness = AndroidHarness(
 		driver=UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial),
 		artifact_store=ArtifactStore(run_dir=run_dir),

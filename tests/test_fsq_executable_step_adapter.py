@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import ConfigurationError
+from fsq_agent.models import ConfigurationError, EvidencePolicy
 
 
 FSQ_CASE = """
@@ -82,6 +82,19 @@ def test_fsq_executable_step_adapter_preserves_order_and_action_names(tmp_path: 
     ]
     assert steps[0].step_id == "fundamental_test_bing_com_website-step-001"
     assert steps[-1].step_id == "fundamental_test_bing_com_website-step-009"
+    assert all(step.evidence_policy.artifact_kinds == [] for step in steps)
+
+
+def test_fsq_executable_step_adapter_applies_configured_evidence_policy(tmp_path: Path) -> None:
+    case = _load_case(tmp_path)
+    policy = EvidencePolicy(capture_before=True, capture_after=False, capture_on_failure=True, artifact_kinds=["screenshot"])
+
+    steps = FsqExecutableStepAdapter(default_evidence_policy=policy).to_executable_steps(case)
+
+    assert all(step.evidence_policy.capture_before is True for step in steps)
+    assert all(step.evidence_policy.capture_after is False for step in steps)
+    assert all(step.evidence_policy.capture_on_failure is True for step in steps)
+    assert all(step.evidence_policy.artifact_kinds == ["screenshot"] for step in steps)
 
 
 def test_fsq_executable_step_adapter_normalizes_params_and_source_refs(tmp_path: Path) -> None:
@@ -134,12 +147,16 @@ platform: android
     )
     case = FsqCaseLoader().load_case(case_path)
 
-    steps = FsqExecutableStepAdapter().to_executable_steps(case)
+    steps = FsqExecutableStepAdapter(
+        default_evidence_policy=EvidencePolicy(capture_before=True, capture_after=True, artifact_kinds=["screenshot"])
+    ).to_executable_steps(case)
 
     assert steps[0].params == {"text": {"runtimeSecret": "TEST_ACCOUNT_PASSWORD"}, "target": "Password field"}
     assert steps[1].action_name == "waitMs"
     assert steps[1].params == {"duration_ms": 1, "reason": "settle"}
     assert steps[1].kind == "action"
+    assert steps[0].evidence_policy.artifact_kinds == ["screenshot"]
+    assert steps[1].evidence_policy.artifact_kinds == []
 
 
 def test_fsq_executable_step_adapter_raises_for_malformed_command(tmp_path: Path) -> None:

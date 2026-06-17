@@ -6,7 +6,7 @@ Load, merge, normalize, and validate runtime configuration for the OpenAI Agents
 
 ## Dependencies
 
-- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `HarnessSettings`, `AndroidHarnessSettings`, `StrictCoreHarnessSettings`, `WorkspaceSettings`, `CaseSettings`, `AgentContextSettings`, `AgentKnowledgeSettings`, `KnowledgeSkillSettings`, `PrePlanKnowledgeSettings`, `SkillConfig`, `OutputSettings`, `LocalToolOutputSettings`, and `ConfigurationError`.
+- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `HarnessSettings`, `AndroidHarnessSettings`, `StrictCoreHarnessSettings`, `StrictCoreEvidenceSettings`, `WorkspaceSettings`, `CaseSettings`, `AgentContextSettings`, `AgentKnowledgeSettings`, `KnowledgeSkillSettings`, `PrePlanKnowledgeSettings`, `SkillConfig`, `OutputSettings`, `LocalToolOutputSettings`, and `ConfigurationError`.
 
 ## Public Interface
 
@@ -18,7 +18,7 @@ Target `__init__.py` exports via `__all__` after this change:
 - `validate_runtime_settings(settings: Settings) -> None`: Validates provider-specific environment/auth requirements, Azure OpenAI base URL shape when selected, resolved model name, LLM harness/driver settings, CommonTool policy, and local path constraints before a default LLM run starts.
 - `validate_strict_core_settings(settings: Settings, requires_ai_assertion: bool = False) -> None`: Validates strict-core harness/driver settings not provided by a case file. It does not require provider credentials unless the caller knows the strict run contains an authored `assertWithAI` step or otherwise requires a provider-backed AI assertion evaluator. Strict replay runtime-secret refs are validated by entry-layer code after the case is parsed because the referenced names come from the case, not from static settings.
 
-Developer-owned YAML shape for harness strict-core pacing and agent context must include this structure:
+Developer-owned YAML shape for harness strict-core pacing, strict-core evidence capture, and agent context must include this structure:
 
 ```yaml
 harness:
@@ -27,6 +27,12 @@ harness:
 		backend: uiautomator2
 	strict_core:
 		step_interval_seconds: 1.0
+		evidence:
+			capture_before: true
+			capture_after: true
+			capture_on_failure: true
+			artifact_kinds:
+				- screenshot
 
 agent_context:
 	knowledge:
@@ -74,6 +80,7 @@ Invalid or missing configuration raises `ConfigurationError` from `models`. Low-
 - `harness.platform` selects the platform harness used by goal-driven task execution. The first supported platform is `android`.
 - `harness.android.backend` selects the Android backend. The first supported backend is `uiautomator2`.
 - `harness.strict_core.step_interval_seconds` controls the interval passed from entry-layer strict execution into `StepSequenceRunner`. The default is `1.0` seconds, values must be non-negative, and this pacing is execution timing only: it must not add `waitMs` commands, mutate parsed FSQ commands, or create synthetic evidence steps.
+- `harness.strict_core.evidence` controls the default evidence policy applied by entry-layer strict FSQ execution to platform-backed FSQ steps. Defaults request screenshot artifacts before each step, after each step, and on failure. `artifact_kinds` may contain supported core evidence kinds such as `screenshot` and `ui_tree`; an empty list disables automatic artifact capture while preserving phase/result evidence. Generated `waitMs` pure waits must not request platform artifact capture even when strict-core evidence capture is configured.
 - Android app id and device serial are environment-backed local values, not YAML values. Strict-core may fall back to `appId` from parsed FSQ case metadata when `FSQ_ANDROID_APP_ID` is absent. There are no public CLI app-id overrides.
 - Strict-core execution remains deterministic except for explicitly authored `assertWithAI` assertion steps. When a strict run contains `assertWithAI`, entry-layer code may request provider validation and inject a provider-backed evaluator into the platform harness. Missing provider readiness for such a step is a configuration failure. No AI recovery, locator fallback, or testcase mutation is enabled by this setting.
 - Strict replay secret refs remain deterministic configuration inputs. After parsing a strict case, entry-layer code validates each referenced `runtimeSecret` name against `runtime_secrets.allowed_env_names` and verifies the value is present in environment or `.env` before UI actions begin. Missing allowlist entries or values are configuration failures. Secret values are substituted only in memory and must not be written to settings, generated YAML, events, manifests, or reports.

@@ -181,6 +181,12 @@ harness:
         backend: uiautomator2
     strict_core:
         step_interval_seconds: 0.25
+        evidence:
+            capture_before: true
+            capture_after: false
+            capture_on_failure: true
+            artifact_kinds:
+                - ui_tree
 """,
     )
     case_path = tmp_path / "cases" / "strict_cli.codex.yaml"
@@ -213,6 +219,10 @@ harness:
     assert calls["strict"]["run_id"] == "strict_cli"
     assert calls["strict"]["output_dir"] == tmp_path / "workspace" / "output" / "runs" / "strict_cli"
     assert calls["strict"]["step_interval_seconds"] == 0.25
+    assert calls["strict"]["steps"][0].evidence_policy.capture_before is True
+    assert calls["strict"]["steps"][0].evidence_policy.capture_after is False
+    assert calls["strict"]["steps"][0].evidence_policy.capture_on_failure is True
+    assert calls["strict"]["steps"][0].evidence_policy.artifact_kinds == ["ui_tree"]
     assert "core-report.md" in result.output
     assert "evidence-manifest.json" in result.output
 

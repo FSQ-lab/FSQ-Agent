@@ -287,14 +287,26 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     html = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "playground.js").read_text(encoding="utf-8")
     styles = (static_dir / "playground.css").read_text(encoding="utf-8")
+    clear_page_body = script[script.index("function clearPage()"):script.index("async function refreshStatus()")]
 
     assert html.index('class="section progress-section"') < html.index("<h2>Session</h2>")
     assert "preview-tab" in html
     assert "report-tab" in html
     assert "report-content" in html
     assert "preview-pane" in html
+    assert "progress-run-id" in html
     assert "progressSequence" in script
     assert "progressDetailOpenState" in script
+    assert "function clearPage()" in script
+    assert "els.refresh.addEventListener('click', clearPage)" in script
+    assert "window.clearInterval(state.progressTimer)" in script
+    assert "clearRunId();" in clear_page_body
+    assert "els.progress.innerHTML = ''" in script
+    assert "els.reportContent.textContent = ''" in script
+    assert "els.screenshot.removeAttribute('src')" in script
+    assert "refreshStatus();" in clear_page_body
+    assert "els.sessionMessage.textContent = ''" not in clear_page_body
+    assert "els.deviceSelect.innerHTML = ''" not in clear_page_body
     assert "captureProgressDetailState" in script
     assert "data-detail-key" in script
     assert "event.sequence" in script
@@ -320,6 +332,13 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "showRightTab" in script
     assert "renderProgressText" in script
     assert "toolName" in script
+    assert "progressRunId" in script
+    assert "function setRunId(runId)" in script
+    assert "function clearRunId()" in script
+    assert "setRunId(event.run_id || event.runId)" in script
+    assert "setRunId(progress.result.runId)" in script
+    assert "event.type === 'run_started'" in script
+    assert "Run ID: ${runId}" in script
     assert "eventStatus" in script
     assert "statusFromValue" in script
     assert "progress-status-${status}" in script
@@ -327,6 +346,8 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "ensureSession" in script
     assert "padStart(3, '0')" in script
     assert "progress-number" in styles
+    assert "progress-run-id" in styles
+    assert "flex: 0 0 auto" in styles
     assert "progress-title" in styles
     assert "progress-message" in styles
     assert "progress-tool" in styles

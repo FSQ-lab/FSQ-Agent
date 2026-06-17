@@ -59,7 +59,7 @@ class RetryPolicy(BaseModel):
 class EvidencePolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    capture_before: bool = False
+    capture_before: bool = True
     capture_after: bool = True
     capture_on_failure: bool = True
     artifact_kinds: list[EvidenceArtifactKind] = Field(default_factory=list)

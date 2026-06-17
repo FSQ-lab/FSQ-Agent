@@ -36,6 +36,12 @@ harness:
     backend: uiautomator2
   strict_core:
     step_interval_seconds: 1.0
+    evidence:
+      capture_before: true
+      capture_after: true
+      capture_on_failure: true
+      artifact_kinds:
+        - screenshot
 ```
 
 Set Android and Azure user values in `.env`:

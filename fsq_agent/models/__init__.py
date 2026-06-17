@@ -96,6 +96,7 @@ from fsq_agent.models._settings import (
     PrePlanKnowledgeSettings,
     PrePlanSettings,
     RuntimeSecretSettings,
+    StrictCoreEvidenceSettings,
     StrictCoreHarnessSettings,
     WorkspaceSettings,
 )
@@ -209,6 +210,7 @@ __all__ = [
     "ContextTrimmingSettings",
     "HarnessSettings",
     "AndroidHarnessSettings",
+    "StrictCoreEvidenceSettings",
     "StrictCoreHarnessSettings",
     "AgentContextSettings",
     "AgentKnowledgeSettings",

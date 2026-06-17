@@ -43,7 +43,7 @@ def init(config_path: str | None, workspace_path: str | None) -> None:
         _log_readiness("Strict-core run", lambda: validate_strict_core_settings(settings))
         _log_readiness("AI assertion", lambda: validate_strict_core_settings(settings, requires_ai_assertion=True))
     except FsqAgentError as exc:
-        logger.error("Error: %s", exc)
+        _echo_cli_error(exc)
         raise click.Abort() from exc
 
 
@@ -98,9 +98,7 @@ def run(
             record_on_failure=record_on_failure,
         )
     except FsqAgentError as exc:
-        logger.error("Error: %s", exc)
-        if exc.context:
-            logger.error("Details: %s", exc.context)
+        _echo_cli_error(exc)
         raise click.Abort() from exc
 
 
@@ -115,7 +113,7 @@ def report(config_path: str | None, workspace_path: str | None, run_id: str, rep
         path = resolve_report_path(Path(settings.output.runs_dir), run_id, report_format)  # type: ignore[arg-type]
         click.echo(path.read_text(encoding="utf-8"), nl=False)
     except FsqAgentError as exc:
-        logger.error("Error: %s", exc)
+        _echo_cli_error(exc)
         raise click.Abort() from exc
 
 
@@ -164,6 +162,14 @@ def _validate_run_inputs(
         raise ConfigurationError("--record and --record-on-failure are only supported by dynamic LLM runs.")
     if record_on_failure and not record:
         raise ConfigurationError("--record-on-failure requires --record.")
+
+
+def _echo_cli_error(exc: FsqAgentError) -> None:
+    logger.error("Error: %s", exc)
+    click.echo(f"Error: {exc}", err=True)
+    if exc.context:
+        logger.error("Details: %s", exc.context)
+        click.echo(f"Details: {exc.context}", err=True)
 
 
 def _run_dynamic(
@@ -266,7 +272,10 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
 
 def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id: str):
     run_dir = Path(settings.output.runs_dir) / run_id
-    steps = resolve_strict_replay_steps(FsqExecutableStepAdapter().to_executable_steps(case), settings)
+    steps = resolve_strict_replay_steps(
+        FsqExecutableStepAdapter(default_evidence_policy=settings.harness.strict_core.evidence_policy()).to_executable_steps(case),
+        settings,
+    )
     harness = _build_strict_android_harness(settings, _strict_case_app_id(settings, case), run_dir, _case_requires_ai_assertion(case))
     return run_strict_fsq_core_case(
         case_path=case_path,
