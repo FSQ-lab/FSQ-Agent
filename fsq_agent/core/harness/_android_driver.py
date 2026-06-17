@@ -12,6 +12,7 @@ from fsq_agent.models import (
     AndroidPressKeyParams,
     AndroidSwipeParams,
     AndroidTapOnParams,
+    AndroidUiTreeParams,
 )
 
 
@@ -56,5 +57,5 @@ class AndroidDriverInterface(Protocol):
     def screenshot(self) -> bytes:
         ...
 
-    def ui_tree(self) -> dict[str, object]:
+    def ui_tree(self, params: AndroidUiTreeParams) -> dict[str, object]:
         ...

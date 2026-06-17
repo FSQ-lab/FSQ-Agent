@@ -4,6 +4,14 @@ This file is loaded for every normal goal-driven task as concise project and app
 
 `knowledge/index.md` is reserved for the page-knowledge graph index used by internal dynamic goal planning.
 
+## Edge Android Overflow Menu
+
+The Edge Android overflow menu can be horizontally paged. Opening `Browser menu` may show only part of the menu grid.
+
+- To inspect the complete menu, use horizontal swipes inside the visible menu grid to move left or right between menu pages.
+- Items such as `All menu` may require a horizontal swipe before they become visible.
+- After a swipe, refresh the UI observation and verify the expected menu item from the current UI tree or screenshot before treating the menu navigation as complete.
+
 ## Edge Android MSA Sign-In
 
 Use the account plus password sign-in path for Microsoft account setup.

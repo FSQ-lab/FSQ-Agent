@@ -66,8 +66,12 @@ class FakeAndroidDriver:
         self.calls.append(("screenshot", None))
         return b"fake-png"
 
-    def ui_tree(self) -> dict[str, object]:
-        self.calls.append(("ui_tree", None))
+    def ui_tree(self, params: dict[str, object]) -> dict[str, object]:
+        if hasattr(params, "model_dump"):
+            recorded = params.model_dump(mode="json", exclude_none=True)
+        else:
+            recorded = params
+        self.calls.append(("ui_tree", recorded))
         return {"nodes": [{"text": "Login"}]}
 
 
@@ -94,6 +98,7 @@ def test_android_harness_dispatches_fsq_action_names_to_driver() -> None:
         ("inputText", {"text": "bing.com", "target": "Search box"}, "input_text"),
         ("longPressOn", {"target": "Address bar"}, "long_press_on"),
         ("swipe", {"direction": "up", "duration": 1000}, "swipe"),
+        ("uiTree", {}, "ui_tree"),
         ("assertNotVisible", {"target": "Dialog"}, "assert_not_visible"),
         ("assert", {"text": {"contains": "bing.com"}}, "assert_state"),
     ]
@@ -156,6 +161,7 @@ def test_android_harness_action_space_returns_decorated_driver_method_schemas() 
     schemas = {schema.name: schema for schema in harness.action_space()}
 
     assert "tap_on" in schemas
+    assert "ui_tree" in schemas
     assert "perform_actions" not in schemas
     assert "assert_with_ai" not in schemas
     assert schemas["tap_on"].driver_method == "tap_on"
@@ -167,6 +173,9 @@ def test_android_harness_action_space_returns_decorated_driver_method_schemas() 
         "backend": "uiautomator2",
     }
     assert "target" in schemas["tap_on"].params_json_schema["properties"]
+    assert schemas["ui_tree"].driver_method == "ui_tree"
+    assert schemas["ui_tree"].fsq_action_name == "uiTree"
+    assert schemas["ui_tree"].params_json_schema.get("properties") == {}
 
 
 def test_android_harness_validation_failure_does_not_call_driver_method() -> None:
@@ -246,7 +255,7 @@ def test_android_harness_captures_screenshot_and_ui_tree_with_artifact_store(tmp
     assert driver.calls == [
         ("context", None),
         ("screenshot", None),
-        ("ui_tree", None),
+        ("ui_tree", {}),
     ]
 
 

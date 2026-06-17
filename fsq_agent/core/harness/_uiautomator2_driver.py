@@ -16,6 +16,7 @@ from fsq_agent.models import (
     AndroidPressKeyParams,
     AndroidSwipeParams,
     AndroidTapOnParams,
+    AndroidUiTreeParams,
     ConfigurationError,
 )
 
@@ -174,7 +175,8 @@ class UiAutomator2AndroidDriver:
         image.save(output, format="PNG")
         return output.getvalue()
 
-    def ui_tree(self) -> dict[str, object]:
+    @_android_driver_tool("uiTree", description="Return the current Android UI hierarchy XML.")
+    def ui_tree(self, params: AndroidUiTreeParams) -> dict[str, object]:
         return {"xml": self.device.dump_hierarchy()}
 
     def _connect(self, serial: str | None) -> object:

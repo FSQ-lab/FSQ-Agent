@@ -14,6 +14,7 @@ from fsq_agent.models import (
     HarnessContext,
     HarnessFunctionSchema,
     StepPhase,
+    AndroidUiTreeParams,
 )
 
 
@@ -128,7 +129,7 @@ class AndroidHarness:
                 step_id=step_id,
                 phase=phase,
                 name=reason,
-                payload=self.driver.ui_tree(),
+                payload=self.driver.ui_tree(AndroidUiTreeParams()),
             ))
         raise RuntimeError(f"Unsupported Android artifact kind: {kind}")
 

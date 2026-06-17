@@ -23,7 +23,7 @@ class ModelProviderSession:
         return await client.responses.create(**payload)
 
     def invoke_responses_sync(self, *, async_openai_type: Any | None = None, **kwargs: Any) -> Any:
-        return _run_async_sync(self.invoke_responses(async_openai_type=async_openai_type, **kwargs))
+        return _run_async_sync(self._invoke_responses_once(async_openai_type=async_openai_type, **kwargs))
 
     async def close(self) -> None:
         client = self._client
@@ -43,16 +43,31 @@ class ModelProviderSession:
     def _ensure_client(self, async_openai_type: Any | None) -> Any:
         if self._client is not None:
             return self._client
+        self._client = self._new_client(async_openai_type)
+        return self._client
+
+    async def _invoke_responses_once(self, *, async_openai_type: Any | None = None, **kwargs: Any) -> Any:
+        client = self._new_client(async_openai_type)
+        payload = {"model": self.model, **kwargs}
+        try:
+            return await client.responses.create(**payload)
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
+
+    def _new_client(self, async_openai_type: Any | None) -> Any:
         if async_openai_type is None:
             from openai import AsyncOpenAI
 
             async_openai_type = AsyncOpenAI
-        self._client = async_openai_type(
+        return async_openai_type(
             api_key=self.client_config.api_key,
             base_url=self.client_config.base_url,
             default_headers=self.client_config.default_headers or None,
         )
-        return self._client
 
 
 def _run_async_sync(coro):

@@ -245,6 +245,10 @@ class AndroidSwipeParams(BaseModel):
         raise ValueError("requires direction or both start and end points")
 
 
+class AndroidUiTreeParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class AndroidPerformActionsParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -336,6 +340,7 @@ ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
     AndroidActionDefinition("assertNotVisible", "assert_not_visible", AndroidAssertNotVisibleParams, "assertion"),
     AndroidActionDefinition("longPressOn", "long_press_on", AndroidLongPressOnParams, "action"),
     AndroidActionDefinition("swipe", "swipe", AndroidSwipeParams, "action"),
+    AndroidActionDefinition("uiTree", "ui_tree", AndroidUiTreeParams, "observation"),
     AndroidActionDefinition("assertWithAI", "assert_with_ai", AndroidAssertWithAIParams, "assertion", "harness"),
 )
 ANDROID_ACTION_DEFINITIONS_BY_NAME: dict[str, AndroidActionDefinition] = {
