@@ -1,6 +1,12 @@
 const state = {
   currentRequestId: null,
   progressTimer: null,
+  replayTimer: null,
+  replayIndex: 0,
+  replayRequestId: null,
+  replayFrames: [],
+  previewToken: null,
+  replayVideoInFlight: false,
   progressSequence: 0,
   progressDetailOpenState: new Map(),
 };
@@ -19,7 +25,8 @@ const els = {
   progressRunId: document.getElementById('progress-run-id'),
   progress: document.getElementById('progress'),
   runtimeInfo: document.getElementById('runtime-info'),
-  refreshScreenshot: document.getElementById('refresh-screenshot'),
+  replayScreenshots: document.getElementById('replay-screenshots'),
+  replayVideo: document.getElementById('replay-video'),
   screenshot: document.getElementById('screenshot'),
   previewEmpty: document.getElementById('preview-empty'),
   previewTab: document.getElementById('preview-tab'),
@@ -57,6 +64,10 @@ function clearPage() {
     window.clearInterval(state.progressTimer);
     state.progressTimer = null;
   }
+  stopReplay();
+  state.replayRequestId = null;
+  state.replayFrames = [];
+  state.previewToken = null;
   state.currentRequestId = null;
   state.progressSequence = 0;
   state.progressDetailOpenState.clear();
@@ -67,10 +78,7 @@ function clearPage() {
   els.progress.innerHTML = '';
   els.runtimeInfo.textContent = '';
   els.reportContent.textContent = '';
-  els.previewEmpty.textContent = '';
-  els.previewEmpty.style.display = 'block';
-  els.screenshot.removeAttribute('src');
-  els.screenshot.style.display = 'none';
+  clearPreview();
   els.runSelected.disabled = false;
 
   const goalMode = els.runModeInputs.find((input) => input.value === 'goal');
@@ -83,7 +91,7 @@ function clearPage() {
 async function refreshStatus() {
   try {
     const status = await api('/status');
-    els.status.textContent = status.busy ? 'Running' : 'Ready';
+    setServerStatus(status.busy ? 'Running' : 'Ready', status.busy ? 'running' : 'ready');
     els.runSelected.disabled = Boolean(status.busy);
     if (status.session?.connected) {
       els.sessionMessage.textContent = `Connected to ${status.session.displayName || status.session.deviceId}`;
@@ -91,8 +99,13 @@ async function refreshStatus() {
       els.sessionMessage.textContent = 'No active session.';
     }
   } catch (error) {
-    els.status.textContent = error.message;
+    setServerStatus(error.message, 'error');
   }
+}
+
+function setServerStatus(text, status) {
+  els.status.textContent = text;
+  els.status.className = `status-pill status-${status}`;
 }
 
 async function refreshSetup() {
@@ -223,12 +236,17 @@ async function startExecution(payload) {
   if (!(await ensureSession())) return;
   state.progressSequence = 0;
   state.progressDetailOpenState.clear();
+  stopReplay();
+  state.replayRequestId = null;
+  state.replayFrames = [];
   clearRunId();
   els.progress.innerHTML = '';
   els.reportContent.textContent = 'No report yet.';
+  clearPreview('Loading live preview...');
   try {
     const result = await api('/execute', { method: 'POST', body: JSON.stringify(payload) });
     state.currentRequestId = result.requestId;
+    state.replayRequestId = result.requestId;
     startProgressPolling();
     await refreshStatus();
   } catch (error) {
@@ -253,6 +271,9 @@ async function refreshProgress() {
       if (event.type === 'run_started') setRunId(event.run_id || event.runId);
       appendProgress(eventLabel(event), event.sequence, eventDetails(event), eventStatus(event));
     }
+    if (progress.preview?.token && progress.preview.token !== state.previewToken) {
+      await refreshPreview(progress.requestId, progress.preview.token);
+    }
     if (progress.status !== 'running') {
       window.clearInterval(state.progressTimer);
       state.progressTimer = null;
@@ -260,13 +281,37 @@ async function refreshProgress() {
       if (progress.error) appendProgress(`Error: ${progress.error}`, null, [], 'failed');
       if (progress.result?.runId) {
         setRunId(progress.result.runId);
+        state.replayRequestId = progress.result.runId;
         await loadReport(progress.result.runId);
+        await refreshPreviewFromReplay(progress.result.runId);
+      }
+      const replayVideo = await ensureReplayVideoGenerated(state.replayRequestId);
+      if (replayVideo?.videoUrl) {
+        appendProgress('Replay video saved', null, [], 'success');
+      } else if (state.replayRequestId) {
+        appendProgress(`Replay video was not generated: ${replayVideo?.error || 'unknown error'}`, null, [], 'failed');
       }
       await refreshStatus();
       await refreshRuntime();
     }
   } catch (error) {
     appendProgress(`Progress error: ${error.message}`, null, [], 'failed');
+  }
+}
+
+async function refreshPreview(requestId, token) {
+  try {
+    const preview = await api(`/preview/${encodeURIComponent(requestId)}`);
+    const src = `data:image/png;base64,${preview.screenshot}`;
+    await preloadImage(src);
+    state.previewToken = token;
+    els.replayVideo.hidden = true;
+    els.replayVideo.style.display = 'none';
+    els.screenshot.src = src;
+    els.screenshot.style.display = 'block';
+    els.previewEmpty.style.display = 'none';
+  } catch {
+    // Preview artifacts are best-effort while strict execution is still writing evidence.
   }
 }
 
@@ -380,7 +425,7 @@ function showRightTab(tabName) {
   els.reportTab.classList.toggle('active', showReport);
   els.previewTab.setAttribute('aria-selected', String(!showReport));
   els.reportTab.setAttribute('aria-selected', String(showReport));
-  els.refreshScreenshot.hidden = showReport;
+  els.replayScreenshots.hidden = showReport;
 }
 
 function appendProgress(content, backendSequence = null, details = [], status = 'neutral') {
@@ -546,23 +591,235 @@ function hasMeaningfulPayload(payload) {
   return Object.entries(payload).some(([, value]) => hasDisplayValue(value));
 }
 
-async function refreshScreenshot() {
+async function startReplay() {
+  if (state.replayTimer) {
+    stopReplay({ resumeLive: Boolean(state.currentRequestId) });
+    return;
+  }
+  if (!state.replayRequestId) {
+    els.previewEmpty.textContent = 'No replay run yet.';
+    els.previewEmpty.style.display = 'block';
+    return;
+  }
+  let replay;
   try {
-    const result = await api('/screenshot');
-    if (!result.available) {
-      els.previewEmpty.textContent = result.error || 'Screenshot unavailable.';
-      els.previewEmpty.style.display = 'block';
-      els.screenshot.style.display = 'none';
+    const video = await loadReplayVideo(state.replayRequestId);
+    if (video.available && video.videoUrl) {
+      playReplayVideo(video.videoUrl);
       return;
     }
-    els.screenshot.src = `data:image/png;base64,${result.screenshot}`;
-    els.screenshot.style.display = 'block';
-    els.previewEmpty.style.display = 'none';
+    replay = await loadReplayFrames(state.replayRequestId);
   } catch (error) {
-    els.previewEmpty.textContent = error.message;
+    els.previewEmpty.textContent = `Unable to load replay: ${error.message}`;
     els.previewEmpty.style.display = 'block';
-    els.screenshot.style.display = 'none';
+    return;
   }
+  state.replayFrames = replay.frames;
+  if (state.replayFrames.length === 0) {
+    els.previewEmpty.textContent = 'No replay frames yet.';
+    els.previewEmpty.style.display = 'block';
+    return;
+  }
+  state.replayIndex = 0;
+  els.replayScreenshots.textContent = 'Stop';
+  const generatedVideo = await ensureReplayVideoGenerated(state.replayRequestId, state.replayFrames);
+  if (generatedVideo) {
+    playReplayVideo(generatedVideo.videoUrl || URL.createObjectURL(generatedVideo.blob));
+    return;
+  }
+  showReplayFrame(state.replayFrames[state.replayIndex]);
+  scheduleNextReplayFrame();
+}
+
+async function ensureReplayVideoGenerated(requestId, frames = null) {
+  if (!requestId) return { error: 'missing replay request id' };
+  if (state.replayVideoInFlight) return { error: 'replay video generation is already running' };
+  state.replayVideoInFlight = true;
+  try {
+    const existing = await loadReplayVideo(requestId);
+    if (existing.available && existing.videoUrl) return { videoUrl: existing.videoUrl, blob: null };
+    const replayFrames = frames || (await loadReplayFrames(requestId)).frames;
+    if (replayFrames.length === 0) return { error: 'no replay frames found' };
+    const videoBlob = await generateReplayVideo(replayFrames);
+    if (!videoBlob || videoBlob.size === 0) return { error: 'MediaRecorder produced an empty video' };
+    const uploaded = await uploadReplayVideo(requestId, videoBlob);
+    return { videoUrl: uploaded.videoUrl, blob: videoBlob };
+  } catch (error) {
+    console.warn('Unable to generate replay video', error);
+    return { error: error.message || String(error) };
+  } finally {
+    state.replayVideoInFlight = false;
+  }
+}
+
+async function loadReplayVideo(requestId) {
+  return api(`/replay-video/${encodeURIComponent(requestId)}`);
+}
+
+async function uploadReplayVideo(requestId, videoBlob) {
+  const videoBase64 = await blobToBase64(videoBlob);
+  return api(`/replay-video/${encodeURIComponent(requestId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ mimeType: 'video/webm', videoBase64 }),
+  });
+}
+
+async function loadReplayFrames(requestId) {
+  const replay = await api(`/replay/${encodeURIComponent(requestId)}`);
+  const frames = (replay.frames || [])
+    .filter((frame) => typeof frame.screenshot === 'string')
+    .map((frame) => ({
+      timestamp: Number.isFinite(Number(frame.timestamp)) ? Number(frame.timestamp) : null,
+      src: `data:image/png;base64,${frame.screenshot}`,
+    }));
+  return { frames };
+}
+
+async function refreshPreviewFromReplay(requestId) {
+  if (!requestId || state.replayTimer) return;
+  try {
+    const replay = await loadReplayFrames(requestId);
+    const frame = replay.frames[replay.frames.length - 1];
+    if (frame) showReplayFrame(frame);
+  } catch {
+    // The screenshot artifact may have been announced before the replay endpoint can read it.
+  }
+}
+
+function scheduleNextReplayFrame() {
+  const current = state.replayFrames[state.replayIndex];
+  const next = state.replayFrames[state.replayIndex + 1];
+  if (!next) {
+    state.replayTimer = window.setTimeout(() => stopReplay({ resumeLive: Boolean(state.currentRequestId) }), 0);
+    return;
+  }
+  const delayMs = replayFrameDelay(current, next);
+  state.replayTimer = window.setTimeout(() => {
+    state.replayIndex += 1;
+    showReplayFrame(state.replayFrames[state.replayIndex]);
+    scheduleNextReplayFrame();
+  }, delayMs);
+}
+
+function replayFrameDelay(current, next) {
+  if (typeof current.timestamp === 'number' && typeof next.timestamp === 'number') {
+    return Math.max(0, next.timestamp - current.timestamp);
+  }
+  return 1000;
+}
+
+async function generateReplayVideo(frames) {
+  if (!window.MediaRecorder || frames.length === 0) return null;
+  const mimeType = replayVideoMimeType();
+  if (!mimeType) return null;
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context || !canvas.captureStream) return null;
+  const firstImage = await loadImageElement(frames[0].src);
+  canvas.width = firstImage.naturalWidth || firstImage.width;
+  canvas.height = firstImage.naturalHeight || firstImage.height;
+  context.drawImage(firstImage, 0, 0, canvas.width, canvas.height);
+  const chunks = [];
+  const stream = canvas.captureStream(30);
+  const recorder = new MediaRecorder(stream, { mimeType });
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) chunks.push(event.data);
+  };
+  recorder.start(1000);
+  for (let index = 1; index < frames.length; index += 1) {
+    await waitMs(replayFrameDelay(frames[index - 1], frames[index]));
+    const image = await loadImageElement(frames[index].src);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  }
+  await new Promise((resolve) => {
+    recorder.onstop = resolve;
+    recorder.stop();
+  });
+  stream.getTracks().forEach((track) => track.stop());
+  return new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+}
+
+function replayVideoMimeType() {
+  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || '';
+}
+
+function stopReplay({ resumeLive = false } = {}) {
+  if (state.replayTimer) {
+    window.clearTimeout(state.replayTimer);
+    state.replayTimer = null;
+  }
+  if (els.replayVideo.src) {
+    els.replayVideo.pause();
+    els.replayVideo.removeAttribute('src');
+    els.replayVideo.load();
+  }
+  els.replayVideo.hidden = true;
+  els.replayVideo.style.display = 'none';
+  state.replayIndex = 0;
+  els.replayScreenshots.textContent = 'Replay';
+}
+
+function playReplayVideo(videoUrl) {
+  els.replayScreenshots.textContent = 'Stop';
+  els.screenshot.style.display = 'none';
+  els.previewEmpty.style.display = 'none';
+  els.replayVideo.hidden = false;
+  els.replayVideo.style.display = 'block';
+  els.replayVideo.src = videoUrl;
+  els.replayVideo.currentTime = 0;
+  els.replayVideo.play().catch((error) => {
+    els.previewEmpty.textContent = `Unable to play replay video: ${error.message}`;
+    els.previewEmpty.style.display = 'block';
+  });
+}
+
+function showReplayFrame(frame) {
+  els.replayVideo.hidden = true;
+  els.replayVideo.style.display = 'none';
+  els.screenshot.src = frame.src;
+  els.screenshot.style.display = 'block';
+  els.previewEmpty.style.display = 'none';
+}
+
+function preloadImage(src) {
+  return loadImageElement(src).then(() => undefined);
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function waitMs(durationMs) {
+  return new Promise((resolve) => window.setTimeout(resolve, durationMs));
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function clearPreview(message = '') {
+  els.previewEmpty.textContent = message;
+  els.previewEmpty.style.display = 'block';
+  if (els.replayVideo.src) {
+    els.replayVideo.pause();
+    els.replayVideo.removeAttribute('src');
+    els.replayVideo.load();
+  }
+  els.replayVideo.hidden = true;
+  els.replayVideo.style.display = 'none';
+  els.screenshot.removeAttribute('src');
+  els.screenshot.style.display = 'none';
 }
 
 els.refresh.addEventListener('click', clearPage);
@@ -574,8 +831,10 @@ for (const input of els.runModeInputs) {
 }
 els.previewTab.addEventListener('click', () => showRightTab('preview'));
 els.reportTab.addEventListener('click', () => showRightTab('report'));
-els.refreshScreenshot.addEventListener('click', refreshScreenshot);
+els.replayScreenshots.addEventListener('click', startReplay);
+els.replayVideo.addEventListener('ended', () => stopReplay({ resumeLive: Boolean(state.currentRequestId) }));
 
 updateRunMode();
 showRightTab('preview');
 refreshAll();
+

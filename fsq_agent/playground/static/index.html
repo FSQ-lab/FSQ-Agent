@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>fsq-agent Playground</title>
+    <title>FSQ-Agent Playground</title>
     <link rel="stylesheet" href="/playground.css" />
   </head>
   <body>
@@ -11,10 +11,10 @@
       <section class="panel control-panel">
         <header class="topbar">
           <div>
-            <h1>fsq-agent Playground</h1>
-            <p id="server-status">Connecting...</p>
+            <h1>FSQ-Agent Playground</h1>
+            <p id="server-status" class="status-pill status-connecting">Connecting...</p>
           </div>
-          <button id="refresh" type="button">Refresh</button>
+          <button id="refresh" type="button">Clear</button>
         </header>
 
         <section class="section progress-section">
@@ -55,9 +55,10 @@
             </div>
             <p id="runtime-info" class="muted">No runtime info yet.</p>
           </div>
-          <button id="refresh-screenshot" type="button">Screenshot</button>
+          <button id="replay-screenshots" type="button">Replay</button>
         </header>
         <div id="preview-pane" class="tab-pane preview-frame" role="tabpanel" aria-labelledby="preview-tab">
+          <video id="replay-video" controls hidden></video>
           <img id="screenshot" alt="Android screenshot preview" />
           <p id="preview-empty">Screenshot preview will appear here.</p>
         </div>

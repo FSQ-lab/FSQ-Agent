@@ -1,3 +1,4 @@
+import base64
 import json
 from pathlib import Path
 from urllib.request import urlopen
@@ -155,6 +156,7 @@ def test_playground_state_locks_concurrent_tasks(tmp_path: Path) -> None:
 
     progress = state.get_task(request_id)
     assert progress is not None
+    assert progress["runId"] == "run-1"
     assert progress["status"] == "success"
     assert progress["result"]["runId"] == "run-1"
     assert state.current_request_id is None
@@ -186,6 +188,160 @@ def test_playground_server_report_endpoint_returns_content(tmp_path: Path) -> No
     assert status == 200
     assert payload["runId"] == "run-1"
     assert payload["content"] == "# report"
+
+
+def test_playground_server_persists_replay_frames(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Replay me")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+
+    server._record_replay_frame(
+        request_id,
+        {"available": True, "screenshot": base64.b64encode(b"frame-1").decode("ascii"), "timestamp": 1000},
+    )
+    server._record_replay_frame(
+        request_id,
+        {"available": True, "screenshot": base64.b64encode(b"frame-2").decode("ascii"), "timestamp": 1800},
+    )
+
+    status, payload = server.handle_get(f"/replay/{request_id}", {})
+    progress = server.state.get_task(request_id)
+
+    assert status == 200
+    assert [frame["timestamp"] for frame in payload["frames"]] == [1000, 1800]
+    assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"frame-1"
+    assert (settings.output.runs_dir / "run-1" / "playground-replay" / "replay-manifest.json").exists()
+    assert progress is not None
+    assert progress["replay"]["runId"] == "run-1"
+    assert progress["replay"]["frameCount"] == 2
+    assert "manifestPath" not in progress["replay"]
+
+
+def test_playground_server_replay_uses_evidence_screenshots(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    run_dir = settings.output.runs_dir / "run-1"
+    screenshot_dir = run_dir / "artifacts" / "screenshots"
+    screenshot_dir.mkdir(parents=True)
+    (screenshot_dir / "step-1.png").write_bytes(b"evidence-frame")
+    (run_dir / "evidence-manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "events": [
+                    {
+                        "event_type": "artifact_captured",
+                        "timestamp": "2026-06-17T10:49:07Z",
+                        "payload": {"kind": "screenshot", "path": "artifacts/screenshots/step-1.png"},
+                    }
+                ],
+                "artifacts": [
+                    {"kind": "screenshot", "path": "artifacts/screenshots/step-1.png"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+
+    status, payload = server.handle_get("/replay/run-1", {})
+
+    assert status == 200
+    assert payload["runId"] == "run-1"
+    assert isinstance(payload["frames"][0]["timestamp"], int)
+    assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"evidence-frame"
+
+
+def test_playground_server_preview_endpoint_returns_latest_screenshot(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    screenshot_path = settings.output.runs_dir / "run-1" / "artifacts" / "screenshots" / "step-1.png"
+    screenshot_path.parent.mkdir(parents=True)
+    screenshot_path.write_bytes(b"preview")
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Strict")
+    server.state.set_preview(
+        request_id,
+        {
+            "runId": "run-1",
+            "path": "artifacts/screenshots/step-1.png",
+            "timestamp": "2026-06-17T10:49:07+00:00",
+            "token": "run-1:step-1",
+        },
+    )
+
+    status, payload = server.handle_get(f"/preview/{request_id}", {})
+
+    assert status == 200
+    assert payload["token"] == "run-1:step-1"
+    assert base64.b64decode(payload["screenshot"]) == b"preview"
+
+
+def test_playground_server_resets_replay_dir_once_per_request(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    replay_dir = settings.output.runs_dir / "run-1" / "playground-replay"
+    replay_dir.mkdir(parents=True)
+    (replay_dir / "old-frame.png").write_bytes(b"old")
+    (replay_dir / "replay.webm").write_bytes(b"old-video")
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Replay me")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+
+    server._record_replay_frame(
+        request_id,
+        {"available": True, "screenshot": base64.b64encode(b"frame-1").decode("ascii"), "timestamp": 1000},
+    )
+    server._record_replay_frame(
+        request_id,
+        {"available": True, "screenshot": base64.b64encode(b"frame-2").decode("ascii"), "timestamp": 1800},
+    )
+
+    assert not (replay_dir / "old-frame.png").exists()
+    assert not (replay_dir / "replay.webm").exists()
+    assert sorted(path.name for path in replay_dir.glob("frame-*.png")) == [
+        "frame-0001-1000.png",
+        "frame-0002-1800.png",
+    ]
+
+
+def test_playground_server_stores_uploaded_replay_video(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Replay me")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+
+    status, payload = server.handle_post(
+        f"/replay-video/{request_id}",
+        {"mimeType": "video/webm", "videoBase64": base64.b64encode(b"webm").decode("ascii")},
+    )
+    video_status, video_bytes, content_type = server.handle_replay_video_file(f"/replay-video-file/{request_id}")
+
+    assert status == 200
+    assert payload["videoUrl"] == "/replay-video-file/run-1"
+    assert (settings.output.runs_dir / "run-1" / "playground-replay" / "replay.webm").read_bytes() == b"webm"
+    assert video_status == 200
+    assert video_bytes == b"webm"
+    assert content_type == "video/webm"
+
+
+def test_playground_server_accepts_webm_upload_with_codecs(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Replay me")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+
+    status, payload = server.handle_post(
+        f"/replay-video/{request_id}",
+        {"mimeType": "video/webm;codecs=vp8", "videoBase64": base64.b64encode(b"webm").decode("ascii")},
+    )
+
+    assert status == 200
+    assert payload["videoUrl"] == "/replay-video-file/run-1"
 
 
 def test_playground_execute_requires_session() -> None:
@@ -230,6 +386,35 @@ def test_playground_execute_starts_strict_yaml(monkeypatch) -> None:
     assert captured["goal"] is None
     assert captured["case_yaml_path"] is None
     assert captured["strict_case_yaml_path"] == "case.codex.yaml"
+
+
+def test_playground_execute_clears_strict_replay_dir_at_start(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings()
+    settings.cases.dir = tmp_path / "cases"
+    settings.output.runs_dir = tmp_path / "runs"
+    settings.cases.dir.mkdir()
+    case_path = settings.cases.dir / "strict_case.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Strict Case
+platform: android
+---
+- launchApp
+""",
+        encoding="utf-8",
+    )
+    replay_dir = settings.output.runs_dir / "strict_case" / "playground-replay"
+    replay_dir.mkdir(parents=True)
+    (replay_dir / "old-frame.png").write_bytes(b"old")
+    monkeypatch.setattr("fsq_agent.playground._server.start_dynamic_goal_execution", lambda **_kwargs: None)
+    server = PlaygroundServer(settings)
+    server.state.create_session("device-1")
+
+    status, _payload = server.handle_post("/execute", {"strictCaseYamlPath": "strict_case.codex.yaml"})
+
+    assert status == 202
+    assert not replay_dir.exists()
 
 
 def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:
@@ -290,19 +475,41 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     clear_page_body = script[script.index("function clearPage()"):script.index("async function refreshStatus()")]
 
     assert html.index('class="section progress-section"') < html.index("<h2>Session</h2>")
+    assert "FSQ-Agent Playground" in html
+    assert "status-pill status-connecting" in html
     assert "preview-tab" in html
     assert "report-tab" in html
     assert "report-content" in html
     assert "preview-pane" in html
+    assert '<button id="replay-screenshots" type="button">Replay</button>' in html
+    assert 'id="replay-video"' in html
+    assert '<button id="refresh" type="button">Clear</button>' in html
     assert "progress-run-id" in html
     assert "progressSequence" in script
+    assert "setServerStatus" in script
+    assert "status-pill status-${status}" in script
     assert "progressDetailOpenState" in script
+    assert "screenshotTimer" not in script
+    assert "screenshotInFlight" not in script
+    assert "replayFrames" in script
+    assert "replayTimer" in script
+    assert "replayIndex" in script
+    assert "replayRequestId" in script
+    assert "previewToken" in script
+    assert "replayVideoInFlight" in script
+    assert "liveVideoRecorder" not in script
+    assert "liveVideoChunks" not in script
     assert "function clearPage()" in script
     assert "els.refresh.addEventListener('click', clearPage)" in script
     assert "window.clearInterval(state.progressTimer)" in script
+    assert "stopLiveScreenshotPolling" not in script
+    assert "stopReplay();" in clear_page_body
     assert "clearRunId();" in clear_page_body
     assert "els.progress.innerHTML = ''" in script
     assert "els.reportContent.textContent = ''" in script
+    assert "clearPreview();" in clear_page_body
+    assert "clearPreview('Loading live preview...')" in script
+    assert "function clearPreview" in script
     assert "els.screenshot.removeAttribute('src')" in script
     assert "refreshStatus();" in clear_page_body
     assert "els.sessionMessage.textContent = ''" not in clear_page_body
@@ -339,6 +546,46 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "setRunId(progress.result.runId)" in script
     assert "event.type === 'run_started'" in script
     assert "Run ID: ${runId}" in script
+    assert "refreshPreviewFromReplay" in script
+    assert "refreshPreview" in script
+    assert "api(`/preview/${encodeURIComponent(requestId)}`)" in script
+    assert "startLiveScreenshotPolling" not in script
+    assert "refreshScreenshot({ preservePrevious: true })" not in script
+    assert "preloadImage" in script
+    assert "startReplay" in script
+    assert "stopReplay" in script
+    assert "showReplayFrame" in script
+    assert "loadReplayFrames" in script
+    assert "loadReplayVideo" in script
+    assert "playReplayVideo" in script
+    assert "generateReplayVideo" in script
+    assert "recordLiveReplayFrame" not in script
+    assert "finalizeLiveReplayVideo" not in script
+    assert "Replay video saved" in script
+    assert "Replay video was not generated:" in script
+    assert "MediaRecorder produced an empty video" in script
+    assert "no replay frames found" in script
+    assert "discardLiveReplayVideo" not in script
+    assert "ensureReplayVideoGenerated" in script
+    assert "replayVideoMimeType" in script
+    assert "MediaRecorder.isTypeSupported" in script
+    assert "uploadReplayVideo" in script
+    assert "blobToBase64" in script
+    assert "els.replayVideo.addEventListener('ended'" in script
+    assert "api(`/replay-video/${encodeURIComponent(requestId)}`)" in script
+    assert "method: 'POST'" in script
+    assert "recorder.start(1000)" in script
+    assert "video.videoUrl" in script
+    assert "scheduleNextReplayFrame" in script
+    assert "replayFrameDelay" in script
+    assert "els.replayScreenshots.addEventListener('click', startReplay)" in script
+    assert "api(`/replay/${encodeURIComponent(requestId)}`)" in script
+    assert "next.timestamp - current.timestamp" in script
+    assert "window.setTimeout" in script
+    assert "window.clearTimeout" in script
+    assert "No replay frames yet." in script
+    assert "No replay run yet." in script
+    assert "Unable to load replay" in script
     assert "eventStatus" in script
     assert "statusFromValue" in script
     assert "progress-status-${status}" in script
@@ -346,6 +593,11 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "ensureSession" in script
     assert "padStart(3, '0')" in script
     assert "progress-number" in styles
+    assert "#replay-video" in styles
+    assert "status-pill" in styles
+    assert "status-ready" in styles
+    assert "status-running" in styles
+    assert "status-error" in styles
     assert "progress-run-id" in styles
     assert "flex: 0 0 auto" in styles
     assert "progress-title" in styles
@@ -355,6 +607,7 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "progress-status-dot" in styles
     assert "progress-status-success" in styles
     assert "progress-status-failed" in styles
+    assert "screenshot-refresh" not in styles
     assert "#22c55e" in styles
     assert "#ef4444" in styles
     assert "grid-template-rows: auto minmax(0, 1fr) auto auto" in styles

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 import json
 import mimetypes
 from pathlib import Path
+import re
+import shutil
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import time
@@ -12,6 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import webbrowser
 
 from fsq_agent.config import Settings
+from fsq_agent.fsq import FsqCaseLoader
 from fsq_agent.playground._android import build_android_setup_schema, capture_android_screenshot, resolve_auto_session
 from fsq_agent.playground._execution import start_dynamic_goal_execution
 from fsq_agent.playground._state import BusyError, PlaygroundState
@@ -87,18 +91,60 @@ class PlaygroundServer:
             if not self.state.session.connected:
                 return 200, {"available": False, "error": "No active session."}
             try:
-                return 200, capture_android_screenshot(self.settings, self.state.session.device_id)
+                payload = capture_android_screenshot(self.settings, self.state.session.device_id)
+                if payload.get("available") is True and self.state.current_request_id:
+                    self._record_replay_frame(self.state.current_request_id, payload)
+                return 200, payload
             except Exception as exc:  # noqa: BLE001 - API returns structured errors.
                 return 500, {"available": False, "error": str(exc) or exc.__class__.__name__}
+        if path.startswith("/replay/"):
+            request_id = unquote(path.removeprefix("/replay/")).strip()
+            return self._replay_response(request_id)
+        if path.startswith("/replay-video/"):
+            replay_id = unquote(path.removeprefix("/replay-video/")).strip()
+            return self._replay_video_response(replay_id)
         if path.startswith("/task-progress/"):
             request_id = unquote(path.removeprefix("/task-progress/")).strip()
             task = self.state.get_task(request_id)
             if task is None:
                 return 404, {"error": "Task progress not found."}
             return 200, task
+        if path.startswith("/preview/"):
+            request_id = unquote(path.removeprefix("/preview/")).strip()
+            return self._preview_response(request_id)
         if path.startswith("/reports/"):
             return self._report_response(path, query)
         return 404, {"error": "Not found."}
+
+    def _preview_response(self, request_id: str) -> tuple[int, object]:
+        task = self.state.get_task(request_id)
+        preview = task.get("preview") if task else None
+        if not isinstance(preview, dict):
+            return 404, {"error": "Preview not found."}
+        run_id = preview.get("runId")
+        path = preview.get("path")
+        if not isinstance(run_id, str) or not isinstance(path, str):
+            return 404, {"error": "Preview not found."}
+        run_dir = Path(self.settings.output.runs_dir) / run_id
+        preview_path = (run_dir / path).resolve()
+        if not _is_relative_to(preview_path, run_dir) or not preview_path.is_file():
+            return 404, {"error": "Preview not found."}
+        return 200, {
+            "requestId": request_id,
+            "runId": run_id,
+            "timestamp": preview.get("timestamp"),
+            "token": preview.get("token"),
+            "screenshot": base64.b64encode(preview_path.read_bytes()).decode("ascii"),
+        }
+
+    def handle_replay_video_file(self, path: str) -> tuple[int, bytes, str]:
+        replay_id = unquote(path.removeprefix("/replay-video-file/")).strip()
+        run_id = self.state.run_id_for_request(replay_id) or replay_id
+        video_path = self._replay_video_path(run_id)
+        if not video_path.exists():
+            payload = {"available": False, "error": "Replay video not found.", "runId": run_id}
+            return 404, json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8"
+        return 200, video_path.read_bytes(), "video/webm"
 
     def handle_post(self, path: str, body: dict[str, object]) -> tuple[int, object]:
         if path == "/session":
@@ -144,6 +190,8 @@ class PlaygroundServer:
                 request_id = self.state.start_task(task_label)
             except BusyError as exc:
                 return 409, {"error": str(exc)}
+            if has_strict_case_yaml:
+                self._reset_replay_for_known_run(request_id, self._strict_case_run_id(strict_case_yaml_path.strip()))
             start_dynamic_goal_execution(
                 settings=self.settings,
                 state=self.state,
@@ -154,6 +202,9 @@ class PlaygroundServer:
                 device_id=self.state.session.device_id,
             )
             return 202, {"requestId": request_id}
+        if path.startswith("/replay-video/"):
+            replay_id = unquote(path.removeprefix("/replay-video/")).strip()
+            return self._store_replay_video(replay_id, body)
         return 404, {"error": "Not found."}
 
     def handle_delete(self, path: str) -> tuple[int, object]:
@@ -179,8 +230,8 @@ class PlaygroundServer:
     def _runtime_info(self) -> dict[str, object]:
         return {
             "platformId": "android",
-            "title": "fsq-agent Android Playground",
-            "interface": {"type": "Android", "description": "fsq-agent Android harness"},
+            "title": "FSQ-Agent Android Playground",
+            "interface": {"type": "Android", "description": "FSQ-Agent Android harness"},
             "preview": {"kind": "screenshot", "screenshotPath": "/screenshot", "live": False},
             "session": self.state.session.to_json(),
             "metadata": {
@@ -203,6 +254,191 @@ class PlaygroundServer:
         except Exception as exc:  # noqa: BLE001 - API returns structured errors.
             return 404, {"error": str(exc) or exc.__class__.__name__}
 
+    def _record_replay_frame(self, request_id: str, screenshot_payload: dict[str, object]) -> None:
+        screenshot = screenshot_payload.get("screenshot")
+        timestamp = screenshot_payload.get("timestamp")
+        if not isinstance(screenshot, str) or not isinstance(timestamp, int):
+            return
+        run_id = self.state.run_id_for_request(request_id)
+        if not run_id:
+            return
+        replay_dir = self._replay_dir(run_id)
+        self._reset_replay_dir_once(request_id, replay_dir)
+        replay_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = replay_dir / "replay-manifest.json"
+        manifest = self._read_replay_manifest(manifest_path, request_id, run_id)
+        frames = manifest["frames"]
+        if frames and frames[-1].get("timestamp") == timestamp:
+            return
+        frame_index = len(frames) + 1
+        frame_name = f"frame-{frame_index:04d}-{timestamp}.png"
+        frame_path = replay_dir / frame_name
+        frame_path.write_bytes(base64.b64decode(screenshot))
+        frames.append({"timestamp": timestamp, "path": frame_name})
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+        self.state.set_replay(
+            request_id,
+            {"requestId": request_id, "runId": run_id, "frameCount": len(frames)},
+        )
+
+    def _replay_response(self, replay_id: str) -> tuple[int, object]:
+        run_id = self.state.run_id_for_request(replay_id) or replay_id
+        manifest_path = self._replay_dir(run_id) / "replay-manifest.json"
+        if not manifest_path.exists():
+            return self._evidence_replay_response(replay_id, run_id)
+        manifest = self._read_replay_manifest(manifest_path, replay_id, run_id)
+        frames = []
+        for frame in manifest["frames"]:
+            frame_path = (manifest_path.parent / str(frame.get("path") or "")).resolve()
+            if not _is_relative_to(frame_path, manifest_path.parent) or not frame_path.is_file():
+                continue
+            frames.append(
+                {
+                    "timestamp": frame.get("timestamp"),
+                    "screenshot": base64.b64encode(frame_path.read_bytes()).decode("ascii"),
+                }
+            )
+        return 200, {"requestId": replay_id, "runId": run_id, "frames": frames}
+
+    def _evidence_replay_response(self, replay_id: str, run_id: str) -> tuple[int, object]:
+        run_dir = Path(self.settings.output.runs_dir) / run_id
+        manifest_path = run_dir / "evidence-manifest.json"
+        if not manifest_path.exists():
+            return 404, {"error": "Replay frames not found."}
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return 404, {"error": str(exc) or "Unable to read evidence manifest."}
+        timestamps_by_path = self._screenshot_event_timestamps(manifest)
+        frames = []
+        for artifact in manifest.get("artifacts", []):
+            if not isinstance(artifact, dict) or artifact.get("kind") != "screenshot":
+                continue
+            relative_path = str(artifact.get("path") or "")
+            frame_path = (run_dir / relative_path).resolve()
+            if not _is_relative_to(frame_path, run_dir) or not frame_path.is_file():
+                continue
+            frames.append(
+                {
+                    "timestamp": timestamps_by_path.get(relative_path) or self._timestamp_ms(artifact.get("created_at")),
+                    "screenshot": base64.b64encode(frame_path.read_bytes()).decode("ascii"),
+                }
+            )
+        frames.sort(key=lambda frame: frame.get("timestamp") or 0)
+        if not frames:
+            return 404, {"error": "Replay frames not found."}
+        return 200, {"requestId": replay_id, "runId": run_id, "frames": frames}
+
+    def _screenshot_event_timestamps(self, manifest: dict[str, object]) -> dict[str, int]:
+        timestamps: dict[str, int] = {}
+        events = manifest.get("events")
+        if not isinstance(events, list):
+            return timestamps
+        for event in events:
+            if not isinstance(event, dict) or event.get("event_type") != "artifact_captured":
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict) or payload.get("kind") != "screenshot":
+                continue
+            path = payload.get("path")
+            timestamp = self._timestamp_ms(event.get("timestamp"))
+            if isinstance(path, str) and timestamp is not None:
+                timestamps[path] = timestamp
+        return timestamps
+
+    def _timestamp_ms(self, value: object) -> int | None:
+        if not isinstance(value, str):
+            return None
+        try:
+            normalized = value.replace("Z", "+00:00")
+            return int(time.mktime(time.strptime(normalized[:19], "%Y-%m-%dT%H:%M:%S")) * 1000)
+        except ValueError:
+            return None
+
+    def _replay_video_response(self, replay_id: str) -> tuple[int, object]:
+        run_id = self.state.run_id_for_request(replay_id) or replay_id
+        video_path = self._replay_video_path(run_id)
+        if not video_path.exists():
+            return 200, {"available": False, "error": "Replay video not found.", "runId": run_id}
+        return 200, {
+            "available": True,
+            "requestId": replay_id,
+            "runId": run_id,
+            "format": "webm",
+            "videoUrl": f"/replay-video-file/{run_id}",
+        }
+
+    def _read_replay_manifest(self, manifest_path: Path, request_id: str, run_id: str) -> dict[str, object]:
+        if manifest_path.exists():
+            try:
+                payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                frames = payload.get("frames") if isinstance(payload, dict) else None
+                if isinstance(frames, list):
+                    video = payload.get("video") if isinstance(payload.get("video"), dict) else None
+                    return {"requestId": request_id, "runId": run_id, "frames": frames, "video": video}
+            except (OSError, json.JSONDecodeError):
+                pass
+        return {"requestId": request_id, "runId": run_id, "frames": []}
+
+    def _store_replay_video(self, replay_id: str, body: dict[str, object]) -> tuple[int, object]:
+        run_id = self.state.run_id_for_request(replay_id) or replay_id
+        video_base64 = body.get("videoBase64")
+        mime_type = body.get("mimeType")
+        if not isinstance(video_base64, str) or not video_base64.strip():
+            return 400, {"error": "videoBase64 is required."}
+        if not isinstance(mime_type, str) or not mime_type.lower().startswith("video/webm"):
+            return 400, {"error": "Only video/webm replay uploads are supported."}
+        replay_dir = self._replay_dir(run_id)
+        self._reset_replay_dir_once(replay_id, replay_dir)
+        replay_dir.mkdir(parents=True, exist_ok=True)
+        video_path = replay_dir / "replay.webm"
+        try:
+            video_path.write_bytes(base64.b64decode(video_base64))
+        except Exception as exc:  # noqa: BLE001 - API returns structured errors.
+            return 400, {"error": str(exc) or "Invalid replay video."}
+        manifest_path = replay_dir / "replay-manifest.json"
+        manifest = self._read_replay_manifest(manifest_path, replay_id, run_id)
+        manifest["video"] = {"path": "replay.webm", "mimeType": "video/webm"}
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+        return 200, {
+            "available": True,
+            "requestId": replay_id,
+            "runId": run_id,
+            "videoUrl": f"/replay-video-file/{run_id}",
+            "mimeType": "video/webm",
+        }
+
+    def _replay_dir(self, run_id: str) -> Path:
+        slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", run_id).strip("-") or "run"
+        return Path(self.settings.output.runs_dir) / slug / "playground-replay"
+
+    def _replay_video_path(self, run_id: str) -> Path:
+        return self._replay_dir(run_id) / "replay.webm"
+
+    def _reset_replay_dir_once(self, request_id: str, replay_dir: Path) -> None:
+        if self.state.mark_replay_reset(request_id) and replay_dir.exists():
+            shutil.rmtree(replay_dir)
+
+    def _reset_replay_for_known_run(self, request_id: str, run_id: str | None) -> None:
+        if not run_id:
+            return
+        self.state.bind_run_id(request_id, run_id)
+        self._reset_replay_dir_once(request_id, self._replay_dir(run_id))
+
+    def _strict_case_run_id(self, path_text: str) -> str | None:
+        try:
+            return FsqCaseLoader().load_case(self._resolve_case_yaml_path(path_text)).id
+        except Exception:
+            return None
+
+    def _resolve_case_yaml_path(self, path_text: str) -> Path:
+        requested = Path(path_text.strip())
+        candidates = [requested] if requested.is_absolute() else [self.settings.cases.dir / requested, Path.cwd() / requested]
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.resolve()
+        raise FileNotFoundError(path_text)
+
 
 class _PlaygroundHTTPServer(ThreadingHTTPServer):
     def __init__(self, server_address: tuple[str, int], handler_class: type[BaseHTTPRequestHandler], playground: PlaygroundServer) -> None:
@@ -215,6 +451,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API.
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/replay-video-file/"):
+            status, payload, content_type = self.server.playground.handle_replay_video_file(parsed.path)
+            self._send_bytes(status, payload, content_type)
+            return
         if _is_api_path(parsed.path):
             status, payload = self.server.playground.handle_get(parsed.path, parse_qs(parsed.query))
             self._send_json(status, payload)
@@ -281,7 +521,7 @@ def run_playground(settings: Settings, options: PlaygroundServerOptions) -> None
 
 def _is_api_path(path: str) -> bool:
     return path in {"/status", "/session", "/session/setup", "/session/auto", "/runtime-info", "/screenshot"} or path.startswith(
-        ("/task-progress/", "/reports/")
+        ("/task-progress/", "/preview/", "/reports/", "/replay/", "/replay-video/")
     )
 
 

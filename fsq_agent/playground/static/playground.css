@@ -129,6 +129,54 @@ h1 {
   font-size: 20px;
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  margin-top: 7px;
+  padding: 3px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.status-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.status-ready {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.status-running {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.status-connecting {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.status-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 h2 {
   font-size: 15px;
   margin-bottom: 10px;
@@ -405,7 +453,8 @@ textarea {
   padding: 0;
 }
 
-#screenshot {
+#screenshot,
+#replay-video {
   display: none;
   max-width: 100%;
   max-height: calc(100vh - 150px);

@@ -88,7 +88,7 @@ def build_android_setup_schema(settings: Settings) -> dict[str, object]:
     default_device_id = configured_serial or next((target.id for target in targets if target.is_default), None)
     _, auto_info = _resolve_auto_session_from_targets(settings, targets, error)
     return {
-        "title": "fsq-agent Android Playground",
+        "title": "FSQ-Agent Android Playground",
         "description": "Select an available ADB device to run dynamic goals.",
         "primaryActionLabel": "Create Session",
         "autoSubmitWhenReady": len(targets) == 1,

@@ -14,7 +14,7 @@ from fsq_agent.agent import FsqAgent
 from fsq_agent.config import Settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, StepSequenceRunner, UiAutomator2AndroidDriver
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ExecutableStep, ReportArtifact, RunEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
+from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ExecutableStep, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
 from fsq_agent.playground._state import PlaygroundState
 from fsq_agent.providers import build_ai_assertion_evaluator
 from fsq_agent.report import CoreEvidenceReportGenerator
@@ -170,6 +170,8 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		run_id=run_id,
 		steps=steps,
 		step_interval_seconds=settings.harness.strict_core.step_interval_seconds,
+		state=state,
+		request_id=request_id,
 	)
 	status, summary = _strict_report_status(artifact)
 	state.add_event(
@@ -209,9 +211,11 @@ def _run_strict_core_steps(
 	run_id: str,
 	steps: list[ExecutableStep],
 	step_interval_seconds: float,
+	state: PlaygroundState,
+	request_id: str,
 ) -> ReportArtifact:
 	normal_steps, teardown_steps = _split_trailing_teardown_steps(steps)
-	recorder = EvidenceRecorder(run_id=run_id, output_dir=output_dir)
+	recorder = _PlaygroundEvidenceRecorder(run_id=run_id, output_dir=output_dir, state=state, request_id=request_id)
 	StepSequenceRunner(
 		harness=harness,
 		evidence_recorder=recorder,
@@ -219,6 +223,31 @@ def _run_strict_core_steps(
 	).run_steps(run_id=run_id, steps=normal_steps, teardown_steps=teardown_steps)
 	manifest_path = recorder.write_manifest()
 	return CoreEvidenceReportGenerator().generate_from_manifest(manifest_path)
+
+
+class _PlaygroundEvidenceRecorder(EvidenceRecorder):
+	def __init__(self, *, run_id: str, output_dir: Path, state: PlaygroundState, request_id: str) -> None:
+		super().__init__(run_id=run_id, output_dir=output_dir)
+		self.state = state
+		self.request_id = request_id
+
+	def record_event(self, event: RunnerEvent) -> None:
+		super().record_event(event)
+		payload = event.payload or {}
+		if event.event_type != "artifact_captured" or payload.get("kind") != "screenshot":
+			return
+		path = payload.get("path")
+		if not isinstance(path, str):
+			return
+		self.state.set_preview(
+			self.request_id,
+			{
+				"runId": event.run_id,
+				"path": path,
+				"timestamp": event.timestamp.isoformat(),
+				"token": f"{event.run_id}:{path}:{event.timestamp.isoformat()}",
+			},
+		)
 
 
 def _split_trailing_teardown_steps(steps: list[ExecutableStep]) -> tuple[list[ExecutableStep], list[ExecutableStep]]:
