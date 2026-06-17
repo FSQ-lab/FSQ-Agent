@@ -272,6 +272,9 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "report-content" in html
     assert "preview-pane" in html
     assert "progressSequence" in script
+    assert "progressDetailOpenState" in script
+    assert "captureProgressDetailState" in script
+    assert "data-detail-key" in script
     assert "event.sequence" in script
     assert "backendSequence" in script
     assert "tool_arguments" in script

@@ -2,6 +2,7 @@ const state = {
   currentRequestId: null,
   progressTimer: null,
   progressSequence: 0,
+  progressDetailOpenState: new Map(),
 };
 
 const els = {
@@ -188,6 +189,7 @@ function updateRunMode() {
 async function startExecution(payload) {
   if (!(await ensureSession())) return;
   state.progressSequence = 0;
+  state.progressDetailOpenState.clear();
   els.progress.innerHTML = '';
   els.reportContent.textContent = 'No report yet.';
   try {
@@ -210,6 +212,7 @@ async function refreshProgress() {
   if (!state.currentRequestId) return;
   try {
     const progress = await api(`/task-progress/${encodeURIComponent(state.currentRequestId)}`);
+    captureProgressDetailState();
     els.progress.innerHTML = '';
     state.progressSequence = 0;
     for (const event of progress.events || []) {
@@ -355,11 +358,18 @@ function appendProgress(content, backendSequence = null, details = [], status = 
   item.appendChild(number);
   item.appendChild(statusDot);
   item.appendChild(body);
+  const eventKey = hasBackendSequence ? String(backendSequence) : `local-${state.progressSequence}`;
   for (const detail of details) {
-    item.appendChild(renderProgressDetail(detail.label, detail.value));
+    item.appendChild(renderProgressDetail(eventKey, detail.label, detail.value));
   }
   els.progress.appendChild(item);
   els.progress.scrollTop = els.progress.scrollHeight;
+}
+
+function captureProgressDetailState() {
+  for (const detail of els.progress.querySelectorAll('.progress-detail[data-detail-key]')) {
+    state.progressDetailOpenState.set(detail.dataset.detailKey, detail.open);
+  }
 }
 
 function renderProgressText(root, content) {
@@ -445,9 +455,15 @@ function eventDetails(event) {
   return details;
 }
 
-function renderProgressDetail(label, value) {
+function renderProgressDetail(eventKey, label, value) {
+  const detailKey = `${eventKey}:${label}`;
   const detail = document.createElement('details');
   detail.className = 'progress-detail';
+  detail.dataset.detailKey = detailKey;
+  detail.open = state.progressDetailOpenState.get(detailKey) === true;
+  detail.addEventListener('toggle', () => {
+    state.progressDetailOpenState.set(detailKey, detail.open);
+  });
   const summary = document.createElement('summary');
   summary.textContent = label;
   const pre = document.createElement('pre');
