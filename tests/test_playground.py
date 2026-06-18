@@ -481,8 +481,10 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "report-tab" in html
     assert "report-content" in html
     assert "preview-pane" in html
-    assert '<button id="replay-screenshots" type="button">Replay</button>' in html
-    assert 'id="replay-video"' in html
+    assert "replay-screenshots" not in html
+    assert 'id="replay-video" controls' in html
+    assert 'id="replay-video-play"' not in html
+    assert 'aria-label="Play replay video"' not in html
     assert '<button id="refresh" type="button">Clear</button>' in html
     assert "progress-run-id" in html
     assert "progressSequence" in script
@@ -491,19 +493,20 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "progressDetailOpenState" in script
     assert "screenshotTimer" not in script
     assert "screenshotInFlight" not in script
-    assert "replayFrames" in script
-    assert "replayTimer" in script
-    assert "replayIndex" in script
+    assert "state.replayFrames" not in script
+    assert "state.replayTimer" not in script
+    assert "state.replayIndex" not in script
     assert "replayRequestId" in script
     assert "previewToken" in script
     assert "replayVideoInFlight" in script
+    assert "replayDurationFixing" in script
     assert "liveVideoRecorder" not in script
     assert "liveVideoChunks" not in script
     assert "function clearPage()" in script
     assert "els.refresh.addEventListener('click', clearPage)" in script
     assert "window.clearInterval(state.progressTimer)" in script
     assert "stopLiveScreenshotPolling" not in script
-    assert "stopReplay();" in clear_page_body
+    assert "stopReplay" not in script
     assert "clearRunId();" in clear_page_body
     assert "els.progress.innerHTML = ''" in script
     assert "els.reportContent.textContent = ''" in script
@@ -552,15 +555,20 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "startLiveScreenshotPolling" not in script
     assert "refreshScreenshot({ preservePrevious: true })" not in script
     assert "preloadImage" in script
-    assert "startReplay" in script
-    assert "stopReplay" in script
     assert "showReplayFrame" in script
     assert "loadReplayFrames" in script
     assert "loadReplayVideo" in script
-    assert "playReplayVideo" in script
+    assert "showReplayVideoPreview" in script
+    assert "startReplay" not in script
+    assert "replayVideoEnded" not in script
+    assert "replayVideoStarted" not in script
+    assert "replayVideoPaused" not in script
+    assert "normalizeReplayVideoDuration" in script
     assert "generateReplayVideo" in script
     assert "recordLiveReplayFrame" not in script
     assert "finalizeLiveReplayVideo" not in script
+    assert "appendReplayVideoGeneratingProgress" in script
+    assert "Generating replay video..." in script
     assert "Replay video saved" in script
     assert "Replay video was not generated:" in script
     assert "MediaRecorder produced an empty video" in script
@@ -571,21 +579,22 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "MediaRecorder.isTypeSupported" in script
     assert "uploadReplayVideo" in script
     assert "blobToBase64" in script
-    assert "els.replayVideo.addEventListener('ended'" in script
+    assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" in script
+    assert "els.replayVideo.currentTime = 1e101" in script
+    assert "showReplayVideoPreview(replayVideo.videoUrl)" in script
+    assert "showRightTab('preview')" in script
     assert "api(`/replay-video/${encodeURIComponent(requestId)}`)" in script
     assert "method: 'POST'" in script
     assert "recorder.start(1000)" in script
-    assert "video.videoUrl" in script
-    assert "scheduleNextReplayFrame" in script
+    assert "replayVideo.videoUrl" in script
     assert "replayFrameDelay" in script
-    assert "els.replayScreenshots.addEventListener('click', startReplay)" in script
     assert "api(`/replay/${encodeURIComponent(requestId)}`)" in script
     assert "next.timestamp - current.timestamp" in script
     assert "window.setTimeout" in script
-    assert "window.clearTimeout" in script
-    assert "No replay frames yet." in script
-    assert "No replay run yet." in script
-    assert "Unable to load replay" in script
+    assert "window.clearTimeout" not in script
+    assert "No replay frames yet." not in script
+    assert "No replay run yet." not in script
+    assert "Unable to load replay" not in script
     assert "eventStatus" in script
     assert "statusFromValue" in script
     assert "progress-status-${status}" in script
@@ -606,6 +615,8 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "progress-detail" in styles
     assert "progress-status-dot" in styles
     assert "progress-status-success" in styles
+    assert ".replay-video-play" not in styles
+    assert ".replay-video-progress" not in styles
     assert "progress-status-failed" in styles
     assert "screenshot-refresh" not in styles
     assert "#22c55e" in styles

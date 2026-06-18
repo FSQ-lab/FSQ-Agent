@@ -1,12 +1,10 @@
 const state = {
   currentRequestId: null,
   progressTimer: null,
-  replayTimer: null,
-  replayIndex: 0,
   replayRequestId: null,
-  replayFrames: [],
   previewToken: null,
   replayVideoInFlight: false,
+  replayDurationFixing: false,
   progressSequence: 0,
   progressDetailOpenState: new Map(),
 };
@@ -25,7 +23,6 @@ const els = {
   progressRunId: document.getElementById('progress-run-id'),
   progress: document.getElementById('progress'),
   runtimeInfo: document.getElementById('runtime-info'),
-  replayScreenshots: document.getElementById('replay-screenshots'),
   replayVideo: document.getElementById('replay-video'),
   screenshot: document.getElementById('screenshot'),
   previewEmpty: document.getElementById('preview-empty'),
@@ -64,9 +61,7 @@ function clearPage() {
     window.clearInterval(state.progressTimer);
     state.progressTimer = null;
   }
-  stopReplay();
   state.replayRequestId = null;
-  state.replayFrames = [];
   state.previewToken = null;
   state.currentRequestId = null;
   state.progressSequence = 0;
@@ -236,9 +231,7 @@ async function startExecution(payload) {
   if (!(await ensureSession())) return;
   state.progressSequence = 0;
   state.progressDetailOpenState.clear();
-  stopReplay();
   state.replayRequestId = null;
-  state.replayFrames = [];
   clearRunId();
   els.progress.innerHTML = '';
   els.reportContent.textContent = 'No report yet.';
@@ -285,11 +278,16 @@ async function refreshProgress() {
         await loadReport(progress.result.runId);
         await refreshPreviewFromReplay(progress.result.runId);
       }
-      const replayVideo = await ensureReplayVideoGenerated(state.replayRequestId);
-      if (replayVideo?.videoUrl) {
-        appendProgress('Replay video saved', null, [], 'success');
-      } else if (state.replayRequestId) {
-        appendProgress(`Replay video was not generated: ${replayVideo?.error || 'unknown error'}`, null, [], 'failed');
+      if (state.replayRequestId) {
+        appendReplayVideoGeneratingProgress();
+        const replayVideo = await ensureReplayVideoGenerated(state.replayRequestId);
+        if (replayVideo?.videoUrl) {
+          appendProgress('Replay video saved', null, [], 'success');
+          showReplayVideoPreview(replayVideo.videoUrl);
+          showRightTab('preview');
+        } else {
+          appendProgress(`Replay video was not generated: ${replayVideo?.error || 'unknown error'}`, null, [], 'failed');
+        }
       }
       await refreshStatus();
       await refreshRuntime();
@@ -425,7 +423,6 @@ function showRightTab(tabName) {
   els.reportTab.classList.toggle('active', showReport);
   els.previewTab.setAttribute('aria-selected', String(!showReport));
   els.reportTab.setAttribute('aria-selected', String(showReport));
-  els.replayScreenshots.hidden = showReport;
 }
 
 function appendProgress(content, backendSequence = null, details = [], status = 'neutral') {
@@ -591,46 +588,6 @@ function hasMeaningfulPayload(payload) {
   return Object.entries(payload).some(([, value]) => hasDisplayValue(value));
 }
 
-async function startReplay() {
-  if (state.replayTimer) {
-    stopReplay({ resumeLive: Boolean(state.currentRequestId) });
-    return;
-  }
-  if (!state.replayRequestId) {
-    els.previewEmpty.textContent = 'No replay run yet.';
-    els.previewEmpty.style.display = 'block';
-    return;
-  }
-  let replay;
-  try {
-    const video = await loadReplayVideo(state.replayRequestId);
-    if (video.available && video.videoUrl) {
-      playReplayVideo(video.videoUrl);
-      return;
-    }
-    replay = await loadReplayFrames(state.replayRequestId);
-  } catch (error) {
-    els.previewEmpty.textContent = `Unable to load replay: ${error.message}`;
-    els.previewEmpty.style.display = 'block';
-    return;
-  }
-  state.replayFrames = replay.frames;
-  if (state.replayFrames.length === 0) {
-    els.previewEmpty.textContent = 'No replay frames yet.';
-    els.previewEmpty.style.display = 'block';
-    return;
-  }
-  state.replayIndex = 0;
-  els.replayScreenshots.textContent = 'Stop';
-  const generatedVideo = await ensureReplayVideoGenerated(state.replayRequestId, state.replayFrames);
-  if (generatedVideo) {
-    playReplayVideo(generatedVideo.videoUrl || URL.createObjectURL(generatedVideo.blob));
-    return;
-  }
-  showReplayFrame(state.replayFrames[state.replayIndex]);
-  scheduleNextReplayFrame();
-}
-
 async function ensureReplayVideoGenerated(requestId, frames = null) {
   if (!requestId) return { error: 'missing replay request id' };
   if (state.replayVideoInFlight) return { error: 'replay video generation is already running' };
@@ -650,6 +607,17 @@ async function ensureReplayVideoGenerated(requestId, frames = null) {
   } finally {
     state.replayVideoInFlight = false;
   }
+}
+
+function appendReplayVideoGeneratingProgress() {
+  appendProgress(
+    {
+      title: 'Generating replay video...',
+      message: 'Encoding replay frames and saving the video.',
+    },
+    null,
+    [],
+  );
 }
 
 async function loadReplayVideo(requestId) {
@@ -676,7 +644,7 @@ async function loadReplayFrames(requestId) {
 }
 
 async function refreshPreviewFromReplay(requestId) {
-  if (!requestId || state.replayTimer) return;
+  if (!requestId) return;
   try {
     const replay = await loadReplayFrames(requestId);
     const frame = replay.frames[replay.frames.length - 1];
@@ -684,21 +652,6 @@ async function refreshPreviewFromReplay(requestId) {
   } catch {
     // The screenshot artifact may have been announced before the replay endpoint can read it.
   }
-}
-
-function scheduleNextReplayFrame() {
-  const current = state.replayFrames[state.replayIndex];
-  const next = state.replayFrames[state.replayIndex + 1];
-  if (!next) {
-    state.replayTimer = window.setTimeout(() => stopReplay({ resumeLive: Boolean(state.currentRequestId) }), 0);
-    return;
-  }
-  const delayMs = replayFrameDelay(current, next);
-  state.replayTimer = window.setTimeout(() => {
-    state.replayIndex += 1;
-    showReplayFrame(state.replayFrames[state.replayIndex]);
-    scheduleNextReplayFrame();
-  }, delayMs);
 }
 
 function replayFrameDelay(current, next) {
@@ -744,34 +697,42 @@ function replayVideoMimeType() {
   return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || '';
 }
 
-function stopReplay({ resumeLive = false } = {}) {
-  if (state.replayTimer) {
-    window.clearTimeout(state.replayTimer);
-    state.replayTimer = null;
+function showReplayVideoPreview(videoUrl) {
+  if (els.replayVideo.src !== videoUrl) {
+    els.replayVideo.src = videoUrl;
   }
-  if (els.replayVideo.src) {
-    els.replayVideo.pause();
-    els.replayVideo.removeAttribute('src');
-    els.replayVideo.load();
-  }
-  els.replayVideo.hidden = true;
-  els.replayVideo.style.display = 'none';
-  state.replayIndex = 0;
-  els.replayScreenshots.textContent = 'Replay';
-}
-
-function playReplayVideo(videoUrl) {
-  els.replayScreenshots.textContent = 'Stop';
+  els.replayVideo.pause();
+  els.replayVideo.currentTime = 0;
   els.screenshot.style.display = 'none';
   els.previewEmpty.style.display = 'none';
   els.replayVideo.hidden = false;
   els.replayVideo.style.display = 'block';
-  els.replayVideo.src = videoUrl;
-  els.replayVideo.currentTime = 0;
-  els.replayVideo.play().catch((error) => {
-    els.previewEmpty.textContent = `Unable to play replay video: ${error.message}`;
-    els.previewEmpty.style.display = 'block';
-  });
+}
+
+function normalizeReplayVideoDuration() {
+  if (!els.replayVideo.src || state.replayDurationFixing) return;
+  if (Number.isFinite(els.replayVideo.duration) && els.replayVideo.duration > 0) return;
+  state.replayDurationFixing = true;
+  const wasPaused = els.replayVideo.paused;
+  const originalTime = Number.isFinite(els.replayVideo.currentTime) ? els.replayVideo.currentTime : 0;
+  const finishDurationFix = () => {
+    els.replayVideo.removeEventListener('timeupdate', finishDurationFix);
+    try {
+      els.replayVideo.currentTime = originalTime;
+      if (wasPaused) els.replayVideo.pause();
+    } catch {
+      // Some browsers reject seeking before enough metadata is available.
+    } finally {
+      state.replayDurationFixing = false;
+    }
+  };
+  els.replayVideo.addEventListener('timeupdate', finishDurationFix);
+  try {
+    els.replayVideo.currentTime = 1e101;
+  } catch {
+    state.replayDurationFixing = false;
+    els.replayVideo.removeEventListener('timeupdate', finishDurationFix);
+  }
 }
 
 function showReplayFrame(frame) {
@@ -831,8 +792,7 @@ for (const input of els.runModeInputs) {
 }
 els.previewTab.addEventListener('click', () => showRightTab('preview'));
 els.reportTab.addEventListener('click', () => showRightTab('report'));
-els.replayScreenshots.addEventListener('click', startReplay);
-els.replayVideo.addEventListener('ended', () => stopReplay({ resumeLive: Boolean(state.currentRequestId) }));
+els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration);
 
 updateRunMode();
 showRightTab('preview');
