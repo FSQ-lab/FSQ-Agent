@@ -27,8 +27,6 @@
           <h2>Session</h2>
           <div class="session-row">
             <select id="device-select" aria-label="ADB device"></select>
-            <button id="create-session" type="button">Use Selected</button>
-            <button id="destroy-session" type="button">Disconnect</button>
           </div>
           <p id="session-message" class="muted"></p>
         </section>
@@ -53,7 +51,6 @@
               <button id="preview-tab" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="preview-pane">Preview</button>
               <button id="report-tab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="report-pane">Report</button>
             </div>
-            <p id="runtime-info" class="muted">No runtime info yet.</p>
           </div>
         </header>
         <div id="preview-pane" class="tab-pane preview-frame" role="tabpanel" aria-labelledby="preview-tab">

@@ -20,8 +20,6 @@ const els = {
   status: document.getElementById('server-status'),
   refresh: document.getElementById('refresh'),
   deviceSelect: document.getElementById('device-select'),
-  createSession: document.getElementById('create-session'),
-  destroySession: document.getElementById('destroy-session'),
   sessionMessage: document.getElementById('session-message'),
   goal: document.getElementById('goal'),
   caseYaml: document.getElementById('case-yaml'),
@@ -29,7 +27,6 @@ const els = {
   runModeInputs: Array.from(document.querySelectorAll('input[name="run-mode"]')),
   progressRunId: document.getElementById('progress-run-id'),
   progress: document.getElementById('progress'),
-  runtimeInfo: document.getElementById('runtime-info'),
   replayVideo: document.getElementById('replay-video'),
   screenshot: document.getElementById('screenshot'),
   previewEmpty: document.getElementById('preview-empty'),
@@ -78,7 +75,6 @@ function clearPage() {
   els.caseYaml.value = '';
   clearRunId();
   els.progress.innerHTML = '';
-  els.runtimeInfo.textContent = '';
   els.reportContent.textContent = '';
   clearPreview();
   els.runSelected.disabled = false;
@@ -132,26 +128,9 @@ async function refreshSetup() {
 
 async function refreshRuntime() {
   try {
-    const runtime = await api('/runtime-info');
-    const device = runtime.metadata?.selectedDeviceId || 'none';
-    const app = runtime.metadata?.appIdPresent ? 'app id set' : 'missing app id';
-    els.runtimeInfo.textContent = `${runtime.title} · device: ${device} · ${app}`;
+    await api('/runtime-info');
   } catch (error) {
-    els.runtimeInfo.textContent = error.message;
-  }
-}
-
-async function createSession() {
-  const deviceId = els.deviceSelect.value;
-  if (!deviceId) {
-    els.sessionMessage.textContent = 'Select a device first.';
-    return;
-  }
-  try {
-    await api('/session', { method: 'POST', body: JSON.stringify({ deviceId }) });
-    await refreshAll();
-  } catch (error) {
-    els.sessionMessage.textContent = error.message;
+    setServerStatus(error.message, 'error');
   }
 }
 
@@ -184,18 +163,9 @@ async function ensureSession() {
   }
   if (await autoCreateSessionIfPossible()) return true;
   if (els.deviceSelect.value) {
-    els.sessionMessage.textContent = 'Select a device, then use it to continue.';
+    els.sessionMessage.textContent = 'Automatic session selection is required before running.';
   }
   return false;
-}
-
-async function destroySession() {
-  try {
-    await api('/session', { method: 'DELETE' });
-    await refreshAll();
-  } catch (error) {
-    els.sessionMessage.textContent = error.message;
-  }
 }
 
 async function runGoal() {
@@ -830,8 +800,6 @@ function clearPreview(message = '') {
 }
 
 els.refresh.addEventListener('click', clearPage);
-els.createSession.addEventListener('click', createSession);
-els.destroySession.addEventListener('click', destroySession);
 els.runSelected.addEventListener('click', runSelected);
 for (const input of els.runModeInputs) {
   input.addEventListener('change', updateRunMode);

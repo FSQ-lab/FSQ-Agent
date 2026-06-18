@@ -517,6 +517,10 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert 'id="replay-video" controls' in html
     assert 'id="replay-video-play"' not in html
     assert 'aria-label="Play replay video"' not in html
+    assert "Use Selected" not in html
+    assert "Disconnect" not in html
+    assert "createSession" not in script
+    assert "destroySession" not in script
     assert '<button id="refresh" type="button">Clear</button>' in html
     assert "progress-run-id" in html
     assert "progressSequence" in script
