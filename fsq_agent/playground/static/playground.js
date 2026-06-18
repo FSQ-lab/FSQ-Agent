@@ -10,6 +10,12 @@ const state = {
   progressDetailOpenState: new Map(),
 };
 
+const REPLAY_FAST_SAME_EVENT_DELAY_MS = 180;
+const REPLAY_FAST_ACTION_DELAY_MS = 700;
+const REPLAY_FAST_MAX_DELAY_MS = 900;
+const REPLAY_FAST_FALLBACK_DELAY_MS = 500;
+const REPLAY_FAST_TIME_SCALE = 10;
+
 const els = {
   status: document.getElementById('server-status'),
   refresh: document.getElementById('refresh'),
@@ -657,9 +663,14 @@ async function refreshPreviewFromReplay(requestId) {
 
 function replayFrameDelay(current, next) {
   if (typeof current.timestamp === 'number' && typeof next.timestamp === 'number') {
-    return Math.max(0, next.timestamp - current.timestamp);
+    const rawDelay = Math.max(0, next.timestamp - current.timestamp);
+    if (rawDelay === 0) return REPLAY_FAST_SAME_EVENT_DELAY_MS;
+    return Math.min(
+      REPLAY_FAST_MAX_DELAY_MS,
+      Math.max(REPLAY_FAST_ACTION_DELAY_MS, rawDelay / REPLAY_FAST_TIME_SCALE),
+    );
   }
-  return 1000;
+  return REPLAY_FAST_FALLBACK_DELAY_MS;
 }
 
 async function generateReplayVideo(frames) {
