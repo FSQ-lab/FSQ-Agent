@@ -498,6 +498,7 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "state.replayIndex" not in script
     assert "replayRequestId" in script
     assert "previewToken" in script
+    assert "pendingReplayVideoCleanup" in script
     assert "replayVideoInFlight" in script
     assert "replayDurationFixing" in script
     assert "liveVideoRecorder" not in script
@@ -559,6 +560,11 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "loadReplayFrames" in script
     assert "loadReplayVideo" in script
     assert "showReplayVideoPreview" in script
+    assert "async function showReplayVideoPreview(videoUrl)" in script
+    assert "await waitForReplayVideoReady()" in script
+    assert "function waitForReplayVideoReady()" in script
+    assert "els.replayVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA" in script
+    assert "function cancelPendingReplayVideoReadyWait()" in script
     assert "startReplay" not in script
     assert "replayVideoEnded" not in script
     assert "replayVideoStarted" not in script
@@ -581,7 +587,7 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "blobToBase64" in script
     assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" in script
     assert "els.replayVideo.currentTime = 1e101" in script
-    assert "showReplayVideoPreview(replayVideo.videoUrl)" in script
+    assert "await showReplayVideoPreview(replayVideo.videoUrl)" in script
     assert "showRightTab('preview')" in script
     assert "api(`/replay-video/${encodeURIComponent(requestId)}`)" in script
     assert "method: 'POST'" in script
