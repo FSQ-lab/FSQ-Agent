@@ -255,7 +255,11 @@ class OpenAIAgentsRuntime:
                         message="Building CommonTool and platform harness tools for the SDK agent.",
                     ),
                 )
-                harness_adapter = HarnessToolAdapter(harness, reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES})
+                harness_adapter = HarnessToolAdapter(
+                    harness,
+                    reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES},
+                    default_evidence_policy=self.settings.harness.evidence_policy(),
+                )
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name
                 common_tools = self.tool_factory.build_tools(FunctionTool, run_id=run_id, task_id=task.id, event_sink=event_sink)

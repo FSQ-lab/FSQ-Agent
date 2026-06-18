@@ -13,7 +13,9 @@ from fsq_agent.agent._verification_task import VerificationEvidenceBuilder
 from fsq_agent.config import Settings
 from fsq_agent.models import (
     AgentFinalOutput,
+    EvidencePolicy,
     HarnessActionResult,
+    HarnessArtifactRef,
     HarnessContext,
     HarnessFunctionSchema,
     KnowledgeBundle,
@@ -43,6 +45,7 @@ class _FakeFunctionTool:
 class _FakeHarness:
     def __init__(self) -> None:
         self.steps: list[Any] = []
+        self.captures: list[dict[str, Any]] = []
 
     def action_space(self) -> list[HarnessFunctionSchema]:
         return [
@@ -65,6 +68,15 @@ class _FakeHarness:
             status="passed",
             action_name=step.action_name,
             output={"context_session_id": context.session_id, "params": step.params},
+        )
+
+    def capture_artifact(self, **kwargs: Any) -> HarnessArtifactRef:
+        self.captures.append(kwargs)
+        return HarnessArtifactRef(
+            artifact_id=f"{kwargs['step_id']}-{kwargs['phase']}-{kwargs['reason']}",
+            kind=kwargs["kind"],
+            path=Path("artifacts/screenshots") / f"{kwargs['step_id']}-{kwargs['phase']}-{kwargs['reason']}.png",
+            mime_type="image/png",
         )
 
 
@@ -433,6 +445,21 @@ async def test_harness_tool_adapter_invokes_harness_action() -> None:
     assert payload["result"]["output"]["params"] == {"target": "Downloads"}
     assert harness.steps[0].action_name == "tapOn"
     assert harness.steps[0].kind == "action"
+
+def test_harness_tool_adapter_captures_configured_evidence() -> None:
+    harness = _FakeHarness()
+    adapter = HarnessToolAdapter(
+        harness,
+        default_evidence_policy=EvidencePolicy(capture_before=True, capture_after=True, artifact_kinds=["screenshot"]),
+    )
+    tool = adapter.build_tools(_FakeFunctionTool)[0]
+
+    output = asyncio.run(tool.on_invoke_tool(None, json.dumps({"target": "Downloads"})))
+    payload = json.loads(output)
+
+    assert [capture["reason"] for capture in harness.captures] == ["before-action", "after-action"]
+    assert payload["evidence_artifact_refs"][0]["path"].startswith("artifacts/screenshots/")
+    assert [ref["kind"] for ref in payload["result"]["artifact_refs"]] == ["screenshot", "screenshot"]
 
 
 def test_runtime_tool_origin_recognizes_harness_tools() -> None:

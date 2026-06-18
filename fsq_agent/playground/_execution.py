@@ -322,8 +322,46 @@ def _validate_resolved_params(step: ExecutableStep, params: dict[str, Any]) -> N
 def _event_sink(state: PlaygroundState, request_id: str) -> Callable[[RunEvent], None]:
 	def sink(event: RunEvent) -> None:
 		state.add_event(request_id, event)
+		_preview = _preview_from_dynamic_event(event)
+		if _preview is not None:
+			state.set_preview(request_id, _preview)
 
 	return sink
+
+
+def _preview_from_dynamic_event(event: RunEvent) -> dict[str, object] | None:
+	if event.type != "tool_call_completed":
+		return None
+	path = _latest_screenshot_artifact_path(event.payload)
+	if path is None:
+		return None
+	timestamp = event.timestamp.isoformat()
+	return {
+		"runId": event.run_id,
+		"path": path,
+		"timestamp": timestamp,
+		"token": f"{event.run_id}:{path}:{timestamp}",
+	}
+
+
+def _latest_screenshot_artifact_path(payload: dict[str, Any]) -> str | None:
+	artifact_refs = payload.get("artifact_refs")
+	if isinstance(artifact_refs, list):
+		for artifact_ref in reversed(artifact_refs):
+			if not isinstance(artifact_ref, dict) or artifact_ref.get("kind") != "screenshot":
+				continue
+			path = artifact_ref.get("path")
+			if isinstance(path, str) and path:
+				return path
+	artifact_path = payload.get("artifact_path")
+	if isinstance(artifact_path, str) and _looks_like_screenshot_path(artifact_path):
+		return artifact_path
+	return None
+
+
+def _looks_like_screenshot_path(path: str) -> bool:
+	normalized = path.replace("\\", "/").lower()
+	return "/screenshots/" in normalized and normalized.endswith((".png", ".jpg", ".jpeg", ".webp"))
 
 
 def _record_dynamic_result(settings: Settings, task: Task, result: TaskResult) -> dict[str, object]:

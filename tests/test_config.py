@@ -140,6 +140,35 @@ harness:
     assert settings.harness.strict_core.step_interval_seconds == 0
 
 
+def test_load_settings_accepts_dynamic_harness_evidence_policy(tmp_path: Path) -> None:
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+                _base_config(
+                        tmp_path,
+                        """
+harness:
+    evidence:
+        capture_before: true
+        capture_after: false
+        capture_on_failure: true
+        artifact_kinds:
+            - screenshot
+            - ui_tree
+""",
+                ),
+                encoding="utf-8",
+        )
+
+        settings = load_settings(config_path)
+        policy = settings.harness.evidence_policy()
+
+        assert policy.capture_before is True
+        assert policy.capture_after is False
+        assert policy.capture_on_failure is True
+        assert policy.artifact_kinds == ["screenshot", "ui_tree"]
+        assert settings.harness.strict_core.evidence_policy().artifact_kinds == ["screenshot"]
+
+
 def test_load_settings_accepts_strict_core_evidence_policy(tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         config_path.write_text(
