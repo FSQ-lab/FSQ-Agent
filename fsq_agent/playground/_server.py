@@ -303,31 +303,105 @@ class PlaygroundServer:
     def _evidence_replay_response(self, replay_id: str, run_id: str) -> tuple[int, object]:
         run_dir = Path(self.settings.output.runs_dir) / run_id
         manifest_path = run_dir / "evidence-manifest.json"
-        if not manifest_path.exists():
-            return 404, {"error": "Replay frames not found."}
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            return 404, {"error": str(exc) or "Unable to read evidence manifest."}
-        timestamps_by_path = self._screenshot_event_timestamps(manifest)
         frames = []
-        for artifact in manifest.get("artifacts", []):
-            if not isinstance(artifact, dict) or artifact.get("kind") != "screenshot":
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                return 404, {"error": str(exc) or "Unable to read evidence manifest."}
+            timestamps_by_path = self._screenshot_event_timestamps(manifest)
+            frames.extend(self._frames_from_artifact_refs(run_dir, manifest.get("artifacts", []), timestamps_by_path))
+        if not frames:
+            frames.extend(self._event_replay_frames(run_dir))
+        frames.sort(key=lambda frame: frame.get("timestamp") or 0)
+        if not frames:
+            return 404, {"error": "Replay frames not found."}
+        return 200, {"requestId": replay_id, "runId": run_id, "frames": frames}
+
+    def _frames_from_artifact_refs(
+        self,
+        run_dir: Path,
+        artifact_refs: object,
+        timestamps_by_path: dict[str, int] | None = None,
+    ) -> list[dict[str, object]]:
+        if not isinstance(artifact_refs, list):
+            return []
+        timestamps = timestamps_by_path or {}
+        frames: list[dict[str, object]] = []
+        seen_paths: set[str] = set()
+        for artifact in artifact_refs:
+            if not isinstance(artifact, dict) or not self._is_screenshot_artifact_ref(artifact):
                 continue
             relative_path = str(artifact.get("path") or "")
+            if not relative_path or relative_path in seen_paths:
+                continue
+            seen_paths.add(relative_path)
             frame_path = (run_dir / relative_path).resolve()
             if not _is_relative_to(frame_path, run_dir) or not frame_path.is_file():
                 continue
             frames.append(
                 {
-                    "timestamp": timestamps_by_path.get(relative_path) or self._timestamp_ms(artifact.get("created_at")),
+                    "timestamp": timestamps.get(relative_path) or self._artifact_timestamp(artifact),
                     "screenshot": base64.b64encode(frame_path.read_bytes()).decode("ascii"),
                 }
             )
-        frames.sort(key=lambda frame: frame.get("timestamp") or 0)
-        if not frames:
-            return 404, {"error": "Replay frames not found."}
-        return 200, {"requestId": replay_id, "runId": run_id, "frames": frames}
+        return frames
+
+    def _event_replay_frames(self, run_dir: Path) -> list[dict[str, object]]:
+        events_path = run_dir / "events.jsonl"
+        if not events_path.exists():
+            return []
+        refs: list[dict[str, object]] = []
+        seen_paths: set[str] = set()
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict) or event.get("type") not in {"tool_call_completed", "tool_call_failed"}:
+                continue
+            timestamp = self._timestamp_ms(event.get("timestamp"))
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            artifact_refs = payload.get("artifact_refs")
+            if isinstance(artifact_refs, list):
+                for ref in artifact_refs:
+                    self._append_event_artifact_ref(refs, seen_paths, ref, timestamp)
+            artifact_path = payload.get("artifact_path")
+            if isinstance(artifact_path, str) and artifact_path:
+                self._append_event_artifact_ref(refs, seen_paths, {"kind": "screenshot", "path": artifact_path}, timestamp)
+        return self._frames_from_artifact_refs(run_dir, refs)
+
+    def _append_event_artifact_ref(
+        self,
+        refs: list[dict[str, object]],
+        seen_paths: set[str],
+        ref: object,
+        timestamp: int | None,
+    ) -> None:
+        if not isinstance(ref, dict) or not self._is_screenshot_artifact_ref(ref):
+            return
+        path = ref.get("path")
+        if not isinstance(path, str) or not path or path in seen_paths:
+            return
+        seen_paths.add(path)
+        refs.append({**ref, "timestamp": ref.get("timestamp") or timestamp})
+
+    def _artifact_timestamp(self, artifact: dict[str, object]) -> int | None:
+        timestamp = artifact.get("timestamp")
+        if isinstance(timestamp, int):
+            return timestamp
+        return self._timestamp_ms(artifact.get("created_at"))
+
+    def _is_screenshot_artifact_ref(self, ref: dict[str, object]) -> bool:
+        if ref.get("kind") == "screenshot":
+            return True
+        path = ref.get("path")
+        if not isinstance(path, str):
+            return False
+        normalized = path.replace("\\", "/").lower()
+        return "/screenshots/" in normalized and normalized.endswith((".png", ".jpg", ".jpeg", ".webp"))
 
     def _screenshot_event_timestamps(self, manifest: dict[str, object]) -> dict[str, int]:
         timestamps: dict[str, int] = {}

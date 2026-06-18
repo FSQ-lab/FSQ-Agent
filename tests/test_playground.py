@@ -254,6 +254,38 @@ def test_playground_server_replay_uses_evidence_screenshots(tmp_path: Path) -> N
     assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"evidence-frame"
 
 
+def test_playground_server_replay_falls_back_to_event_screenshots(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    run_dir = settings.output.runs_dir / "run-1"
+    screenshot_dir = run_dir / "artifacts" / "screenshots"
+    screenshot_dir.mkdir(parents=True)
+    (screenshot_dir / "step-1.png").write_bytes(b"event-frame")
+    (run_dir / "evidence-manifest.json").write_text(json.dumps({"run_id": "run-1", "steps": []}), encoding="utf-8")
+    (run_dir / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "tool_call_completed",
+                "timestamp": "2026-06-17T10:49:07Z",
+                "payload": {
+                    "artifact_refs": [
+                        {"kind": "screenshot", "path": "artifacts/screenshots/step-1.png"},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+
+    status, payload = server.handle_get("/replay/run-1", {})
+
+    assert status == 200
+    assert payload["runId"] == "run-1"
+    assert isinstance(payload["frames"][0]["timestamp"], int)
+    assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"event-frame"
+
+
 def test_playground_server_preview_endpoint_returns_latest_screenshot(tmp_path: Path) -> None:
     settings = Settings()
     settings.output.runs_dir = tmp_path / "runs"
