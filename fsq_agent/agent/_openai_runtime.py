@@ -255,7 +255,7 @@ class OpenAIAgentsRuntime:
                         message="Building CommonTool and platform harness tools for the SDK agent.",
                     ),
                 )
-                harness_adapter = HarnessToolAdapter(harness, reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES})
+                harness_adapter = HarnessToolAdapter(harness, run_id=run_id, reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES})
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name
                 common_tools = self.tool_factory.build_tools(FunctionTool, run_id=run_id, task_id=task.id, event_sink=event_sink)
@@ -1019,10 +1019,17 @@ class OpenAIAgentsRuntime:
             "failure_category",
             "error_message",
             "duration_ms",
+            "runner_step_id",
         }
         for key in safe_keys:
             if key in parsed:
                 payload[key] = parsed[key]
+        runner_result = parsed.get("runner_result")
+        if isinstance(runner_result, dict):
+            payload["runner_result"] = runner_result
+        artifact_refs = parsed.get("artifact_refs")
+        if isinstance(artifact_refs, list):
+            payload["artifact_refs"] = artifact_refs
         metadata = parsed.get("metadata")
         if isinstance(metadata, dict):
             payload["metadata"] = metadata
@@ -1034,9 +1041,9 @@ class OpenAIAgentsRuntime:
                 payload["failure_category"] = result.get("failure_category")
             if "error_message" not in payload and result.get("error_message") is not None:
                 payload["error_message"] = result.get("error_message")
-            artifact_refs = result.get("artifact_refs")
-            if isinstance(artifact_refs, list) and artifact_refs:
-                payload["artifact_refs"] = artifact_refs
+            result_artifact_refs = result.get("artifact_refs")
+            if "artifact_refs" not in payload and isinstance(result_artifact_refs, list) and result_artifact_refs:
+                payload["artifact_refs"] = result_artifact_refs
         return payload
 
     def _json_payload(self, output: Any) -> Any:
