@@ -380,8 +380,8 @@ def test_runtime_instructions_exclude_loader_diagnostics() -> None:
     assert "missing optional knowledge" not in instructions
     assert "Use Edge account guidance." in instructions
     assert "Use semantic actions." in instructions
-    assert "Final output JSON Schema:" in instructions
-    assert "AgentFinalOutput" in instructions
+    assert "Final output JSON Schema:" not in instructions
+    assert "AgentFinalOutput structured output required by the SDK" in instructions
 
 
 def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) -> None:
@@ -438,14 +438,14 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
     task_model = builder.build_task_prompt(Task(id="task-1", description="Do it.", verification_goal="Done."))
 
     assert "Custom operator instructions:" not in renderer.render_agent_prompt(agent_model)
-    assert "Preserve the semantic fidelity of ordered key actions." in renderer.render_agent_prompt(agent_model)
+    assert "Preserve ordered key-action semantic fidelity." in renderer.render_agent_prompt(agent_model)
     assert "launch_app harness tool" not in renderer.render_agent_prompt(agent_model)
     assert "kill_app harness tool" not in renderer.render_agent_prompt(agent_model)
     assert "tool usage error" in renderer.render_agent_prompt(agent_model)
     rendered_task = renderer.render_task_prompt(task_model)
     assert "Structured task input:" in rendered_task
     assert '"id": "task-1"' in rendered_task
-    assert "Final verification goal:" in rendered_task
+    assert "Verification goal:" in rendered_task
     assert "Done." in rendered_task
 
 
