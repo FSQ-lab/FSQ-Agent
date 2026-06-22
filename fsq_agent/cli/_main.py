@@ -18,6 +18,7 @@ from fsq_agent.config import Settings, load_settings, validate_runtime_settings,
 from fsq_agent.core import AndroidHarness, ArtifactStore, UiAutomator2AndroidDriver
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import ConfigurationError, FsqAgentError, FsqCase, Task
+from fsq_agent.playground import PlaygroundServerOptions, run_playground
 from fsq_agent.providers import build_ai_assertion_evaluator
 from fsq_agent.report import resolve_report_path
 
@@ -117,6 +118,33 @@ def report(config_path: str | None, workspace_path: str | None, run_id: str, rep
         logger.error("Error: %s", exc)
         raise click.Abort() from exc
 
+
+@main.command()
+@click.option("--config", "config_path", type=click.Path(exists=False, dir_okay=False), default=None)
+@click.option("--workspace", "workspace_path", type=click.Path(file_okay=False), default=None)
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8765, show_default=True, type=click.IntRange(1, 65535))
+@click.option("--open-browser/--no-open-browser", "open_browser", default=True, show_default=True)
+def playground(
+    config_path: str | None,
+    workspace_path: str | None,
+    host: str,
+    port: int,
+    open_browser: bool,
+) -> None:
+    try:
+        settings = load_settings(config_path, workspace_path)
+        run_playground(
+            settings,
+            PlaygroundServerOptions(host=host, port=port, open_browser=open_browser),
+        )
+    except FsqAgentError as exc:
+        logger.error("Error: %s", exc)
+        raise click.Abort() from exc
+    except OSError as exc:
+        logger.error("Playground startup failed: %s", exc)
+        raise click.Abort() from exc
+    
 
 def _validate_run_inputs(
     *,

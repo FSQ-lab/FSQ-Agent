@@ -1,0 +1,801 @@
+import base64
+import json
+from pathlib import Path
+from urllib.request import urlopen
+
+from fsq_agent.config import Settings
+from fsq_agent.models import ReportArtifact, RunEvent, TaskResult, VerificationResult
+from fsq_agent.playground._android import AndroidTarget, parse_adb_devices, resolve_auto_session
+from fsq_agent.playground._execution import _run_dynamic_task, task_from_case_yaml, task_from_goal
+from fsq_agent.playground._server import PlaygroundServer, PlaygroundServerOptions
+from fsq_agent.playground._state import BusyError, PlaygroundState
+
+
+def test_parse_adb_devices_discovers_default_device() -> None:
+    output = """List of devices attached
+emulator-5554 device product:sdk_gphone64_x86_64 model:sdk_gphone64_x86_64 device:emu64xa transport_id:1
+offline-1 offline
+"""
+
+    targets = parse_adb_devices(output)
+
+    assert len(targets) == 1
+    assert targets[0].id == "emulator-5554"
+    assert targets[0].is_default is True
+    assert "sdk gphone64 x86 64" in targets[0].description
+
+
+def test_task_from_goal_matches_dynamic_goal_contract() -> None:
+    task = task_from_goal("  Open rewards panel  ")
+
+    assert task.id == "open-rewards-panel"
+    assert task.name == "Open rewards panel"
+    assert task.planning_reference_kind == "goal"
+    assert task.planning_reference_text == "Open rewards panel"
+    assert task.verification_goal is None
+
+
+def test_task_from_case_yaml_preserves_raw_reference(tmp_path: Path) -> None:
+    cases_dir = tmp_path / "cases"
+    cases_dir.mkdir()
+    case_path = cases_dir / "sample.codex.yaml"
+    content = "schemaVersion: fsq.ai-test/v1\nname: Sample\n---\n- launchApp\n"
+    case_path.write_text(content, encoding="utf-8")
+    settings = Settings()
+    settings.cases.dir = cases_dir
+
+    task = task_from_case_yaml("sample.codex.yaml", settings)
+
+    assert task.name == "Case reference: sample.codex.yaml"
+    assert task.planning_reference_kind == "raw_case"
+    assert task.planning_reference_text is not None
+    assert str(case_path.resolve()) in task.planning_reference_text
+    assert content in task.planning_reference_text
+
+
+def test_auto_session_uses_configured_serial_when_online(monkeypatch) -> None:
+    settings = Settings()
+    settings.harness.android.serial = "device-2"
+    monkeypatch.setattr(
+        "fsq_agent.playground._android.discover_adb_targets",
+        lambda: (
+            [
+                AndroidTarget(id="device-1", label="device-1", is_default=True),
+                AndroidTarget(id="device-2", label="device-2"),
+            ],
+            None,
+        ),
+    )
+
+    session, info = resolve_auto_session(settings)
+
+    assert session is not None
+    assert session.device_id == "device-2"
+    assert info["reason"] == "configured_serial"
+
+
+def test_auto_session_reports_configured_serial_offline(monkeypatch) -> None:
+    settings = Settings()
+    settings.harness.android.serial = "missing-device"
+    monkeypatch.setattr(
+        "fsq_agent.playground._android.discover_adb_targets",
+        lambda: ([AndroidTarget(id="device-1", label="device-1", is_default=True)], None),
+    )
+
+    session, info = resolve_auto_session(settings)
+
+    assert session is None
+    assert info["reason"] == "configured_serial_offline"
+    assert info["configuredSerial"] == "missing-device"
+
+
+def test_auto_session_uses_single_online_device(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "fsq_agent.playground._android.discover_adb_targets",
+        lambda: ([AndroidTarget(id="device-1", label="device-1", is_default=True)], None),
+    )
+
+    session, info = resolve_auto_session(Settings())
+
+    assert session is not None
+    assert session.device_id == "device-1"
+    assert info["reason"] == "single_device"
+
+
+def test_auto_session_requires_manual_selection_for_multiple_devices(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "fsq_agent.playground._android.discover_adb_targets",
+        lambda: (
+            [
+                AndroidTarget(id="device-1", label="device-1", is_default=True),
+                AndroidTarget(id="device-2", label="device-2"),
+            ],
+            None,
+        ),
+    )
+
+    session, info = resolve_auto_session(Settings())
+
+    assert session is None
+    assert info["reason"] == "multiple_devices"
+
+
+def test_auto_session_reports_no_devices(monkeypatch) -> None:
+    monkeypatch.setattr("fsq_agent.playground._android.discover_adb_targets", lambda: ([], None))
+
+    session, info = resolve_auto_session(Settings())
+
+    assert session is None
+    assert info["reason"] == "no_devices"
+
+
+def test_playground_state_locks_concurrent_tasks(tmp_path: Path) -> None:
+    state = PlaygroundState()
+    state.create_session("device-1")
+    request_id = state.start_task("Do it")
+
+    try:
+        state.start_task("Do something else")
+    except BusyError as exc:
+        assert "already running" in str(exc)
+    else:
+        raise AssertionError("Expected BusyError")
+
+    result = TaskResult(
+        task_id="task",
+        status="success",
+        steps=[],
+        verification=VerificationResult(status="success", summary="ok"),
+        report=ReportArtifact(run_id="run-1", path=tmp_path / "report.md"),
+    )
+    state.add_event(
+        request_id,
+        RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"),
+    )
+    state.finish_task(request_id, result)
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["runId"] == "run-1"
+    assert progress["status"] == "success"
+    assert progress["result"]["runId"] == "run-1"
+    assert state.current_request_id is None
+
+
+def test_playground_server_static_path_rejects_traversal(tmp_path: Path) -> None:
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("hello", encoding="utf-8")
+    server = PlaygroundServer(Settings(), PlaygroundServerOptions(static_path=static_dir))
+
+    status, body, content_type = server.static_response("/../secret.txt")
+
+    assert status == 200
+    assert body == b"hello"
+    assert content_type.startswith("text/html")
+
+
+def test_playground_server_report_endpoint_returns_content(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    report_dir = settings.output.runs_dir / "run-1"
+    report_dir.mkdir(parents=True)
+    (report_dir / "report.md").write_text("# report", encoding="utf-8")
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+
+    status, payload = server.handle_get("/reports/run-1", {})
+
+    assert status == 200
+    assert payload["runId"] == "run-1"
+    assert payload["content"] == "# report"
+
+
+def test_playground_server_task_progress_filters_events_after_sequence(tmp_path: Path) -> None:
+    server = PlaygroundServer(Settings(), PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Incremental progress")
+    for sequence in range(1, 4):
+        server.state.add_event(
+            request_id,
+            RunEvent(
+                run_id="run-1",
+                task_id="task",
+                type="planning_update",
+                title=f"Event {sequence}",
+                sequence=sequence,
+            ),
+        )
+    result = TaskResult(
+        task_id="task",
+        status="success",
+        steps=[],
+        verification=VerificationResult(status="success", summary="ok"),
+        report=ReportArtifact(run_id="run-1", path=tmp_path / "report.md"),
+    )
+    server.state.finish_task(request_id, result)
+
+    full_status, full_payload = server.handle_get(f"/task-progress/{request_id}", {})
+    incremental_status, incremental_payload = server.handle_get(
+        f"/task-progress/{request_id}",
+        {"after_sequence": ["2"]},
+    )
+
+    assert full_status == 200
+    assert [event["sequence"] for event in full_payload["events"]] == [1, 2, 3]
+    assert incremental_status == 200
+    assert [event["sequence"] for event in incremental_payload["events"]] == [3]
+    assert incremental_payload["status"] == "success"
+    assert incremental_payload["result"]["runId"] == "run-1"
+
+
+def test_playground_state_assigns_sequence_for_unsequenced_events() -> None:
+    state = PlaygroundState()
+    request_id = state.start_task("Strict progress")
+
+    state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Start"))
+    state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_completed", title="Done"))
+
+    full_progress = state.get_task(request_id)
+    incremental_progress = state.get_task(request_id, after_sequence=1)
+
+    assert full_progress is not None
+    assert [event["sequence"] for event in full_progress["events"]] == [1, 2]
+    assert incremental_progress is not None
+    assert [event["sequence"] for event in incremental_progress["events"]] == [2]
+
+
+def test_playground_server_persists_replay_frames(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Replay me")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+
+    server._record_replay_frame(
+        request_id,
+        {"available": True, "screenshot": base64.b64encode(b"frame-1").decode("ascii"), "timestamp": 1000},
+    )
+    server._record_replay_frame(
+        request_id,
+        {"available": True, "screenshot": base64.b64encode(b"frame-2").decode("ascii"), "timestamp": 1800},
+    )
+
+    status, payload = server.handle_get(f"/replay/{request_id}", {})
+    progress = server.state.get_task(request_id)
+
+    assert status == 200
+    assert [frame["timestamp"] for frame in payload["frames"]] == [1000, 1800]
+    assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"frame-1"
+    assert (settings.output.runs_dir / "run-1" / "playground-replay" / "replay-manifest.json").exists()
+    assert progress is not None
+    assert progress["replay"]["runId"] == "run-1"
+    assert progress["replay"]["frameCount"] == 2
+    assert "manifestPath" not in progress["replay"]
+
+
+def test_playground_server_replay_uses_evidence_screenshots(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    run_dir = settings.output.runs_dir / "run-1"
+    screenshot_dir = run_dir / "artifacts" / "screenshots"
+    screenshot_dir.mkdir(parents=True)
+    (screenshot_dir / "step-1.png").write_bytes(b"evidence-frame")
+    (run_dir / "evidence-manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "events": [
+                    {
+                        "event_type": "artifact_captured",
+                        "timestamp": "2026-06-17T10:49:07Z",
+                        "payload": {"kind": "screenshot", "path": "artifacts/screenshots/step-1.png"},
+                    }
+                ],
+                "artifacts": [
+                    {"kind": "screenshot", "path": "artifacts/screenshots/step-1.png"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+
+    status, payload = server.handle_get("/replay/run-1", {})
+
+    assert status == 200
+    assert payload["runId"] == "run-1"
+    assert isinstance(payload["frames"][0]["timestamp"], int)
+    assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"evidence-frame"
+
+
+def test_playground_server_replay_falls_back_to_event_screenshots(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    run_dir = settings.output.runs_dir / "run-1"
+    screenshot_dir = run_dir / "artifacts" / "screenshots"
+    screenshot_dir.mkdir(parents=True)
+    (screenshot_dir / "step-1.png").write_bytes(b"event-frame")
+    (run_dir / "evidence-manifest.json").write_text(json.dumps({"run_id": "run-1", "steps": []}), encoding="utf-8")
+    (run_dir / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "tool_call_completed",
+                "timestamp": "2026-06-17T10:49:07Z",
+                "payload": {
+                    "artifact_refs": [
+                        {"kind": "screenshot", "path": "artifacts/screenshots/step-1.png"},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+
+    status, payload = server.handle_get("/replay/run-1", {})
+
+    assert status == 200
+    assert payload["runId"] == "run-1"
+    assert isinstance(payload["frames"][0]["timestamp"], int)
+    assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"event-frame"
+
+
+def test_playground_server_preview_endpoint_returns_latest_screenshot(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    screenshot_path = settings.output.runs_dir / "run-1" / "artifacts" / "screenshots" / "step-1.png"
+    screenshot_path.parent.mkdir(parents=True)
+    screenshot_path.write_bytes(b"preview")
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Strict")
+    server.state.set_preview(
+        request_id,
+        {
+            "runId": "run-1",
+            "path": "artifacts/screenshots/step-1.png",
+            "timestamp": "2026-06-17T10:49:07+00:00",
+            "token": "run-1:step-1",
+        },
+    )
+
+    status, payload = server.handle_get(f"/preview/{request_id}", {})
+
+    assert status == 200
+    assert payload["token"] == "run-1:step-1"
+    assert base64.b64decode(payload["screenshot"]) == b"preview"
+
+
+def test_playground_server_resets_replay_dir_once_per_request(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    replay_dir = settings.output.runs_dir / "run-1" / "playground-replay"
+    replay_dir.mkdir(parents=True)
+    (replay_dir / "old-frame.png").write_bytes(b"old")
+    (replay_dir / "replay.webm").write_bytes(b"old-video")
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Replay me")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+
+    server._record_replay_frame(
+        request_id,
+        {"available": True, "screenshot": base64.b64encode(b"frame-1").decode("ascii"), "timestamp": 1000},
+    )
+    server._record_replay_frame(
+        request_id,
+        {"available": True, "screenshot": base64.b64encode(b"frame-2").decode("ascii"), "timestamp": 1800},
+    )
+
+    assert not (replay_dir / "old-frame.png").exists()
+    assert not (replay_dir / "replay.webm").exists()
+    assert sorted(path.name for path in replay_dir.glob("frame-*.png")) == [
+        "frame-0001-1000.png",
+        "frame-0002-1800.png",
+    ]
+
+
+def test_playground_server_stores_uploaded_replay_video(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Replay me")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+
+    status, payload = server.handle_post(
+        f"/replay-video/{request_id}",
+        {"mimeType": "video/webm", "videoBase64": base64.b64encode(b"webm").decode("ascii")},
+    )
+    video_status, video_bytes, content_type = server.handle_replay_video_file(f"/replay-video-file/{request_id}")
+
+    assert status == 200
+    assert payload["videoUrl"] == "/replay-video-file/run-1"
+    assert (settings.output.runs_dir / "run-1" / "playground-replay" / "replay.webm").read_bytes() == b"webm"
+    assert video_status == 200
+    assert video_bytes == b"webm"
+    assert content_type == "video/webm"
+
+
+def test_playground_server_accepts_webm_upload_with_codecs(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Replay me")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+
+    status, payload = server.handle_post(
+        f"/replay-video/{request_id}",
+        {"mimeType": "video/webm;codecs=vp8", "videoBase64": base64.b64encode(b"webm").decode("ascii")},
+    )
+
+    assert status == 200
+    assert payload["videoUrl"] == "/replay-video-file/run-1"
+
+
+def test_playground_execute_requires_session() -> None:
+    server = PlaygroundServer(Settings())
+
+    status, payload = server.handle_post("/execute", {"goal": "Do it"})
+
+    assert status == 409
+    assert "No active" in payload["error"]
+
+
+def test_playground_execute_requires_exactly_one_source() -> None:
+    server = PlaygroundServer(Settings())
+    server.state.create_session("device-1")
+
+    missing_status, missing_payload = server.handle_post("/execute", {})
+    both_status, both_payload = server.handle_post("/execute", {"goal": "Do it", "caseYamlPath": "case.codex.yaml"})
+    strict_both_status, strict_both_payload = server.handle_post("/execute", {"caseYamlPath": "case.codex.yaml", "strictCaseYamlPath": "case.codex.yaml"})
+
+    assert missing_status == 400
+    assert "Exactly one" in missing_payload["error"]
+    assert both_status == 400
+    assert "Exactly one" in both_payload["error"]
+    assert strict_both_status == 400
+    assert "Exactly one" in strict_both_payload["error"]
+
+
+def test_playground_execute_starts_strict_yaml(monkeypatch) -> None:
+    captured = {}
+
+    def fake_start_dynamic_goal_execution(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("fsq_agent.playground._server.start_dynamic_goal_execution", fake_start_dynamic_goal_execution)
+    server = PlaygroundServer(Settings())
+    server.state.create_session("device-1")
+
+    status, payload = server.handle_post("/execute", {"strictCaseYamlPath": "case.codex.yaml"})
+
+    assert status == 202
+    assert payload["requestId"]
+    assert captured["goal"] is None
+    assert captured["case_yaml_path"] is None
+    assert captured["strict_case_yaml_path"] == "case.codex.yaml"
+    assert captured["record"] is True
+    assert captured["record_on_failure"] is True
+
+
+def test_playground_execute_passes_recording_options(monkeypatch) -> None:
+    captured = {}
+
+    def fake_start_dynamic_goal_execution(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("fsq_agent.playground._server.start_dynamic_goal_execution", fake_start_dynamic_goal_execution)
+    server = PlaygroundServer(Settings(), PlaygroundServerOptions(record=False, record_on_failure=False))
+    server.state.create_session("device-1")
+
+    status, payload = server.handle_post("/execute", {"goal": "Do it"})
+
+    assert status == 202
+    assert payload["requestId"]
+    assert captured["record"] is False
+    assert captured["record_on_failure"] is False
+
+
+def test_playground_dynamic_goal_records_with_failure_drafts(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    state = PlaygroundState()
+    request_id = state.start_task("Do it")
+    captured = {}
+
+    class FakeAgent:
+        async def run(self, task, event_sink=None):
+            captured["task"] = task
+            return TaskResult(
+                task_id=task.id,
+                status="failed",
+                steps=[],
+                verification=VerificationResult(status="failed", summary="not done"),
+                report=ReportArtifact(run_id="run-1", path=tmp_path / "report.md"),
+            )
+
+    class FakeRecording:
+        def __init__(self, recording_path: Path) -> None:
+            self.recording_path = recording_path
+
+        def to_json(self):
+            return {"status": "skipped", "recording_path": str(self.recording_path), "draft": True}
+
+    def fake_record_dynamic_run_as_strict_case(**kwargs):
+        captured.update(kwargs)
+        return FakeRecording(kwargs["run_dir"] / "recording.json")
+
+    monkeypatch.setattr("fsq_agent.playground._execution.validate_runtime_settings", lambda _settings: None)
+    monkeypatch.setattr("fsq_agent.playground._execution.FsqAgent.from_settings", lambda _settings: FakeAgent())
+    monkeypatch.setattr("fsq_agent.playground._recording._record_dynamic_run_as_strict_case", fake_record_dynamic_run_as_strict_case)
+
+    _run_dynamic_task(
+        settings=settings,
+        state=state,
+        request_id=request_id,
+        goal="Do it",
+        case_yaml_path=None,
+        strict_case_yaml_path=None,
+        device_id=None,
+        record=True,
+        record_on_failure=True,
+    )
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert captured["task"].planning_reference_kind == "goal"
+    assert captured["allow_failure"] is True
+    assert progress["result"]["recording"]["status"] == "skipped"
+    assert progress["result"]["recording"]["draft"] is True
+
+
+def test_playground_execute_clears_strict_replay_dir_at_start(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings()
+    settings.cases.dir = tmp_path / "cases"
+    settings.output.runs_dir = tmp_path / "runs"
+    settings.cases.dir.mkdir()
+    case_path = settings.cases.dir / "strict_case.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Strict Case
+platform: android
+---
+- launchApp
+""",
+        encoding="utf-8",
+    )
+    replay_dir = settings.output.runs_dir / "strict_case" / "playground-replay"
+    replay_dir.mkdir(parents=True)
+    (replay_dir / "old-frame.png").write_bytes(b"old")
+    monkeypatch.setattr("fsq_agent.playground._server.start_dynamic_goal_execution", lambda **_kwargs: None)
+    server = PlaygroundServer(settings)
+    server.state.create_session("device-1")
+
+    status, _payload = server.handle_post("/execute", {"strictCaseYamlPath": "strict_case.codex.yaml"})
+
+    assert status == 202
+    assert not replay_dir.exists()
+
+
+def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "fsq_agent.playground._android.discover_adb_targets",
+        lambda: ([AndroidTarget(id="device-1", label="device-1", is_default=True)], None),
+    )
+    server = PlaygroundServer(Settings())
+
+    status, payload = server.handle_post("/session/auto", {})
+
+    assert status == 200
+    assert payload["session"]["deviceId"] == "device-1"
+    assert payload["autoCreate"]["reason"] == "single_device"
+
+
+def test_playground_auto_session_route_requires_manual_selection(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "fsq_agent.playground._android.discover_adb_targets",
+        lambda: (
+            [
+                AndroidTarget(id="device-1", label="device-1", is_default=True),
+                AndroidTarget(id="device-2", label="device-2"),
+            ],
+            None,
+        ),
+    )
+    server = PlaygroundServer(Settings())
+
+    status, payload = server.handle_post("/session/auto", {})
+
+    assert status == 409
+    assert payload["reason"] == "multiple_devices"
+    assert len(payload["targets"]) == 2
+
+
+def test_playground_server_serves_status_over_http(tmp_path: Path) -> None:
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("hello", encoding="utf-8")
+    server = PlaygroundServer(Settings(), PlaygroundServerOptions(port=0, static_path=static_dir, open_browser=False))
+    server.start()
+    try:
+        with urlopen(f"{server.url}/status", timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.stop()
+
+    assert payload["status"] == "ok"
+    assert payload["busy"] is False
+
+
+def test_playground_static_progress_is_first_section_and_numbered() -> None:
+    static_dir = Path(__file__).parents[1] / "fsq_agent" / "playground" / "static"
+    html = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "playground.js").read_text(encoding="utf-8")
+    styles = (static_dir / "playground.css").read_text(encoding="utf-8")
+    clear_page_body = script[script.index("function clearPage()"):script.index("async function refreshStatus()")]
+
+    assert html.index('class="section progress-section"') < html.index("<h2>Session</h2>")
+    assert "FSQ-Agent Playground" in html
+    assert "status-pill status-connecting" in html
+    assert "preview-tab" in html
+    assert "report-tab" in html
+    assert "report-content" in html
+    assert "preview-pane" in html
+    assert "replay-screenshots" not in html
+    assert 'id="replay-video" controls' in html
+    assert 'id="replay-video-play"' not in html
+    assert 'aria-label="Play replay video"' not in html
+    assert "Use Selected" not in html
+    assert "Disconnect" not in html
+    assert "createSession" not in script
+    assert "destroySession" not in script
+    assert '<button id="refresh" type="button">Clear</button>' in html
+    assert "progress-run-id" in html
+    assert "progressSequence" in script
+    assert "lastProgressSequence" in script
+    assert "after_sequence=${state.lastProgressSequence}" in script
+    assert "function updateLastProgressSequence" in script
+    assert "setServerStatus" in script
+    assert "status-pill status-${status}" in script
+    assert "progressDetailOpenState" in script
+    assert "screenshotTimer" not in script
+    assert "screenshotInFlight" not in script
+    assert "state.replayFrames" not in script
+    assert "state.replayTimer" not in script
+    assert "state.replayIndex" not in script
+    assert "replayRequestId" in script
+    assert "previewToken" in script
+    assert "pendingReplayVideoCleanup" in script
+    assert "replayVideoInFlight" in script
+    assert "replayDurationFixing" in script
+    assert "liveVideoRecorder" not in script
+    assert "liveVideoChunks" not in script
+    assert "function clearPage()" in script
+    assert "els.refresh.addEventListener('click', clearPage)" in script
+    assert "window.clearInterval(state.progressTimer)" in script
+    assert "stopLiveScreenshotPolling" not in script
+    assert "stopReplay" not in script
+    assert "clearRunId();" in clear_page_body
+    assert "els.progress.innerHTML = ''" in script
+    assert "els.reportContent.textContent = ''" in script
+    assert "clearPreview();" in clear_page_body
+    assert "clearPreview('Loading live preview...')" in script
+    assert "function clearPreview" in script
+    assert "els.screenshot.removeAttribute('src')" in script
+    assert "refreshStatus();" in clear_page_body
+    assert "els.sessionMessage.textContent = ''" not in clear_page_body
+    assert "els.deviceSelect.innerHTML = ''" not in clear_page_body
+    assert "captureProgressDetailState" in script
+    assert "data-detail-key" in script
+    assert "event.sequence" in script
+    assert "backendSequence" in script
+    assert "tool_arguments" in script
+    assert "tool_output_preview" in script
+    assert "event.payload" in script
+    assert "eventDetails" in script
+    assert 'name="run-mode"' in html
+    assert "strict-yaml" in html
+    assert "caseYaml" in script
+    assert "runYaml" in script
+    assert "runSelected" in script
+    assert "currentRunMode() === 'strict-yaml'" in script
+    assert "currentRunMode" in script
+    assert "updateRunMode" in script
+    assert "caseYamlPath" in script
+    assert "strictCaseYamlPath" in script
+    assert "loadReport" in script
+    assert "?format=markdown" in script
+    assert "renderMarkdown" in script
+    assert "escapeHtml" in script
+    assert "showRightTab" in script
+    assert "renderProgressText" in script
+    assert "toolName" in script
+    assert "progressRunId" in script
+    assert "function setRunId(runId)" in script
+    assert "function clearRunId()" in script
+    assert "setRunId(event.run_id || event.runId)" in script
+    assert "setRunId(progress.result.runId)" in script
+    assert "event.type === 'run_started'" in script
+    assert "Run ID: ${runId}" in script
+    assert "refreshPreviewFromReplay" in script
+    assert "refreshPreview" in script
+    assert "api(`/preview/${encodeURIComponent(requestId)}`)" in script
+    assert "startLiveScreenshotPolling" not in script
+    assert "refreshScreenshot({ preservePrevious: true })" not in script
+    assert "preloadImage" in script
+    assert "showReplayFrame" in script
+    assert "loadReplayFrames" in script
+    assert "loadReplayVideo" in script
+    assert "showReplayVideoPreview" in script
+    assert "async function showReplayVideoPreview(videoUrl)" in script
+    assert "await waitForReplayVideoReady()" in script
+    assert "function waitForReplayVideoReady()" in script
+    assert "els.replayVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA" in script
+    assert "function cancelPendingReplayVideoReadyWait()" in script
+    assert "startReplay" not in script
+    assert "replayVideoEnded" not in script
+    assert "replayVideoStarted" not in script
+    assert "replayVideoPaused" not in script
+    assert "normalizeReplayVideoDuration" in script
+    assert "generateReplayVideo" in script
+    assert "recordLiveReplayFrame" not in script
+    assert "finalizeLiveReplayVideo" not in script
+    assert "appendReplayVideoGeneratingProgress" in script
+    assert "Generating replay video..." in script
+    assert "Replay video saved" in script
+    assert "Replay video was not generated:" in script
+    assert "MediaRecorder produced an empty video" in script
+    assert "no replay frames found" in script
+    assert "discardLiveReplayVideo" not in script
+    assert "ensureReplayVideoGenerated" in script
+    assert "replayVideoMimeType" in script
+    assert "MediaRecorder.isTypeSupported" in script
+    assert "uploadReplayVideo" in script
+    assert "blobToBase64" in script
+    assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" in script
+    assert "els.replayVideo.currentTime = 1e101" in script
+    assert "await showReplayVideoPreview(replayVideo.videoUrl)" in script
+    assert "showRightTab('preview')" in script
+    assert "api(`/replay-video/${encodeURIComponent(requestId)}`)" in script
+    assert "method: 'POST'" in script
+    assert "recorder.start(1000)" in script
+    assert "replayVideo.videoUrl" in script
+    assert "replayFrameDelay" in script
+    assert "api(`/replay/${encodeURIComponent(requestId)}`)" in script
+    assert "next.timestamp - current.timestamp" in script
+    assert "window.setTimeout" in script
+    assert "window.clearTimeout" not in script
+    assert "No replay frames yet." not in script
+    assert "No replay run yet." not in script
+    assert "Unable to load replay" not in script
+    assert "eventStatus" in script
+    assert "statusFromValue" in script
+    assert "progress-status-${status}" in script
+    assert "/session/auto" in script
+    assert "ensureSession" in script
+    assert "padStart(3, '0')" in script
+    assert "progress-number" in styles
+    assert "#replay-video" in styles
+    assert "status-pill" in styles
+    assert "status-ready" in styles
+    assert "status-running" in styles
+    assert "status-error" in styles
+    assert "progress-run-id" in styles
+    assert "flex: 0 0 auto" in styles
+    assert "progress-title" in styles
+    assert "progress-message" in styles
+    assert "progress-tool" in styles
+    assert "progress-detail" in styles
+    assert "progress-status-dot" in styles
+    assert "progress-status-success" in styles
+    assert ".replay-video-play" not in styles
+    assert ".replay-video-progress" not in styles
+    assert "progress-status-failed" in styles
+    assert "screenshot-refresh" not in styles
+    assert "#22c55e" in styles
+    assert "#ef4444" in styles
+    assert "grid-template-rows: auto minmax(0, 1fr) auto auto" in styles
+    assert "grid-template-rows: auto minmax(420px, 62vh) auto auto" in styles
+    assert "run-mode-row" in styles
+    assert "report-pane" in styles
+    assert "report-content" in styles
+    assert "tab-button.active" in styles
+    assert "[hidden]" in styles
