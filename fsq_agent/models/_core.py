@@ -59,7 +59,7 @@ class RetryPolicy(BaseModel):
 class EvidencePolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    capture_before: bool = True
+    capture_before: bool = False
     capture_after: bool = True
     capture_on_failure: bool = True
     artifact_kinds: list[EvidenceArtifactKind] = Field(default_factory=list)
@@ -132,6 +132,7 @@ class HarnessFunctionSchema(BaseModel):
     platform: HarnessPlatform
     driver_method: str
     fsq_action_name: str | None = None
+    capture_evidence: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

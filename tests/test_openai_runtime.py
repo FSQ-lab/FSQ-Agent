@@ -13,7 +13,6 @@ from fsq_agent.agent._verification_task import VerificationEvidenceBuilder
 from fsq_agent.config import Settings
 from fsq_agent.models import (
     AgentFinalOutput,
-    EvidencePolicy,
     HarnessActionResult,
     HarnessArtifactRef,
     HarnessContext,
@@ -22,7 +21,10 @@ from fsq_agent.models import (
     LocalToolOutputSettings,
     OpenAIAgentsSettings,
     OutputSettings,
+    RunnerStepResult,
     RuntimeSecretSettings,
+    StepPhase,
+    StepPhaseReport,
     StepResult,
     Task,
 )
@@ -43,46 +45,100 @@ class _FakeFunctionTool:
 
 
 class _FakeHarness:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        tool_name: str = "tap_on",
+        driver_method: str = "tap_on",
+        fsq_action_name: str = "tapOn",
+        capture_evidence: bool = True,
+    ) -> None:
+        self.tool_name = tool_name
+        self.driver_method = driver_method
+        self.fsq_action_name = fsq_action_name
+        self.capture_evidence = capture_evidence
         self.steps: list[Any] = []
-        self.captures: list[dict[str, Any]] = []
+        self.calls: list[str] = []
 
     def action_space(self) -> list[HarnessFunctionSchema]:
         return [
             HarnessFunctionSchema(
-                name="tap_on",
-                description="Tap an Android UI target.",
+                name=self.tool_name,
+                description=f"Run {self.fsq_action_name}.",
                 params_json_schema={"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]},
                 platform="android",
-                driver_method="tap_on",
-                fsq_action_name="tapOn",
+                driver_method=self.driver_method,
+                fsq_action_name=self.fsq_action_name,
+                capture_evidence=self.capture_evidence,
             )
         ]
 
     def get_context(self) -> HarnessContext:
+        self.calls.append("get_context")
         return HarnessContext(platform="android", session_id="session-1")
 
+    def before_action(self, step: Any, context: HarnessContext) -> None:
+        self.calls.append(f"before:{step.action_name}:{context.session_id}")
+
     def invoke_action(self, step: Any, context: HarnessContext) -> HarnessActionResult:
+        self.calls.append(f"invoke:{step.action_name}:{context.session_id}")
         self.steps.append(step)
         return HarnessActionResult(
             status="passed",
             action_name=step.action_name,
             output={"context_session_id": context.session_id, "params": step.params},
+            metadata={"harness": "fake"},
         )
 
-    def capture_artifact(self, **kwargs: Any) -> HarnessArtifactRef:
-        self.captures.append(kwargs)
+    def after_action(
+        self,
+        step: Any,
+        context: HarnessContext,
+        action_result: HarnessActionResult | None,
+    ) -> None:
+        status = action_result.status if action_result else "none"
+        self.calls.append(f"after:{step.action_name}:{status}")
+
+    def capture_artifact(
+        self,
+        kind: str,
+        reason: str,
+        context: HarnessContext,
+        step_id: str,
+        phase: StepPhase,
+    ) -> HarnessArtifactRef:
+        self.calls.append(f"capture:{kind}:{reason}:{step_id}:{phase}:{context.session_id}")
         return HarnessArtifactRef(
-            artifact_id=f"{kwargs['step_id']}-{kwargs['phase']}-{kwargs['reason']}",
-            kind=kwargs["kind"],
-            path=Path("artifacts/screenshots") / f"{kwargs['step_id']}-{kwargs['phase']}-{kwargs['reason']}.png",
-            mime_type="image/png",
+            artifact_id=f"{step_id}-{phase}-{reason}-{kind}",
+            kind=kind,
+            path=Path(f"artifacts/{kind}/{step_id}-{phase}-{reason}.{kind}"),
         )
+
+    def classify_error(self, _error: BaseException, _phase: StepPhase, _step: Any) -> str:
+        return "unknown"
 
 
 class _FailingHarness(_FakeHarness):
     def action_space(self) -> list[HarnessFunctionSchema]:
         raise RuntimeError("Harness action-space failed")
+
+
+class _FailingCaptureHarness(_FakeHarness):
+    def capture_artifact(
+        self,
+        kind: str,
+        reason: str,
+        context: HarnessContext,
+        step_id: str,
+        phase: StepPhase,
+    ) -> HarnessArtifactRef:
+        self.calls.append(f"capture:{kind}:{reason}:{step_id}:{phase}:{context.session_id}")
+        raise RuntimeError("capture failed")
+
+
+class _DirectInvokeForbiddenHarness(_FakeHarness):
+    def invoke_action(self, step: Any, context: HarnessContext) -> HarnessActionResult:
+        raise AssertionError("adapter must not directly invoke the harness")
 
 
 def _fake_harness_factory(_run_id: str) -> _FakeHarness:
@@ -429,9 +485,57 @@ def test_prompt_renderer_injects_model_into_configured_jinja_templates(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_harness_tool_adapter_invokes_harness_action() -> None:
+async def test_harness_tool_adapter_delegates_to_step_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fsq_agent.agent._harness_tools as harness_tools_module
+
+    runner_calls: list[tuple[Any, str, Any]] = []
+
+    class _FakeStepRunner:
+        def __init__(self, harness: Any) -> None:
+            self.harness = harness
+
+        def run_step(self, run_id: str, step: Any) -> RunnerStepResult:
+            runner_calls.append((self.harness, run_id, step))
+            return RunnerStepResult(
+                step_id=step.step_id,
+                status="passed",
+                duration_ms=7,
+                phase_reports=[
+                    StepPhaseReport(
+                        step_id=step.step_id,
+                        phase="invoke",
+                        status="passed",
+                        metadata={
+                            "harness_output": {"params": step.params},
+                            "harness_metadata": {"runner": "fake"},
+                        },
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(harness_tools_module, "StepRunner", _FakeStepRunner)
+    harness = _DirectInvokeForbiddenHarness()
+    adapter = HarnessToolAdapter(harness, run_id="run-1")
+
+    tools = adapter.build_tools(_FakeFunctionTool)
+    output = await tools[0].on_invoke_tool(None, json.dumps({"target": "Downloads"}))
+
+    payload = json.loads(output)
+    assert payload["status"] == "passed"
+    assert payload["duration_ms"] == 7
+    assert payload["runner_step_id"] == "agent-tap_on-1"
+    assert payload["runner_result"]["status"] == "passed"
+    assert payload["result"]["output"] == {"params": {"target": "Downloads"}}
+    assert runner_calls[0][0] is harness
+    assert runner_calls[0][1] == "run-1"
+    assert runner_calls[0][2].action_name == "tapOn"
+    assert harness.steps == []
+
+
+@pytest.mark.asyncio
+async def test_harness_tool_adapter_applies_evidence_policy_to_mutating_action() -> None:
     harness = _FakeHarness()
-    adapter = HarnessToolAdapter(harness)
+    adapter = HarnessToolAdapter(harness, run_id="run-1")
 
     tools = adapter.build_tools(_FakeFunctionTool)
     output = await tools[0].on_invoke_tool(None, json.dumps({"target": "Downloads"}))
@@ -443,23 +547,81 @@ async def test_harness_tool_adapter_invokes_harness_action() -> None:
     assert payload["driver_method"] == "tap_on"
     assert payload["fsq_action_name"] == "tapOn"
     assert payload["result"]["output"]["params"] == {"target": "Downloads"}
+    assert [ref["kind"] for ref in payload["artifact_refs"]] == ["screenshot", "ui_tree", "screenshot", "ui_tree"]
+    assert payload["result"]["artifact_refs"] == payload["artifact_refs"]
+    assert payload["runner_result"]["phase_reports"][0]["phase"] == "prepare"
+    assert payload["runner_result"]["phase_reports"][2]["phase"] == "finalize"
     assert harness.steps[0].action_name == "tapOn"
     assert harness.steps[0].kind == "action"
+    assert harness.steps[0].evidence_policy.capture_before is True
+    assert harness.steps[0].evidence_policy.capture_after is True
+    assert harness.steps[0].evidence_policy.capture_on_failure is True
+    assert harness.steps[0].evidence_policy.artifact_kinds == ["screenshot", "ui_tree"]
+    assert [call for call in harness.calls if call.startswith("capture:")] == [
+        "capture:screenshot:before-action:agent-tap_on-1:prepare:session-1",
+        "capture:ui_tree:before-action:agent-tap_on-1:prepare:session-1",
+        "capture:screenshot:after-action:agent-tap_on-1:finalize:session-1",
+        "capture:ui_tree:after-action:agent-tap_on-1:finalize:session-1",
+    ]
 
-def test_harness_tool_adapter_captures_configured_evidence() -> None:
-    harness = _FakeHarness()
-    adapter = HarnessToolAdapter(
-        harness,
-        default_evidence_policy=EvidencePolicy(capture_before=True, capture_after=True, artifact_kinds=["screenshot"]),
+
+@pytest.mark.asyncio
+async def test_harness_tool_adapter_keeps_default_evidence_policy_for_assertion_actions() -> None:
+    harness = _FakeHarness(
+        tool_name="assert_visible",
+        driver_method="assert_visible",
+        fsq_action_name="assertVisible",
+        capture_evidence=False,
     )
-    tool = adapter.build_tools(_FakeFunctionTool)[0]
+    adapter = HarnessToolAdapter(harness, run_id="run-1")
 
-    output = asyncio.run(tool.on_invoke_tool(None, json.dumps({"target": "Downloads"})))
+    tools = adapter.build_tools(_FakeFunctionTool)
+    output = await tools[0].on_invoke_tool(None, json.dumps({"target": "Downloads"}))
+
     payload = json.loads(output)
+    assert payload["status"] == "passed"
+    assert payload["artifact_refs"] == []
+    assert payload["result"]["artifact_refs"] == []
+    assert harness.steps[0].action_name == "assertVisible"
+    assert harness.steps[0].kind == "assertion"
+    assert harness.steps[0].evidence_policy.capture_before is False
+    assert harness.steps[0].evidence_policy.artifact_kinds == []
+    assert not any(call.startswith("capture:") for call in harness.calls)
 
-    assert [capture["reason"] for capture in harness.captures] == ["before-action", "after-action"]
-    assert payload["evidence_artifact_refs"][0]["path"].startswith("artifacts/screenshots/")
-    assert [ref["kind"] for ref in payload["result"]["artifact_refs"]] == ["screenshot", "screenshot"]
+
+@pytest.mark.asyncio
+async def test_harness_tool_adapter_uses_schema_evidence_flag_not_action_name() -> None:
+    harness = _FakeHarness(capture_evidence=False)
+    adapter = HarnessToolAdapter(harness, run_id="run-1")
+
+    tools = adapter.build_tools(_FakeFunctionTool)
+    output = await tools[0].on_invoke_tool(None, json.dumps({"target": "Downloads"}))
+
+    payload = json.loads(output)
+    assert payload["status"] == "passed"
+    assert payload["fsq_action_name"] == "tapOn"
+    assert payload["artifact_refs"] == []
+    assert harness.steps[0].action_name == "tapOn"
+    assert harness.steps[0].evidence_policy.capture_before is False
+    assert harness.steps[0].evidence_policy.artifact_kinds == []
+    assert not any(call.startswith("capture:") for call in harness.calls)
+
+
+@pytest.mark.asyncio
+async def test_harness_tool_adapter_surfaces_artifact_capture_failure() -> None:
+    harness = _FailingCaptureHarness()
+    adapter = HarnessToolAdapter(harness, run_id="run-1")
+
+    tools = adapter.build_tools(_FakeFunctionTool)
+    output = await tools[0].on_invoke_tool(None, json.dumps({"target": "Downloads"}))
+
+    payload = json.loads(output)
+    assert payload["status"] == "failed"
+    assert payload["failure_category"] == "artifact_error"
+    assert payload["result"]["failure_category"] == "artifact_error"
+    assert payload["runner_result"]["status"] == "failed"
+    assert payload["runner_result"]["failure_category"] == "artifact_error"
+    assert "capture failed" in payload["error_message"]
 
 
 def test_runtime_tool_origin_recognizes_harness_tools() -> None:
@@ -470,6 +632,29 @@ def test_runtime_tool_origin_recognizes_harness_tools() -> None:
     assert runtime._tool_origin("read_file") == "common"
     assert runtime._tool_origin("read_knowledge_index") == "runtime"
     assert runtime._tool_origin("unexpected_tool") == "unknown"
+
+
+def test_runtime_tool_output_payload_preserves_runner_evidence_fields() -> None:
+    runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory())
+    output = json.dumps(
+        {
+            "tool_name": "tap_on",
+            "tool_origin": "harness",
+            "status": "passed",
+            "runner_step_id": "agent-tap_on-1",
+            "runner_result": {"step_id": "agent-tap_on-1", "status": "passed"},
+            "artifact_refs": [{"kind": "screenshot", "path": "artifacts/screenshots/before.png"}],
+            "result": {
+                "artifact_refs": [{"kind": "ui_tree", "path": "artifacts/ui-trees/after.json"}],
+            },
+        }
+    )
+
+    payload = runtime._tool_output_payload(output)
+
+    assert payload["runner_step_id"] == "agent-tap_on-1"
+    assert payload["runner_result"] == {"step_id": "agent-tap_on-1", "status": "passed"}
+    assert payload["artifact_refs"] == [{"kind": "screenshot", "path": "artifacts/screenshots/before.png"}]
 
 
 def test_verification_evidence_builder_uses_text_only_after_runner_visual_assertion(tmp_path: Path) -> None:
@@ -540,7 +725,7 @@ def test_verification_evidence_builder_does_not_attach_images_from_paths(tmp_pat
     assert "visual_artifacts" not in model_input
 
 
-def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
+def test_runtime_builds_run_config_with_tool_output_trimmer(monkeypatch: pytest.MonkeyPatch) -> None:
     class _RunConfig:
         def __init__(self, **kwargs: Any) -> None:
             self.kwargs = kwargs
@@ -549,12 +734,14 @@ def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
         def __init__(self, **kwargs: Any) -> None:
             self.kwargs = kwargs
 
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
 
     run_config = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider")
 
     assert run_config.kwargs["model_provider"] == "provider"
+    assert run_config.kwargs["tracing_disabled"] is True
     input_filter = run_config.kwargs["call_model_input_filter"]
     assert input_filter.recent_tool_outputs == 3
     assert input_filter.sdk_filter.kwargs == {
@@ -563,6 +750,42 @@ def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
         "preview_chars": 1000,
         "trimmable_tools": None,
     }
+
+
+def test_runtime_builds_run_config_enables_sdk_tracing_with_openai_export_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RunConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _ToolOutputTrimmer:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+    monkeypatch.setenv("OPENAI_API_KEY", "trace-key")
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
+
+    run_config = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider")
+
+    assert run_config.kwargs["tracing_disabled"] is False
+
+
+def test_runtime_builds_run_config_respects_explicit_tracing_disable(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RunConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _ToolOutputTrimmer:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+    monkeypatch.setenv("OPENAI_API_KEY", "trace-key")
+    settings = Settings(openai_agents=OpenAIAgentsSettings(tracing_enabled=False))
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
+
+    run_config = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider")
+
+    assert run_config.kwargs["tracing_disabled"] is True
 
 
 def test_provider_session_builds_azure_openai_agents_provider(monkeypatch: pytest.MonkeyPatch) -> None:

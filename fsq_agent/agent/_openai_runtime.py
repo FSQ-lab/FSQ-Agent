@@ -196,7 +196,7 @@ class OpenAIAgentsRuntime:
                     payload={"platform": self.settings.harness.platform},
                 ),
             )
-            set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+            set_tracing_disabled(self._sdk_tracing_disabled())
             await self._emit(
                 event_sink,
                 RunEvent(
@@ -255,11 +255,7 @@ class OpenAIAgentsRuntime:
                         message="Building CommonTool and platform harness tools for the SDK agent.",
                     ),
                 )
-                harness_adapter = HarnessToolAdapter(
-                    harness,
-                    reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES},
-                    default_evidence_policy=self.settings.harness.evidence_policy(),
-                )
+                harness_adapter = HarnessToolAdapter(harness, run_id=run_id, reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES})
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name
                 common_tools = self.tool_factory.build_tools(FunctionTool, run_id=run_id, task_id=task.id, event_sink=event_sink)
@@ -479,7 +475,7 @@ class OpenAIAgentsRuntime:
                 message="Generating key actions from the planning reference and page knowledge.",
             ),
         )
-        set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+        set_tracing_disabled(self._sdk_tracing_disabled())
         provider_session = build_model_provider_session(self.settings)
         provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
         try:
@@ -631,7 +627,7 @@ class OpenAIAgentsRuntime:
             events_path,
         )
         evidence_input = self._replace_secret_values(evidence_input, self._runtime_secret_values())
-        set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+        set_tracing_disabled(self._sdk_tracing_disabled())
         provider_session = build_model_provider_session(self.settings)
         provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
         try:
@@ -689,6 +685,12 @@ class OpenAIAgentsRuntime:
         if inspect.isawaitable(result):
             await result
 
+    def _sdk_tracing_disabled(self) -> bool:
+        if not self.settings.openai_agents.tracing_enabled:
+            return True
+        export_api_key = os.getenv("OPENAI_API_KEY")
+        return not bool(export_api_key and export_api_key.strip())
+
     def _build_run_config(self, run_config_cls: Any, tool_output_trimmer_cls: Any, provider: Any, run_id: str = "") -> Any:
         trimming = self.settings.openai_agents.context_trimming
         local_output = self.settings.openai_agents.local_tool_output
@@ -714,7 +716,11 @@ class OpenAIAgentsRuntime:
                 trimmable_tools,
                 artifact_store,
             )
-        return run_config_cls(model_provider=provider, call_model_input_filter=input_filter)
+        return run_config_cls(
+            model_provider=provider,
+            call_model_input_filter=input_filter,
+            tracing_disabled=self._sdk_tracing_disabled(),
+        )
 
     def _build_harness(self, run_id: str) -> HarnessInterface:
         if self.harness_factory is not None:
@@ -1023,10 +1029,17 @@ class OpenAIAgentsRuntime:
             "failure_category",
             "error_message",
             "duration_ms",
+            "runner_step_id",
         }
         for key in safe_keys:
             if key in parsed:
                 payload[key] = parsed[key]
+        runner_result = parsed.get("runner_result")
+        if isinstance(runner_result, dict):
+            payload["runner_result"] = runner_result
+        artifact_refs = parsed.get("artifact_refs")
+        if isinstance(artifact_refs, list):
+            payload["artifact_refs"] = artifact_refs
         metadata = parsed.get("metadata")
         if isinstance(metadata, dict):
             payload["metadata"] = metadata
@@ -1038,9 +1051,9 @@ class OpenAIAgentsRuntime:
                 payload["failure_category"] = result.get("failure_category")
             if "error_message" not in payload and result.get("error_message") is not None:
                 payload["error_message"] = result.get("error_message")
-            artifact_refs = result.get("artifact_refs")
-            if isinstance(artifact_refs, list) and artifact_refs:
-                payload["artifact_refs"] = artifact_refs
+            result_artifact_refs = result.get("artifact_refs")
+            if "artifact_refs" not in payload and isinstance(result_artifact_refs, list) and result_artifact_refs:
+                payload["artifact_refs"] = result_artifact_refs
         return payload
 
     def _json_payload(self, output: Any) -> Any:

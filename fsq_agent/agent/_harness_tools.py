@@ -3,18 +3,8 @@ import json
 import time
 from typing import Any
 
-from fsq_agent.core import HarnessInterface
-from fsq_agent.models import (
-    ANDROID_ACTION_DEFINITIONS_BY_NAME,
-    ConfigurationError,
-    EvidencePolicy,
-    ExecutableStep,
-    HarnessActionResult,
-    HarnessArtifactRef,
-    HarnessContext,
-    HarnessFunctionSchema,
-    StepPhase,
-)
+from fsq_agent.core import HarnessInterface, StepRunner
+from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ConfigurationError, EvidencePolicy, ExecutableStep, HarnessFunctionSchema, RunnerStepResult
 
 
 class HarnessToolAdapter:
@@ -22,12 +12,13 @@ class HarnessToolAdapter:
         self,
         harness: HarnessInterface,
         *,
+        run_id: str,
         reserved_tool_names: set[str] | None = None,
-        default_evidence_policy: EvidencePolicy | None = None,
     ) -> None:
         self.harness = harness
+        self.run_id = run_id
+        self.runner = StepRunner(harness=harness)
         self.reserved_tool_names = reserved_tool_names or set()
-        self.default_evidence_policy = default_evidence_policy or EvidencePolicy()
         self._counter = itertools.count(1)
         self.schemas = self._discover_schemas()
         self.schemas_by_name = {schema.name: schema for schema in self.schemas}
@@ -72,8 +63,9 @@ class HarnessToolAdapter:
                     kind=self._step_kind(action_name),
                     action_name=action_name,
                     params=params,
-                    evidence_policy=self.default_evidence_policy.model_copy(deep=True),
+                    evidence_policy=self._evidence_policy(schema),
                     metadata={
+                        "run_id": self.run_id,
                         "tool_origin": "harness",
                         "tool_name": schema.name,
                         "platform": schema.platform,
@@ -82,51 +74,8 @@ class HarnessToolAdapter:
                         "schema_metadata": schema.metadata,
                     },
                 )
-                context = self.harness.get_context()
-                artifact_refs: list[HarnessArtifactRef] = []
-                artifact_errors: list[str] = []
-                before_refs, before_errors = self._capture_artifacts(
-                    step=step,
-                    context=context,
-                    phase="prepare",
-                    reason="before-action",
-                    enabled=step.evidence_policy.capture_before,
-                )
-                artifact_refs.extend(before_refs)
-                artifact_errors.extend(before_errors)
-                try:
-                    result = self.harness.invoke_action(step, context)
-                except Exception as exc:
-                    failure_refs, failure_errors = self._capture_artifacts(
-                        step=step,
-                        context=context,
-                        phase="finalize",
-                        reason="failure",
-                        enabled=step.evidence_policy.capture_on_failure,
-                    )
-                    artifact_refs.extend(failure_refs)
-                    artifact_errors.extend(failure_errors)
-                    return self._format_failure(schema, exc, int((time.perf_counter() - started) * 1000), artifact_refs, artifact_errors)
-                after_refs, after_errors = self._capture_artifacts(
-                    step=step,
-                    context=context,
-                    phase="finalize",
-                    reason="after-action",
-                    enabled=step.evidence_policy.capture_after,
-                )
-                artifact_refs.extend(after_refs)
-                artifact_errors.extend(after_errors)
-                if result.status in {"failed", "cancelled", "skipped"}:
-                    failure_refs, failure_errors = self._capture_artifacts(
-                        step=step,
-                        context=context,
-                        phase="finalize",
-                        reason="failure",
-                        enabled=step.evidence_policy.capture_on_failure,
-                    )
-                    artifact_refs.extend(failure_refs)
-                    artifact_errors.extend(failure_errors)
-                return self._format_success(schema, result, int((time.perf_counter() - started) * 1000), artifact_refs, artifact_errors)
+                result = self.runner.run_step(run_id=self.run_id, step=step)
+                return self._format_runner_result(schema, step, result, int((time.perf_counter() - started) * 1000))
             except Exception as exc:
                 return self._format_failure(schema, exc, int((time.perf_counter() - started) * 1000))
 
@@ -146,68 +95,88 @@ class HarnessToolAdapter:
             return action_definition.step_kind
         return "action"
 
-    def _capture_artifacts(
-        self,
-        *,
-        step: ExecutableStep,
-        context: HarnessContext,
-        phase: StepPhase,
-        reason: str,
-        enabled: bool,
-    ) -> tuple[list[HarnessArtifactRef], list[str]]:
-        if not enabled or not step.evidence_policy.artifact_kinds:
-            return [], []
-        refs: list[HarnessArtifactRef] = []
-        errors: list[str] = []
-        for kind in step.evidence_policy.artifact_kinds:
-            try:
-                refs.append(
-                    self.harness.capture_artifact(
-                        kind=kind,
-                        reason=reason,
-                        context=context,
-                        step_id=step.step_id,
-                        phase=phase,
-                    )
-                )
-            except Exception as exc:
-                errors.append(str(exc) or exc.__class__.__name__)
-        return refs, errors
+    def _evidence_policy(self, schema: HarnessFunctionSchema) -> EvidencePolicy:
+        if schema.capture_evidence:
+            return EvidencePolicy(
+                capture_before=True,
+                capture_after=True,
+                capture_on_failure=True,
+                artifact_kinds=["screenshot", "ui_tree"],
+            )
+        return EvidencePolicy()
 
-    def _format_success(
+    def _format_runner_result(
         self,
         schema: HarnessFunctionSchema,
-        result: HarnessActionResult,
+        step: ExecutableStep,
+        runner_result: RunnerStepResult,
         duration_ms: int,
-        artifact_refs: list[HarnessArtifactRef] | None = None,
-        artifact_errors: list[str] | None = None,
     ) -> str:
-        merged_result = result.model_copy(update={"artifact_refs": [*result.artifact_refs, *(artifact_refs or [])]})
+        artifact_refs = self._artifact_refs(runner_result)
+        result_summary = self._result_summary(schema, step, runner_result, artifact_refs)
         payload = {
             "tool_name": schema.name,
             "tool_origin": "harness",
             "platform": schema.platform,
             "driver_method": schema.driver_method,
             "fsq_action_name": schema.fsq_action_name,
-            "status": result.status,
-            "failure_category": result.failure_category,
-            "error_message": result.error_message,
-            "duration_ms": result.duration_ms or duration_ms,
-            "result": merged_result.model_dump(mode="json"),
-            "evidence_artifact_refs": [ref.model_dump(mode="json") for ref in artifact_refs or []],
-            "evidence_artifact_errors": artifact_errors or [],
+            "status": runner_result.status,
+            "failure_category": runner_result.failure_category,
+            "error_message": runner_result.error_message,
+            "duration_ms": runner_result.duration_ms or duration_ms,
+            "result": result_summary,
             "metadata": schema.metadata,
+            "runner_step_id": runner_result.step_id,
+            "runner_result": runner_result.model_dump(mode="json"),
+            "artifact_refs": artifact_refs,
         }
         return json.dumps(payload, ensure_ascii=False, default=str)
 
-    def _format_failure(
+    def _result_summary(
         self,
         schema: HarnessFunctionSchema,
-        error: Exception,
-        duration_ms: int,
-        artifact_refs: list[HarnessArtifactRef] | None = None,
-        artifact_errors: list[str] | None = None,
-    ) -> str:
+        step: ExecutableStep,
+        runner_result: RunnerStepResult,
+        artifact_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        invoke_metadata = self._invoke_metadata(runner_result)
+        metadata: dict[str, Any] = {
+            "tool_origin": "harness",
+            "tool_name": schema.name,
+            "platform": schema.platform,
+            "driver_method": schema.driver_method,
+            "fsq_action_name": schema.fsq_action_name,
+            "schema_metadata": schema.metadata,
+        }
+        harness_metadata = invoke_metadata.get("harness_metadata")
+        if isinstance(harness_metadata, dict):
+            metadata["harness_metadata"] = harness_metadata
+        return {
+            "status": runner_result.status,
+            "action_name": step.action_name,
+            "duration_ms": runner_result.duration_ms,
+            "output": invoke_metadata.get("harness_output"),
+            "artifact_refs": artifact_refs,
+            "error_message": runner_result.error_message,
+            "failure_category": runner_result.failure_category,
+            "metadata": metadata,
+        }
+
+    def _invoke_metadata(self, runner_result: RunnerStepResult) -> dict[str, Any]:
+        for phase_report in runner_result.phase_reports:
+            if phase_report.phase == "invoke":
+                return dict(phase_report.metadata)
+        return {}
+
+    def _artifact_refs(self, runner_result: RunnerStepResult) -> list[dict[str, Any]]:
+        refs: list[dict[str, Any]] = []
+        for phase_report in runner_result.phase_reports:
+            refs.extend(ref.model_dump(mode="json") for ref in phase_report.artifact_refs)
+        return refs
+
+    def _format_failure(self, schema: HarnessFunctionSchema, error: Exception, duration_ms: int) -> str:
+        error_message = str(error) or error.__class__.__name__
+        action_name = schema.fsq_action_name or schema.driver_method
         return json.dumps(
             {
                 "tool_name": schema.name,
@@ -217,18 +186,25 @@ class HarnessToolAdapter:
                 "fsq_action_name": schema.fsq_action_name,
                 "status": "failed",
                 "failure_category": "harness_error",
-                "error_message": str(error) or error.__class__.__name__,
+                "error_message": error_message,
                 "duration_ms": duration_ms,
                 "result": {
                     "status": "failed",
-                    "action_name": schema.fsq_action_name or schema.driver_method,
-                    "artifact_refs": [ref.model_dump(mode="json") for ref in artifact_refs or []],
-                    "error_message": str(error) or error.__class__.__name__,
+                    "action_name": action_name,
+                    "artifact_refs": [],
+                    "error_message": error_message,
                     "failure_category": "harness_error",
+                    "metadata": {
+                        "tool_origin": "harness",
+                        "tool_name": schema.name,
+                        "platform": schema.platform,
+                        "driver_method": schema.driver_method,
+                        "fsq_action_name": schema.fsq_action_name,
+                        "schema_metadata": schema.metadata,
+                    },
                 },
-                "evidence_artifact_refs": [ref.model_dump(mode="json") for ref in artifact_refs or []],
-                "evidence_artifact_errors": artifact_errors or [],
                 "metadata": schema.metadata,
+                "artifact_refs": [],
             },
             ensure_ascii=False,
             default=str,

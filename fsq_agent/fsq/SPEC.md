@@ -21,7 +21,7 @@ Current `__init__.py` exports via `__all__`:
 The first deterministic step adapter exposes a narrow API:
 
 ```python
-adapter = FsqExecutableStepAdapter(default_evidence_policy=evidence_policy)
+adapter = FsqExecutableStepAdapter()
 steps = adapter.to_executable_steps(case)
 ```
 
@@ -67,7 +67,7 @@ Each generated step should include:
 - `source_ref`: `source_type="fsq"`, `source_id` set to the case path string, `step_index` set to the zero-based command index, and metadata containing the case name and platform.
 - `metadata`: the original command payload and selected case metadata useful for evidence and debugging.
 - `timeout_ms`: copied from command object `timeout` when present and valid.
-- `evidence_policy`: defaults to the shared model policy unless the caller provides `default_evidence_policy` to `FsqExecutableStepAdapter`. Entry-layer strict FSQ execution passes the configured `harness.strict_core.evidence` policy so platform-backed FSQ commands can request screenshots or other artifacts from configuration. Generated pure wait commands (`waitMs`) keep the default shared model policy without configured artifact kinds because core-owned waits must not call platform harness artifact capture. Rich authored per-step FSQ evidence controls are a later batch.
+- `evidence_policy`: default shared model policy for now. Rich FSQ evidence controls are a later batch.
 
 Malformed command entries that cannot be reduced to one FSQ action must raise `ConfigurationError` with the case path and command index. Known Android command payloads that fail shared parameter model validation, including legacy scalar shorthand such as `pressKey: Enter` or `performActions: [...]`, must also raise `ConfigurationError` before execution starts, with enough context to identify the case path, command index, action name, and validation problem. A generated `inputText.text.runtimeSecret` ref is valid only as a pre-resolution replay value; other redaction markers or unresolved secret-like objects are invalid. Optional commands are still converted into executable steps; optional/non-blocking execution semantics belong to the core runner or a later policy layer, not this adapter.
 

@@ -3,7 +3,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
-from fsq_agent.models._core import EvidenceArtifactKind, EvidencePolicy
 from fsq_agent.models._skills import SkillConfig
 
 
@@ -108,35 +107,10 @@ class AndroidHarnessSettings(BaseModel):
         self._serial = value
 
 
-class HarnessEvidenceSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    capture_before: bool = True
-    capture_after: bool = True
-    capture_on_failure: bool = True
-    artifact_kinds: list[EvidenceArtifactKind] = Field(default_factory=list)
-
-    def to_evidence_policy(self) -> EvidencePolicy:
-        return EvidencePolicy(
-            capture_before=self.capture_before,
-            capture_after=self.capture_after,
-            capture_on_failure=self.capture_on_failure,
-            artifact_kinds=list(self.artifact_kinds),
-        )
-
-
-class StrictCoreEvidenceSettings(HarnessEvidenceSettings):
-    artifact_kinds: list[EvidenceArtifactKind] = Field(default_factory=lambda: ["screenshot"])
-
-
 class StrictCoreHarnessSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     step_interval_seconds: float = Field(default=1.0, ge=0)
-    evidence: StrictCoreEvidenceSettings = Field(default_factory=StrictCoreEvidenceSettings)
-
-    def evidence_policy(self) -> EvidencePolicy:
-        return self.evidence.to_evidence_policy()
 
 
 class HarnessSettings(BaseModel):
@@ -144,11 +118,7 @@ class HarnessSettings(BaseModel):
 
     platform: Literal["android"] = "android"
     android: AndroidHarnessSettings = Field(default_factory=AndroidHarnessSettings)
-    evidence: HarnessEvidenceSettings = Field(default_factory=HarnessEvidenceSettings)
     strict_core: StrictCoreHarnessSettings = Field(default_factory=StrictCoreHarnessSettings)
-
-    def evidence_policy(self) -> EvidencePolicy:
-        return self.evidence.to_evidence_policy()
 
 
 class OpenAIAgentPromptConfig(BaseModel):

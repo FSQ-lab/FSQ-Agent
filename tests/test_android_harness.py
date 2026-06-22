@@ -168,6 +168,7 @@ def test_android_harness_action_space_returns_decorated_driver_method_schemas() 
     assert schemas["tap_on"].fsq_action_name == "tapOn"
     assert schemas["tap_on"].platform == "android"
     assert schemas["tap_on"].strict is True
+    assert schemas["tap_on"].capture_evidence is True
     assert schemas["tap_on"].metadata == {
         "driver_class": "UiAutomator2AndroidDriver",
         "backend": "uiautomator2",
@@ -175,7 +176,11 @@ def test_android_harness_action_space_returns_decorated_driver_method_schemas() 
     assert "target" in schemas["tap_on"].params_json_schema["properties"]
     assert schemas["ui_tree"].driver_method == "ui_tree"
     assert schemas["ui_tree"].fsq_action_name == "uiTree"
+    assert schemas["ui_tree"].capture_evidence is False
     assert schemas["ui_tree"].params_json_schema.get("properties") == {}
+
+    mutating_tools = {"launch_app", "kill_app", "tap_on", "long_press_on", "input_text", "press_key", "swipe"}
+    assert {name for name, schema in schemas.items() if schema.capture_evidence} == mutating_tools
 
 
 def test_android_harness_validation_failure_does_not_call_driver_method() -> None:

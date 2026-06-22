@@ -6,7 +6,7 @@ Load, merge, normalize, and validate runtime configuration for the OpenAI Agents
 
 ## Dependencies
 
-- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `HarnessSettings`, `AndroidHarnessSettings`, `StrictCoreHarnessSettings`, `StrictCoreEvidenceSettings`, `WorkspaceSettings`, `CaseSettings`, `AgentContextSettings`, `AgentKnowledgeSettings`, `KnowledgeSkillSettings`, `PrePlanKnowledgeSettings`, `SkillConfig`, `OutputSettings`, `LocalToolOutputSettings`, and `ConfigurationError`.
+- `models`: Uses `AgentSettings`, `OpenAIAgentsSettings`, `RuntimeSecretSettings`, `HarnessSettings`, `AndroidHarnessSettings`, `StrictCoreHarnessSettings`, `WorkspaceSettings`, `CaseSettings`, `AgentContextSettings`, `AgentKnowledgeSettings`, `KnowledgeSkillSettings`, `PrePlanKnowledgeSettings`, `SkillConfig`, `OutputSettings`, `LocalToolOutputSettings`, and `ConfigurationError`.
 
 ## Public Interface
 
@@ -18,7 +18,7 @@ Target `__init__.py` exports via `__all__` after this change:
 - `validate_runtime_settings(settings: Settings) -> None`: Validates provider-specific environment/auth requirements, Azure OpenAI base URL shape when selected, resolved model name, LLM harness/driver settings, CommonTool policy, and local path constraints before a default LLM run starts.
 - `validate_strict_core_settings(settings: Settings, requires_ai_assertion: bool = False) -> None`: Validates strict-core harness/driver settings not provided by a case file. It does not require provider credentials unless the caller knows the strict run contains an authored `assertWithAI` step or otherwise requires a provider-backed AI assertion evaluator. Strict replay runtime-secret refs are validated by entry-layer code after the case is parsed because the referenced names come from the case, not from static settings.
 
-Developer-owned YAML shape for harness strict-core pacing, strict-core evidence capture, and agent context must include this structure:
+Developer-owned YAML shape for harness strict-core pacing and agent context must include this structure:
 
 ```yaml
 harness:
@@ -27,12 +27,6 @@ harness:
 		backend: uiautomator2
 	strict_core:
 		step_interval_seconds: 1.0
-		evidence:
-			capture_before: true
-			capture_after: true
-			capture_on_failure: true
-			artifact_kinds:
-				- screenshot
 
 agent_context:
 	knowledge:
@@ -70,7 +64,7 @@ Invalid or missing configuration raises `ConfigurationError` from `models`. Low-
 - API keys and test credentials are never stored in config YAML. Runtime-only secret values come from process environment or `.env`; the `runtime_secrets.allowed_env_names` YAML allowlist remains the developer-owned policy naming which environment variables `get_runtime_secret` may return to the model and which recorded strict cases may reference through `runtimeSecret` refs.
 - Android app and device values are local user settings. `FSQ_ANDROID_APP_ID` supplies the Android application id for dynamic LLM runs and strict-core runs that do not provide `appId` in FSQ case metadata. `FSQ_ANDROID_SERIAL` optionally selects the Android device serial passed to the uiautomator2 backend; an empty value means no serial override.
 - `openai_agents.provider` selects the shared model provider. Provider construction and token exchange are implemented by `providers`, not by `config`.
-- Tracing is enabled by default through `openai_agents.tracing_enabled: true`, and the CLI may override that setting for one run. Sensitive tracing is fixed off; `trace_include_sensitive_data` is not a YAML or CLI option.
+- Tracing is enabled by default through `openai_agents.tracing_enabled: true`, and the CLI may override that setting for one run. The runtime enables OpenAI Agents SDK trace export only when `OPENAI_API_KEY` is present for the SDK exporter; otherwise it disables SDK tracing for the run so GitHub Copilot and Azure OpenAI executions do not repeatedly log missing OpenAI trace-export-key warnings. Sensitive tracing is fixed off; `trace_include_sensitive_data` is not a YAML or CLI option.
 - Context trimming and CommonTool local output artifact policy are internal defaults, not part of the default YAML surface. The defaults keep recent moderate CommonTool and harness outputs inline, write complete CommonTool outputs to per-run artifacts, and trim older large SDK tool outputs before model calls.
 - `shell`, `cli_tools`, YAML provider endpoint/key/model fields, YAML Android app id/serial fields, sensitive tracing, workspace marker/autoinit settings, and one-option output policy switches are removed from the external YAML config surface.
 - fsq-agent never writes runtime artifacts relative to the caller's current directory. A configured workspace resolves from `--workspace` or `workspace.root_dir`; when neither is set, the default workspace is the `.fsq-agent-workspace` directory next to the resolved config file, or under the current directory only when no config file is discovered. Every workspace is initialized with the `.fsq-agent-workspace` marker file; non-empty unmarked directories are rejected to avoid treating a public user directory as a managed workspace.
@@ -80,7 +74,6 @@ Invalid or missing configuration raises `ConfigurationError` from `models`. Low-
 - `harness.platform` selects the platform harness used by goal-driven task execution. The first supported platform is `android`.
 - `harness.android.backend` selects the Android backend. The first supported backend is `uiautomator2`.
 - `harness.strict_core.step_interval_seconds` controls the interval passed from entry-layer strict execution into `StepSequenceRunner`. The default is `1.0` seconds, values must be non-negative, and this pacing is execution timing only: it must not add `waitMs` commands, mutate parsed FSQ commands, or create synthetic evidence steps.
-- `harness.strict_core.evidence` controls the default evidence policy applied by entry-layer strict FSQ execution to platform-backed FSQ steps. Defaults request screenshot artifacts before each step, after each step, and on failure. `artifact_kinds` may contain supported core evidence kinds such as `screenshot` and `ui_tree`; an empty list disables automatic artifact capture while preserving phase/result evidence. Generated `waitMs` pure waits must not request platform artifact capture even when strict-core evidence capture is configured.
 - Android app id and device serial are environment-backed local values, not YAML values. Strict-core may fall back to `appId` from parsed FSQ case metadata when `FSQ_ANDROID_APP_ID` is absent. There are no public CLI app-id overrides.
 - Strict-core execution remains deterministic except for explicitly authored `assertWithAI` assertion steps. When a strict run contains `assertWithAI`, entry-layer code may request provider validation and inject a provider-backed evaluator into the platform harness. Missing provider readiness for such a step is a configuration failure. No AI recovery, locator fallback, or testcase mutation is enabled by this setting.
 - Strict replay secret refs remain deterministic configuration inputs. After parsing a strict case, entry-layer code validates each referenced `runtimeSecret` name against `runtime_secrets.allowed_env_names` and verifies the value is present in environment or `.env` before UI actions begin. Missing allowlist entries or values are configuration failures. Secret values are substituted only in memory and must not be written to settings, generated YAML, events, manifests, or reports.

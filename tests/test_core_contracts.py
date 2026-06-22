@@ -89,6 +89,7 @@ def test_harness_function_schema_is_serializable_contract() -> None:
         platform="android",
         driver_method="tap_on",
         fsq_action_name="tapOn",
+        capture_evidence=True,
         metadata={"backend": "uiautomator2"},
     )
 
@@ -96,6 +97,7 @@ def test_harness_function_schema_is_serializable_contract() -> None:
 
     assert dumped["name"] == "tap_on"
     assert dumped["strict"] is True
+    assert dumped["capture_evidence"] is True
     assert dumped["params_json_schema"]["type"] == "object"
     assert dumped["metadata"] == {"backend": "uiautomator2"}
 

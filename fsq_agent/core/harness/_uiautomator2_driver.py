@@ -48,7 +48,7 @@ class UiAutomator2AndroidDriver:
             },
         }
 
-    @_android_driver_tool("launchApp", description="Launch the configured Android app.")
+    @_android_driver_tool("launchApp", description="Launch the configured Android app.", capture_evidence=True)
     def launch_app(self, params: AndroidLaunchAppParams) -> dict[str, object]:
         data = self._param_data(params)
         app_id = str(data.get("app_id") or self.app_id)
@@ -56,14 +56,14 @@ class UiAutomator2AndroidDriver:
         self.device.app_start(app_id, **options)
         return self._passed({"app_id": app_id})
 
-    @_android_driver_tool("killApp", description="Stop the configured Android app.")
+    @_android_driver_tool("killApp", description="Stop the configured Android app.", capture_evidence=True)
     def kill_app(self, params: AndroidKillAppParams) -> dict[str, object]:
         data = self._param_data(params)
         app_id = str(data.get("app_id") or self.app_id)
         self.device.app_stop(app_id)
         return self._passed({"app_id": app_id})
 
-    @_android_driver_tool("tapOn", description="Tap an Android UI target.")
+    @_android_driver_tool("tapOn", description="Tap an Android UI target.", capture_evidence=True)
     def tap_on(self, params: AndroidTapOnParams) -> dict[str, object]:
         data = self._param_data(params)
         selector = self._selector(data)
@@ -72,7 +72,7 @@ class UiAutomator2AndroidDriver:
         selector.click()
         return self._passed()
 
-    @_android_driver_tool("longPressOn", description="Long press an Android UI target.")
+    @_android_driver_tool("longPressOn", description="Long press an Android UI target.", capture_evidence=True)
     def long_press_on(self, params: AndroidLongPressOnParams) -> dict[str, object]:
         data = self._param_data(params)
         selector = self._selector(data)
@@ -81,7 +81,7 @@ class UiAutomator2AndroidDriver:
         selector.long_click()
         return self._passed()
 
-    @_android_driver_tool("inputText", description="Enter text into a focused Android UI target.")
+    @_android_driver_tool("inputText", description="Enter text into a focused Android UI target.", capture_evidence=True)
     def input_text(self, params: AndroidInputTextParams) -> dict[str, object]:
         data = self._param_data(params)
         text = data.get("text")
@@ -97,7 +97,7 @@ class UiAutomator2AndroidDriver:
         selector.set_text(text)
         return self._passed()
 
-    @_android_driver_tool("pressKey", description="Press an Android key.")
+    @_android_driver_tool("pressKey", description="Press an Android key.", capture_evidence=True)
     def press_key(self, params: AndroidPressKeyParams) -> dict[str, object]:
         data = self._param_data(params)
         key = data.get("key")
@@ -106,7 +106,7 @@ class UiAutomator2AndroidDriver:
         self.device.press(key.strip().lower())
         return self._passed({"key": key.strip()})
 
-    @_android_driver_tool("swipe", description="Swipe by direction or explicit Android screen coordinates.")
+    @_android_driver_tool("swipe", description="Swipe by direction or explicit Android screen coordinates.", capture_evidence=True)
     def swipe(self, params: AndroidSwipeParams) -> dict[str, object]:
         data = self._param_data(params)
         direction = data.get("direction")

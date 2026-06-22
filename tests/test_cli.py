@@ -45,38 +45,7 @@ def _isolate_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_only_public_commands_are_registered() -> None:
-    assert set(main.commands) == {"init", "run", "report", "playground"}
-
-
-def test_playground_command_loads_settings_and_starts_server(tmp_path: Path, monkeypatch) -> None:
-    config_path = _config(tmp_path)
-    captured = {}
-
-    def fake_run_playground(settings, options):
-        captured["settings"] = settings
-        captured["options"] = options
-
-    monkeypatch.setattr("fsq_agent.cli._main.run_playground", fake_run_playground)
-
-    result = CliRunner().invoke(
-        main,
-        [
-            "playground",
-            "--config",
-            str(config_path),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "9999",
-            "--no-open-browser",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured["settings"].workspace.root_dir == tmp_path / "workspace"
-    assert captured["options"].host == "127.0.0.1"
-    assert captured["options"].port == 9999
-    assert captured["options"].open_browser is False
+    assert set(main.commands) == {"init", "run", "report"}
 
 
 def test_run_rejects_missing_or_conflicting_sources(tmp_path: Path) -> None:
@@ -181,12 +150,6 @@ harness:
         backend: uiautomator2
     strict_core:
         step_interval_seconds: 0.25
-        evidence:
-            capture_before: true
-            capture_after: false
-            capture_on_failure: true
-            artifact_kinds:
-                - ui_tree
 """,
     )
     case_path = tmp_path / "cases" / "strict_cli.codex.yaml"
@@ -219,10 +182,6 @@ harness:
     assert calls["strict"]["run_id"] == "strict_cli"
     assert calls["strict"]["output_dir"] == tmp_path / "workspace" / "output" / "runs" / "strict_cli"
     assert calls["strict"]["step_interval_seconds"] == 0.25
-    assert calls["strict"]["steps"][0].evidence_policy.capture_before is True
-    assert calls["strict"]["steps"][0].evidence_policy.capture_after is False
-    assert calls["strict"]["steps"][0].evidence_policy.capture_on_failure is True
-    assert calls["strict"]["steps"][0].evidence_policy.artifact_kinds == ["ui_tree"]
     assert "core-report.md" in result.output
     assert "evidence-manifest.json" in result.output
 

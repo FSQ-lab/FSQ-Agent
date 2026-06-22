@@ -85,8 +85,6 @@ def test_harness_settings_default_to_android_uiautomator2() -> None:
     assert settings.android.backend == "uiautomator2"
     assert settings.android.app_id is None
     assert settings.android.serial is None
-    assert settings.evidence.artifact_kinds == []
-    assert settings.strict_core.evidence.artifact_kinds == ["screenshot"]
 
 
 def test_skill_config_defaults_to_markdown() -> None:

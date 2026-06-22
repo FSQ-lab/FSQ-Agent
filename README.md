@@ -25,7 +25,7 @@ GitHub Copilot is the default model provider:
 - `openai_agents.provider: github_copilot` uses the fixed Copilot model `gpt-5.5`. On first run it prompts for GitHub device-code auth and caches the OAuth token under the fsq-agent workspace auth directory.
 - `openai_agents.provider: azure_openai` keeps only the provider selector in YAML. Set `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_MODEL`, and `AZURE_OPENAI_API_KEY` in process env or `.env`.
 
-Tracing is enabled by default with `openai_agents.tracing_enabled: true`. Use `fsq-agent run --no-tracing ...` or `fsq-agent run --tracing ...` to override it for one run.
+Tracing is enabled by default with `openai_agents.tracing_enabled: true`. Use `fsq-agent run --no-tracing ...` or `fsq-agent run --tracing ...` to override it for one run. OpenAI Agents SDK trace export requires `OPENAI_API_KEY`; when it is absent, fsq-agent disables SDK tracing for that run instead of logging repeated missing-key warnings.
 
 For Android runs, install the Android extra, connect an emulator/device, and keep only the platform/backend in config:
 
@@ -36,12 +36,6 @@ harness:
     backend: uiautomator2
   strict_core:
     step_interval_seconds: 1.0
-    evidence:
-      capture_before: true
-      capture_after: true
-      capture_on_failure: true
-      artifact_kinds:
-        - screenshot
 ```
 
 Set Android and Azure user values in `.env`:
