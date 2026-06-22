@@ -45,10 +45,18 @@ class _FakeFunctionTool:
 
 
 class _FakeHarness:
-    def __init__(self, *, tool_name: str = "tap_on", driver_method: str = "tap_on", fsq_action_name: str = "tapOn") -> None:
+    def __init__(
+        self,
+        *,
+        tool_name: str = "tap_on",
+        driver_method: str = "tap_on",
+        fsq_action_name: str = "tapOn",
+        capture_evidence: bool = True,
+    ) -> None:
         self.tool_name = tool_name
         self.driver_method = driver_method
         self.fsq_action_name = fsq_action_name
+        self.capture_evidence = capture_evidence
         self.steps: list[Any] = []
         self.calls: list[str] = []
 
@@ -61,6 +69,7 @@ class _FakeHarness:
                 platform="android",
                 driver_method=self.driver_method,
                 fsq_action_name=self.fsq_action_name,
+                capture_evidence=self.capture_evidence,
             )
         ]
 
@@ -558,7 +567,12 @@ async def test_harness_tool_adapter_applies_evidence_policy_to_mutating_action()
 
 @pytest.mark.asyncio
 async def test_harness_tool_adapter_keeps_default_evidence_policy_for_assertion_actions() -> None:
-    harness = _FakeHarness(tool_name="assert_visible", driver_method="assert_visible", fsq_action_name="assertVisible")
+    harness = _FakeHarness(
+        tool_name="assert_visible",
+        driver_method="assert_visible",
+        fsq_action_name="assertVisible",
+        capture_evidence=False,
+    )
     adapter = HarnessToolAdapter(harness, run_id="run-1")
 
     tools = adapter.build_tools(_FakeFunctionTool)
@@ -570,6 +584,24 @@ async def test_harness_tool_adapter_keeps_default_evidence_policy_for_assertion_
     assert payload["result"]["artifact_refs"] == []
     assert harness.steps[0].action_name == "assertVisible"
     assert harness.steps[0].kind == "assertion"
+    assert harness.steps[0].evidence_policy.capture_before is False
+    assert harness.steps[0].evidence_policy.artifact_kinds == []
+    assert not any(call.startswith("capture:") for call in harness.calls)
+
+
+@pytest.mark.asyncio
+async def test_harness_tool_adapter_uses_schema_evidence_flag_not_action_name() -> None:
+    harness = _FakeHarness(capture_evidence=False)
+    adapter = HarnessToolAdapter(harness, run_id="run-1")
+
+    tools = adapter.build_tools(_FakeFunctionTool)
+    output = await tools[0].on_invoke_tool(None, json.dumps({"target": "Downloads"}))
+
+    payload = json.loads(output)
+    assert payload["status"] == "passed"
+    assert payload["fsq_action_name"] == "tapOn"
+    assert payload["artifact_refs"] == []
+    assert harness.steps[0].action_name == "tapOn"
     assert harness.steps[0].evidence_policy.capture_before is False
     assert harness.steps[0].evidence_policy.artifact_kinds == []
     assert not any(call.startswith("capture:") for call in harness.calls)

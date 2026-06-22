@@ -132,6 +132,7 @@ class HarnessFunctionSchema(BaseModel):
     platform: HarnessPlatform
     driver_method: str
     fsq_action_name: str | None = None
+    capture_evidence: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

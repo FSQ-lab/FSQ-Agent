@@ -7,18 +7,6 @@ from fsq_agent.core import HarnessInterface, StepRunner
 from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ConfigurationError, EvidencePolicy, ExecutableStep, HarnessFunctionSchema, RunnerStepResult
 
 
-_UI_MUTATING_ACTIONS = {
-    "launchApp",
-    "killApp",
-    "tapOn",
-    "performActions",
-    "pressKey",
-    "inputText",
-    "longPressOn",
-    "swipe",
-}
-
-
 class HarnessToolAdapter:
     def __init__(
         self,
@@ -75,7 +63,7 @@ class HarnessToolAdapter:
                     kind=self._step_kind(action_name),
                     action_name=action_name,
                     params=params,
-                    evidence_policy=self._evidence_policy(action_name),
+                    evidence_policy=self._evidence_policy(schema),
                     metadata={
                         "run_id": self.run_id,
                         "tool_origin": "harness",
@@ -107,8 +95,8 @@ class HarnessToolAdapter:
             return action_definition.step_kind
         return "action"
 
-    def _evidence_policy(self, action_name: str) -> EvidencePolicy:
-        if action_name in _UI_MUTATING_ACTIONS:
+    def _evidence_policy(self, schema: HarnessFunctionSchema) -> EvidencePolicy:
+        if schema.capture_evidence:
             return EvidencePolicy(
                 capture_before=True,
                 capture_after=True,

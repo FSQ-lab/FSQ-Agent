@@ -23,6 +23,7 @@ class _DriverToolMetadata:
     params_model: type[BaseModel] | None = None
     fsq_action_name: str | None = None
     strict: bool = True
+    capture_evidence: bool = False
     metadata: dict[str, object] = field(default_factory=dict)
 
 
@@ -32,6 +33,7 @@ def driver_tool(
     params_model: type[BaseModel] | None = None,
     fsq_action_name: str | None = None,
     strict: bool = True,
+    capture_evidence: bool = False,
     metadata: dict[str, object] | None = None,
 ) -> Callable[[_F], _F]:
     def decorate(method: _F) -> _F:
@@ -43,6 +45,7 @@ def driver_tool(
                 params_model=params_model,
                 fsq_action_name=fsq_action_name,
                 strict=strict,
+                capture_evidence=capture_evidence,
                 metadata=dict(metadata or {}),
             ),
         )
@@ -56,6 +59,7 @@ def _android_driver_tool(
     *,
     description: str,
     strict: bool = True,
+    capture_evidence: bool = False,
     metadata: dict[str, object] | None = None,
 ) -> Callable[[_F], _F]:
     action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(fsq_action_name)
@@ -104,6 +108,7 @@ def _android_driver_tool(
             params_model=action_definition.params_model,
             fsq_action_name=action_definition.fsq_action_name,
             strict=strict,
+            capture_evidence=capture_evidence,
             metadata=metadata,
         )(method)
 
@@ -133,6 +138,7 @@ def _discover_driver_function_schemas(
                 platform=platform,
                 driver_method=method_name,
                 fsq_action_name=tool_metadata.fsq_action_name,
+                capture_evidence=tool_metadata.capture_evidence,
                 metadata=schema_metadata,
             )
         )
