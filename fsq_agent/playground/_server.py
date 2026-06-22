@@ -105,7 +105,7 @@ class PlaygroundServer:
             return self._replay_video_response(replay_id)
         if path.startswith("/task-progress/"):
             request_id = unquote(path.removeprefix("/task-progress/")).strip()
-            task = self.state.get_task(request_id)
+            task = self.state.get_task(request_id, after_sequence=_after_sequence(query))
             if task is None:
                 return 404, {"error": "Task progress not found."}
             return 200, task
@@ -605,3 +605,13 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _after_sequence(query: dict[str, list[str]]) -> int | None:
+    values = query.get("after_sequence") or query.get("afterSequence") or []
+    if not values:
+        return None
+    try:
+        return max(0, int(values[0]))
+    except (TypeError, ValueError):
+        return None

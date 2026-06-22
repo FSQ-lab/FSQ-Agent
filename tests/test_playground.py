@@ -190,6 +190,59 @@ def test_playground_server_report_endpoint_returns_content(tmp_path: Path) -> No
     assert payload["content"] == "# report"
 
 
+def test_playground_server_task_progress_filters_events_after_sequence(tmp_path: Path) -> None:
+    server = PlaygroundServer(Settings(), PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Incremental progress")
+    for sequence in range(1, 4):
+        server.state.add_event(
+            request_id,
+            RunEvent(
+                run_id="run-1",
+                task_id="task",
+                type="planning_update",
+                title=f"Event {sequence}",
+                sequence=sequence,
+            ),
+        )
+    result = TaskResult(
+        task_id="task",
+        status="success",
+        steps=[],
+        verification=VerificationResult(status="success", summary="ok"),
+        report=ReportArtifact(run_id="run-1", path=tmp_path / "report.md"),
+    )
+    server.state.finish_task(request_id, result)
+
+    full_status, full_payload = server.handle_get(f"/task-progress/{request_id}", {})
+    incremental_status, incremental_payload = server.handle_get(
+        f"/task-progress/{request_id}",
+        {"after_sequence": ["2"]},
+    )
+
+    assert full_status == 200
+    assert [event["sequence"] for event in full_payload["events"]] == [1, 2, 3]
+    assert incremental_status == 200
+    assert [event["sequence"] for event in incremental_payload["events"]] == [3]
+    assert incremental_payload["status"] == "success"
+    assert incremental_payload["result"]["runId"] == "run-1"
+
+
+def test_playground_state_assigns_sequence_for_unsequenced_events() -> None:
+    state = PlaygroundState()
+    request_id = state.start_task("Strict progress")
+
+    state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Start"))
+    state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_completed", title="Done"))
+
+    full_progress = state.get_task(request_id)
+    incremental_progress = state.get_task(request_id, after_sequence=1)
+
+    assert full_progress is not None
+    assert [event["sequence"] for event in full_progress["events"]] == [1, 2]
+    assert incremental_progress is not None
+    assert [event["sequence"] for event in incremental_progress["events"]] == [2]
+
+
 def test_playground_server_persists_replay_frames(tmp_path: Path) -> None:
     settings = Settings()
     settings.output.runs_dir = tmp_path / "runs"
@@ -524,6 +577,9 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert '<button id="refresh" type="button">Clear</button>' in html
     assert "progress-run-id" in html
     assert "progressSequence" in script
+    assert "lastProgressSequence" in script
+    assert "after_sequence=${state.lastProgressSequence}" in script
+    assert "function updateLastProgressSequence" in script
     assert "setServerStatus" in script
     assert "status-pill status-${status}" in script
     assert "progressDetailOpenState" in script

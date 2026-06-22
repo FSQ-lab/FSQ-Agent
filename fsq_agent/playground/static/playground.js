@@ -7,6 +7,7 @@ const state = {
   replayVideoInFlight: false,
   replayDurationFixing: false,
   progressSequence: 0,
+  lastProgressSequence: 0,
   progressDetailOpenState: new Map(),
 };
 
@@ -69,6 +70,7 @@ function clearPage() {
   state.previewToken = null;
   state.currentRequestId = null;
   state.progressSequence = 0;
+  state.lastProgressSequence = 0;
   state.progressDetailOpenState.clear();
 
   els.goal.value = '';
@@ -207,6 +209,7 @@ function updateRunMode() {
 async function startExecution(payload) {
   if (!(await ensureSession())) return;
   state.progressSequence = 0;
+  state.lastProgressSequence = 0;
   state.progressDetailOpenState.clear();
   state.replayRequestId = null;
   clearRunId();
@@ -233,13 +236,11 @@ function startProgressPolling() {
 async function refreshProgress() {
   if (!state.currentRequestId) return;
   try {
-    const progress = await api(`/task-progress/${encodeURIComponent(state.currentRequestId)}`);
-    captureProgressDetailState();
-    els.progress.innerHTML = '';
-    state.progressSequence = 0;
+    const progress = await api(progressPath(state.currentRequestId));
     for (const event of progress.events || []) {
       if (event.type === 'run_started') setRunId(event.run_id || event.runId);
       appendProgress(eventLabel(event), event.sequence, eventDetails(event), eventStatus(event));
+      updateLastProgressSequence(event.sequence);
     }
     if (progress.preview?.token && progress.preview.token !== state.previewToken) {
       await refreshPreview(progress.requestId, progress.preview.token);
@@ -271,6 +272,18 @@ async function refreshProgress() {
     }
   } catch (error) {
     appendProgress(`Progress error: ${error.message}`, null, [], 'failed');
+  }
+}
+
+function progressPath(requestId) {
+  const encoded = encodeURIComponent(requestId);
+  if (state.lastProgressSequence <= 0) return `/task-progress/${encoded}`;
+  return `/task-progress/${encoded}?after_sequence=${state.lastProgressSequence}`;
+}
+
+function updateLastProgressSequence(sequence) {
+  if (Number.isInteger(sequence) && sequence > state.lastProgressSequence) {
+    state.lastProgressSequence = sequence;
   }
 }
 

@@ -38,7 +38,7 @@ Initial HTTP API:
 | `DELETE /session` | Clear active session metadata when no task is running. |
 | `GET /runtime-info` | Return platform/runtime metadata, preview capability, app id presence, selected device id, and last run summary. |
 | `POST /execute` | Start one dynamic goal, raw YAML-reference, or strict YAML execution and return a request id immediately. |
-| `GET /task-progress/{request_id}` | Return accumulated progress events and final result metadata for one request id. |
+| `GET /task-progress/{request_id}` | Return progress and final result metadata for one request id. Without query parameters it returns accumulated events for compatibility; with `after_sequence` it returns only events whose sequence is greater than the supplied value so browser polling can append new progress without re-rendering history. |
 | `GET /screenshot` | Return a base64 screenshot and timestamp when available, or a structured unavailable/error response. |
 | `GET /replay/{request_or_run_id}` | Return persisted timestamped screenshot frames for one playground request id or run id. |
 | `GET /replay-video/{request_or_run_id}` | Return metadata for a stored run-local replay video when available. |
@@ -52,7 +52,7 @@ Initial HTTP API:
 
 - `__init__.py`: Public exports only.
 - `_server.py`: Local HTTP server, JSON route dispatch, static serving, lifecycle, and safe path handling.
-- `_state.py`: In-memory session/task state, one-task lock, progress event buffering, final result summaries, and request id generation.
+- `_state.py`: In-memory session/task state, one-task lock, progress event buffering with optional sequence-window projection, final result summaries, and request id generation.
 - `_android.py`: ADB discovery, setup schema generation, Android session metadata, and screenshot helper boundaries.
 - `_execution.py`: Dynamic goal/raw-case execution adapter around `FsqAgent.run`, strict YAML execution adapter around core runner contracts, event capture, result/report shaping, recording, and error normalization.
 - `static/`: Package-owned browser assets.
@@ -68,6 +68,7 @@ The playground returns JSON errors for API failures and does not expose tracebac
 - YAML execution follows CLI non-strict `run --case-yaml` semantics: raw UTF-8 reference material, no strict YAML parsing for execution.
 - Strict YAML execution follows strict-core semantics: parse authored YAML, execute deterministic steps through the configured Android harness, and generate core evidence reports.
 - Playground records completed dynamic runs using the post-run recorder with `allow_failure=True`.
+- Browser progress polling is incremental: the server may project only events after the caller's last rendered sequence, and the static UI appends those events to the existing progress list instead of clearing and rebuilding the entire history on every tick.
 - After execution completes and a replay video is available or generated, the Preview pane displays that video directly.
 - The replay video preview uses the browser's native video controls for playback progress, seeking, and pause/resume controls.
 - The static UI does not expose a manual replay button; replay frames remain an internal source for browser-side replay video generation.

@@ -118,7 +118,10 @@ class PlaygroundState:
 				return
 			if event.run_id:
 				task.run_id = event.run_id
-			task.events.append(event.model_dump(mode="json"))
+			event_payload = event.model_dump(mode="json")
+			if not isinstance(event_payload.get("sequence"), int) or event_payload["sequence"] <= 0:
+				event_payload["sequence"] = len(task.events) + 1
+			task.events.append(event_payload)
 
 	def bind_run_id(self, request_id: str, run_id: str) -> None:
 		with self._lock:
@@ -180,10 +183,19 @@ class PlaygroundState:
 			if self.current_request_id == request_id:
 				self.current_request_id = None
 
-	def get_task(self, request_id: str) -> dict[str, object] | None:
+	def get_task(self, request_id: str, after_sequence: int | None = None) -> dict[str, object] | None:
 		with self._lock:
 			task = self.tasks.get(request_id)
-			return task.to_json() if task else None
+			if task is None:
+				return None
+			payload = task.to_json()
+			if after_sequence is not None:
+				payload["events"] = [
+					event
+					for event in task.events
+					if isinstance(event.get("sequence"), int) and event["sequence"] > after_sequence
+				]
+			return payload
 
 	def run_id_for_request(self, request_id: str) -> str | None:
 		with self._lock:
