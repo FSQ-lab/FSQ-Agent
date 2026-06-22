@@ -26,4 +26,3 @@ class SkillBundle(BaseModel):
     kind: SkillKind
     instructions: str = ""
     files: list[Path] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)

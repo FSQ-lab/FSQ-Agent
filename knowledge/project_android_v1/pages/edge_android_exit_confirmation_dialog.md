@@ -24,7 +24,7 @@
       "name": "Cancel",
       "role": "button",
       "reference_locators": [
-        {"strategy": "xpath", "selector": "//android.widget.Button[@text='Cancel']", "confidence": "high", "notes": "Successful run canceled the dialog and verified NTP was still visible."}
+        {"strategy": "xpath", "selector": "//android.widget.Button[@text='Cancel']", "confidence": "high", "notes": "Cancel button closes the dialog and returns to the New Tab Page."}
       ],
       "operations": [
         {"operation": "tap", "result": {"type": "close_dialog", "to_page_id": "edge_android_new_tab_page", "description": "Dismisses the exit dialog and returns to the New Tab Page."}}

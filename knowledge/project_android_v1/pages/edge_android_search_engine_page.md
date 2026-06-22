@@ -15,7 +15,7 @@
       "name": "Google search engine option",
       "role": "radio option",
       "reference_locators": [
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Google']", "confidence": "high", "notes": "Tapped in the successful third-party search-engine run."}
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Google']", "confidence": "high", "notes": "Primary Google search-engine option locator."}
       ],
       "operations": [
         {"operation": "tap", "result": {"type": "state_change", "to_page_id": "edge_android_search_engine_page", "description": "Sets Google as the search engine."}}
@@ -25,7 +25,7 @@
       "name": "Bing search engine option",
       "role": "radio option",
       "reference_locators": [
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Bing']", "confidence": "high", "notes": "Tapped to restore Bing at the end of the successful run."}
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Bing']", "confidence": "high", "notes": "Primary Bing search-engine option locator for restoring the default."}
       ],
       "operations": [
         {"operation": "tap", "result": {"type": "state_change", "to_page_id": "edge_android_search_engine_page", "description": "Sets Bing as the search engine."}}

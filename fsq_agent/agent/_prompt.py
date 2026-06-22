@@ -23,14 +23,11 @@ class PromptKeyValue:
 class PromptSkill:
     name: str
     instructions: str
-    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class AgentPromptModel:
-    custom_instructions: list[str] = field(default_factory=list)
     private_knowledge: list[PromptKeyValue] = field(default_factory=list)
-    knowledge_warnings: list[str] = field(default_factory=list)
     skills: list[PromptSkill] = field(default_factory=list)
     final_output_schema_json: str = ""
     variables: dict[str, Any] = field(default_factory=dict)
@@ -54,35 +51,17 @@ class PromptModelBuilder:
 
     def build_agent_prompt(self, knowledge: KnowledgeBundle, skills: list[SkillBundle]) -> AgentPromptModel:
         return AgentPromptModel(
-            custom_instructions=self._custom_instructions(),
             private_knowledge=[PromptKeyValue(key=key, value=str(value)) for key, value in knowledge.items.items()],
-            knowledge_warnings=list(knowledge.warnings),
             skills=[
                 PromptSkill(
                     name=skill.name,
                     instructions=skill.instructions or "",
-                    warnings=list(skill.warnings),
                 )
                 for skill in skills
             ],
             final_output_schema_json=json.dumps(AgentFinalOutput.model_json_schema(), indent=2, ensure_ascii=False),
             variables=dict(self.settings.variables),
         )
-
-    def _custom_instructions(self) -> list[str]:
-        instructions = list(self.settings.custom_instructions)
-        if self.settings.custom_instructions_path is None:
-            return instructions
-        path = self.settings.custom_instructions_path.expanduser().resolve()
-        if not path.exists() or not path.is_file():
-            raise ConfigurationError("Custom instructions file does not exist.", context={"path": str(path)})
-        try:
-            content = path.read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            raise ConfigurationError("Unable to read custom instructions file.", context={"path": str(path)}) from exc
-        if content:
-            instructions.extend(part.strip() for part in content.split("\n\n") if part.strip())
-        return instructions
 
     def build_task_prompt(self, task: Task, runtime_policy: list[str] | None = None) -> TaskPromptModel:
         acceptance_policy = (

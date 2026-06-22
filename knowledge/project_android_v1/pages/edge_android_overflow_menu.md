@@ -12,13 +12,13 @@
     },
     {
       "name": "Opened from NTP browser menu",
-      "description": "Successful flows open this page by tapping the bottom overflow button on the NTP or from a returned NTP state."
+      "description": "This page opens by tapping the bottom overflow button on the NTP or a returned NTP state."
     }
   ],
   "images": [
     {
       "path": "../assets/images/screenshot_1778749768612.png",
-      "description": "Observed overflow menu after tapping the browser menu during a Downloads run."
+      "description": "Overflow menu after tapping the browser menu."
     }
   ],
   "elements": [
@@ -30,7 +30,7 @@
           "strategy": "xpath",
           "selector": "//android.widget.TextView[@text='Downloads']",
           "confidence": "high",
-          "notes": "Used in two successful open/return cycles."
+          "notes": "Primary text locator for the Downloads menu item."
         }
       ],
       "operations": [
@@ -52,7 +52,7 @@
           "strategy": "xpath",
           "selector": "//android.widget.TextView[@text='Favorites']",
           "confidence": "high",
-          "notes": "Used in two successful Favorites panel cycles."
+          "notes": "Primary text locator for the Favorites menu item."
         }
       ],
       "operations": [
@@ -74,7 +74,7 @@
           "strategy": "xpath",
           "selector": "//android.widget.TextView[@text='History']",
           "confidence": "high",
-          "notes": "Used in two successful History panel cycles."
+          "notes": "Primary text locator for the History menu item."
         }
       ],
       "operations": [
@@ -96,7 +96,7 @@
           "strategy": "xpath",
           "selector": "//android.widget.TextView[@text='Settings']",
           "confidence": "high",
-          "notes": "Used in settings access, settings subpage, and search-engine configuration runs."
+          "notes": "Primary text locator for Settings access and settings-related flows."
         }
       ],
       "operations": [
@@ -118,7 +118,7 @@
           "strategy": "xpath",
           "selector": "//android.widget.TextView[@text='New InPrivate Tab']",
           "confidence": "high",
-          "notes": "Observed in the successful InPrivate flow."
+          "notes": "Primary text locator for opening an InPrivate tab."
         }
       ],
       "operations": [
@@ -140,7 +140,7 @@
           "strategy": "xpath",
           "selector": "//android.widget.TextView[@text='Exit browser']",
           "confidence": "medium",
-          "notes": "Requires horizontal menu-page swipe before selection in the observed run."
+          "notes": "Requires a horizontal menu-page swipe before selection when not visible on the current menu page."
         }
       ],
       "operations": [
@@ -162,7 +162,7 @@
           "strategy": "xpath",
           "selector": "//android.widget.TextView[@text='All menu']",
           "confidence": "low",
-          "notes": "Observed in a failed run; include as a weak planning hint only."
+          "notes": "Low-confidence hint; do not rely on this path unless live UI confirms it."
         }
       ],
       "operations": [
@@ -171,7 +171,7 @@
           "result": {
             "type": "navigate",
             "to_page_id": null,
-            "description": "May open an All Menu panel. This path was not confirmed by a successful run."
+            "description": "May open an All Menu panel. Treat this as unconfirmed until live UI verifies the transition."
           }
         }
       ]

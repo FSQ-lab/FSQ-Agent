@@ -6,7 +6,7 @@ Applies to all automation runs, regardless of harness backend or target platform
 
 ## Execution Rules
 
-- Use only configured harness, local, shell, or CLI tools for external actions.
+- Use only configured harness tools and CommonTool utilities for external actions.
 - Prefer semantic actions and stable locators over coordinate-only gestures.
 - Verify state-changing actions with fresh observations before claiming success.
 - Treat historical artifact search as context, not proof of the current UI state.

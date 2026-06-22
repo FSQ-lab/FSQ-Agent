@@ -90,6 +90,4 @@ def resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> N
         prompt.agent_template_path = _resolve_path(prompt.agent_template_path, config_base)
     if prompt.task_template_path is not None:
         prompt.task_template_path = _resolve_path(prompt.task_template_path, config_base)
-    if prompt.custom_instructions_path is not None:
-        prompt.custom_instructions_path = _resolve_path(prompt.custom_instructions_path, config_base)
 

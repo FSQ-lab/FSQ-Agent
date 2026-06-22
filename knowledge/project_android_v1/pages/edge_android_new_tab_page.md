@@ -8,7 +8,7 @@
   "identifiers": [
     {
       "name": "Account menu visible",
-      "description": "The New Tab Page exposes an Account menu entry. Successful runs repeatedly used this as the first stable NTP marker."
+      "description": "The New Tab Page exposes an Account menu entry, a stable NTP readiness marker."
     },
     {
       "name": "NTP scroll view visible",
@@ -22,11 +22,11 @@
   "images": [
     {
       "path": "../assets/images/screenshot_1778749755004.png",
-      "description": "Observed NTP at the start of an overflow-menu Downloads run."
+      "description": "NTP state before opening the overflow menu."
     },
     {
       "path": "../assets/images/screenshot_1778749824996.png",
-      "description": "Observed NTP after returning from the Downloads panel with Android Back."
+      "description": "NTP state after returning from the Downloads panel with Android Back."
     }
   ],
   "elements": [
@@ -38,7 +38,7 @@
           "strategy": "accessibility id",
           "selector": "Account menu",
           "confidence": "high",
-          "notes": "Used as the common NTP readiness marker across successful Android runs."
+          "notes": "Common NTP readiness marker."
         }
       ],
       "operations": [
@@ -68,7 +68,7 @@
           "strategy": "id",
           "selector": "com.microsoft.emmx:id/overflow_button_bottom",
           "confidence": "high",
-          "notes": "Bottom toolbar overflow button used in menu, hub, settings, InPrivate, and exit-browser runs."
+          "notes": "Bottom toolbar overflow button opens the browser menu from NTP and returned NTP states."
         }
       ],
       "operations": [
@@ -90,7 +90,7 @@
           "strategy": "id",
           "selector": "com.microsoft.emmx:id/search_box_text",
           "confidence": "high",
-          "notes": "Used to enter the omnibox/ZIP state from the NTP in top and bottom omnibox runs."
+          "notes": "Search box entry for entering URL or keyword text from NTP."
         }
       ],
       "operations": [
@@ -134,7 +134,7 @@
           "strategy": "id",
           "selector": "com.microsoft.emmx:id/edge_bottom_bar_plus_button",
           "confidence": "high",
-          "notes": "Observed after loading pages and used to create another NTP tab."
+          "notes": "Tab counter available after loading pages and returning to toolbar state."
         }
       ],
       "operations": [

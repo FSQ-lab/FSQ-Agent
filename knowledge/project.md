@@ -1,8 +1,6 @@
 # FSQ Agent Project Knowledge
 
-This file is loaded for every normal goal-driven task as concise project and app knowledge.
-
-`knowledge/index.md` is reserved for the page-knowledge graph index used by internal dynamic goal planning.
+This file is loaded for every normal goal-driven task as concise Edge Android project guidance.
 
 ## Edge Android Overflow Menu
 

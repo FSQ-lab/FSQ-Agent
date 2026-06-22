@@ -60,13 +60,11 @@ def build_pre_plan_input(
         "reference_type": reference_type,
         "reference_text": reference_text,
         "knowledge_items": knowledge.items,
-        "knowledge_warnings": knowledge.warnings,
         "skills": [
             {
                 "name": skill.name,
                 "description": skill.description,
                 "instructions": skill.instructions,
-                "warnings": skill.warnings,
             }
             for skill in skills
         ],

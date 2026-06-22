@@ -24,7 +24,7 @@
       "name": "Exit InPrivate mode",
       "role": "button",
       "reference_locators": [
-        {"strategy": "xpath", "selector": "//android.widget.Button[@text='Exit InPrivate mode']", "confidence": "high", "notes": "Successful flow returned from InPrivate to the normal New Tab Page."}
+        {"strategy": "xpath", "selector": "//android.widget.Button[@text='Exit InPrivate mode']", "confidence": "high", "notes": "Exit button returns from InPrivate to the normal New Tab Page."}
       ],
       "operations": [
         {"operation": "tap", "result": {"type": "navigate", "to_page_id": "edge_android_new_tab_page", "description": "Exits InPrivate mode and returns to the normal New Tab Page."}}

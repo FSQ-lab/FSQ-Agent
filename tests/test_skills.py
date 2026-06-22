@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from fsq_agent.models import SkillConfig
+import pytest
+
+from fsq_agent.models import FsqAgentError, SkillConfig
 from fsq_agent.skills import SkillBundle, SkillLoader
 
 
@@ -17,11 +19,21 @@ def test_skill_loader_loads_markdown_file(tmp_path: Path) -> None:
     assert bundles[0].files == [skill_path]
 
 
-def test_skill_loader_returns_warning_for_missing_optional_skill(tmp_path: Path) -> None:
+def test_skill_loader_skips_missing_optional_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    messages: list[str] = []
+    monkeypatch.setattr("fsq_agent.skills._loader.logger.warning", lambda message, *args: messages.append(message % args))
+
     bundles = SkillLoader(tmp_path).load([SkillConfig(name="missing", path=Path("missing.md"))])
 
-    assert bundles[0].instructions == ""
-    assert bundles[0].warnings
+    assert bundles == []
+    assert messages == [f"Skipping optional skill missing: Optional skill file does not exist. path={tmp_path / 'missing.md'}"]
+
+
+def test_skill_loader_fails_missing_required_skill(tmp_path: Path) -> None:
+    with pytest.raises(FsqAgentError, match="Required skill file") as exc_info:
+        SkillLoader(tmp_path).load([SkillConfig(name="missing", path=Path("missing.md"), required=True)])
+
+    assert exc_info.value.context == {"skill": "missing", "path": str(tmp_path / "missing.md")}
 
 
 def test_repository_android_harness_skill_documents_tool_usage_recovery() -> None:
@@ -45,5 +57,6 @@ def test_repository_android_harness_skill_documents_tool_usage_recovery() -> Non
     assert "keyCode-only" not in bundles[0].instructions
     assert "session ownership belongs to the harness and driver" in bundles[0].instructions
     assert "required `pressKey` action succeeded" in bundles[0].instructions
+    assert "submit_visual_assertion" not in bundles[0].instructions
     assert "sessionId" not in bundles[0].instructions
     assert "pointerType" not in bundles[0].instructions

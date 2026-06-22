@@ -56,14 +56,14 @@
       "name": "Common settings section",
       "role": "list item",
       "reference_locators": [
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Microsoft password manager']", "confidence": "medium", "notes": "L1 entry from first settings accessibility run."},
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Payment methods']", "confidence": "medium", "notes": "L1 entry from first settings accessibility run."},
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Personal info']", "confidence": "medium", "notes": "L1 entry from first settings accessibility run."},
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Privacy and security']", "confidence": "medium", "notes": "L1 entry from first settings accessibility run."},
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Appearance and layout']", "confidence": "medium", "notes": "L1 entry from second settings accessibility run."},
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Microsoft password manager']", "confidence": "medium", "notes": "Settings list entry from the upper settings section."},
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Payment methods']", "confidence": "medium", "notes": "Settings list entry from the upper settings section."},
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Personal info']", "confidence": "medium", "notes": "Settings list entry from the upper settings section."},
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Privacy and security']", "confidence": "medium", "notes": "Settings list entry from the upper settings section."},
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Appearance and layout']", "confidence": "medium", "notes": "Settings list entry from the middle settings section."},
         {"strategy": "xpath", "selector": "//android.widget.TextView[@text='New tab page']", "confidence": "medium", "notes": "May require vertical scroll in Settings."},
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Tabs']", "confidence": "medium", "notes": "L1 entry from second settings accessibility run."},
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Accessibility']", "confidence": "medium", "notes": "L1 entry from second settings accessibility run."},
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Tabs']", "confidence": "medium", "notes": "Settings list entry from the middle settings section."},
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Accessibility']", "confidence": "medium", "notes": "Settings list entry from the middle settings section."},
         {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Languages']", "confidence": "medium", "notes": "May require vertical scroll in Settings."},
         {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Site settings']", "confidence": "medium", "notes": "May require vertical scroll in Settings."},
         {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Notifications']", "confidence": "medium", "notes": "May require vertical scroll in Settings."},
@@ -77,7 +77,7 @@
       "name": "Set as default browser entry",
       "role": "list item",
       "reference_locators": [
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Set as default browser' and contains(@resource-id, 'android:id/title')]", "confidence": "medium", "notes": "Opens a system confirmation dialog in the observed run."}
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Set as default browser' and contains(@resource-id, 'android:id/title')]", "confidence": "medium", "notes": "Opens a system confirmation dialog when Android default-browser settings are available."}
       ],
       "operations": [
         {"operation": "tap", "result": {"type": "open_dialog", "to_page_id": "edge_android_settings_subpage", "description": "Opens the Set Edge as default browser dialog; Cancel returns to Settings."}}

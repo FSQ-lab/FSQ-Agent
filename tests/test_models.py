@@ -67,8 +67,8 @@ def test_openai_agents_settings_defaults_to_safe_offline_mode() -> None:
     assert settings.model == "gpt-5.5"
     assert settings.api_key_env == "AZURE_OPENAI_API_KEY"
     assert settings.tracing_enabled is True
-    assert settings.prompt.custom_instructions == []
-    assert settings.prompt.custom_instructions_path is None
+    assert not hasattr(settings.prompt, "custom_instructions")
+    assert not hasattr(settings.prompt, "custom_instructions_path")
     assert settings.prompt.agent_template_path is None
     assert settings.prompt.task_template_path is None
     assert settings.prompt.variables == {}

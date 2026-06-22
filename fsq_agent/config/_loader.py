@@ -61,6 +61,18 @@ def _reject_obsolete_settings(data: dict[str, Any]) -> None:
             "Obsolete verification configuration is no longer supported.",
             context={"config_key": "verification", "removed_key": "verification.mode"},
         )
+    openai_agents = data.get("openai_agents")
+    if not isinstance(openai_agents, dict):
+        return
+    prompt = openai_agents.get("prompt")
+    if not isinstance(prompt, dict):
+        return
+    for key in ("custom_instructions", "custom_instructions_path"):
+        if key in prompt:
+            raise ConfigurationError(
+                "Obsolete custom instruction configuration is no longer supported; move guidance into knowledge/project.md or configured skills.",
+                context={"config_key": f"openai_agents.prompt.{key}"},
+            )
 
 
 def _load_env_files(config_path: Path | None) -> None:

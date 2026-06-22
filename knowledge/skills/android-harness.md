@@ -6,7 +6,7 @@ Use this skill when the configured harness platform is Android. Treat it as runt
 
 ## Tool Selection
 
-| FSQ semantic action | Preferred harness/local path | Notes |
+| FSQ semantic action | Preferred runtime path | Notes |
 |---|---|---|
 | Launch app | `launch_app` | Use at the start of each Android case to foreground the configured target app before business actions. |
 | Kill app | `kill_app` | Use at the end of each Android case after final evidence is collected to clean up app state. |
@@ -15,8 +15,8 @@ Use this skill when the configured harness platform is Android. Treat it as runt
 | Enter text | `input_text` | Verify the target field before setting text. |
 | Press key | `press_key` | Use the semantic key requested by the FSQ step. |
 | Wait / pause | `wait_ms` | Use this for FSQ `performActions` pause and page-load waits. Do not use scroll, long_press, or any gesture as a wait substitute. |
-| Screenshot evidence | current harness artifact refs or local artifact tools when exposed | Capture concise evidence for important assertions. |
-| AI visual assertion | `assert_with_ai` or screenshot evidence plus `submit_visual_assertion` when exposed | For `assertWithAI`, use fresh evidence after the relevant wait/state change before deciding the assertion result. |
+| Screenshot evidence | current harness artifact refs or CommonTool artifact utilities when exposed | Capture concise evidence for important assertions. |
+| AI visual assertion | `assert_with_ai` | For `assertWithAI`, use fresh evidence after the relevant wait/state change before deciding the assertion result. |
 
 ## Argument Rules
 
@@ -69,4 +69,4 @@ Do not call `press_key` with conflicting or backend-only identities:
 - If a `pressKey` step with `key: Back` accidentally returns output for Enter, do not count it as Back. Retry Back with the schema-valid Back payload.
 - After retrying a key action, verify the resulting UI state with a fresh observation such as page source, visible text, or screenshot evidence.
 - Before `assertWithAI`, use `wait_ms` for any required pause and keep the page at the intended visual assertion state. Do not scroll or long-press merely to wait before taking the visual assertion screenshot.
-- For `assertWithAI`, do not claim the visual assertion is satisfied from a screenshot path alone. Use the exposed harness `assert_with_ai` action or submit a fresh screenshot with the ordered key action id or label and assertion prompt before deciding whether the visual assertion is satisfied.
+- For `assertWithAI`, do not claim the visual assertion is satisfied from a screenshot path alone. Use the exposed harness `assert_with_ai` action and its returned verdict before deciding whether the visual assertion is satisfied.

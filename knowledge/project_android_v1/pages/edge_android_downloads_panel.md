@@ -10,14 +10,14 @@
     {"name": "Hub view pager visible", "description": "The Downloads hub panel exposes the shared hub view pager container."}
   ],
   "images": [
-    {"path": "../assets/images/screenshot_1778749776960.png", "description": "Observed Downloads panel after opening it from overflow menu."}
+    {"path": "../assets/images/screenshot_1778749776960.png", "description": "Downloads panel after opening it from the overflow menu."}
   ],
   "elements": [
     {
       "name": "Downloads title and container",
       "role": "panel marker",
       "reference_locators": [
-        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Downloads']", "confidence": "high", "notes": "Fresh get_text returned Downloads in the successful run."},
+        {"strategy": "xpath", "selector": "//android.widget.TextView[@text='Downloads']", "confidence": "high", "notes": "Primary title locator for the Downloads panel."},
         {"strategy": "id", "selector": "com.microsoft.emmx:id/hub_view_pager", "confidence": "medium", "notes": "Shared hub panel container verified after opening Downloads."}
       ],
       "operations": [

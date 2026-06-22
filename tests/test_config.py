@@ -385,10 +385,8 @@ openai_agents:
 def test_load_settings_accepts_prompt_config(tmp_path: Path) -> None:
     agent_template = tmp_path / "agent.j2"
     task_template = tmp_path / "task.j2"
-    custom_instructions = tmp_path / "custom-instructions.md"
     agent_template.write_text("Agent {{ variables.voice }}", encoding="utf-8")
     task_template.write_text("Task {{ task.id }}", encoding="utf-8")
-    custom_instructions.write_text("Prefer semantic UI assertions before visual fallback.", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
@@ -398,7 +396,6 @@ openai_agents:
   prompt:
     agent_template_path: ./agent.j2
     task_template_path: ./task.j2
-    custom_instructions_path: ./custom-instructions.md
     variables:
       voice: concise
 """,
@@ -410,8 +407,44 @@ openai_agents:
 
     assert settings.openai_agents.prompt.agent_template_path == agent_template.resolve()
     assert settings.openai_agents.prompt.task_template_path == task_template.resolve()
-    assert settings.openai_agents.prompt.custom_instructions_path == custom_instructions.resolve()
     assert settings.openai_agents.prompt.variables == {"voice": "concise"}
+
+
+def test_load_settings_rejects_obsolete_prompt_custom_instructions(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+openai_agents:
+  prompt:
+    custom_instructions:
+      - Prefer semantic UI assertions before visual fallback.
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Obsolete custom instruction"):
+        load_settings(config_path)
+
+
+def test_load_settings_rejects_obsolete_prompt_custom_instructions_path(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+openai_agents:
+  prompt:
+    custom_instructions_path: ./custom-instructions.md
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Obsolete custom instruction"):
+        load_settings(config_path)
 
 
 def test_load_settings_rejects_internal_context_and_tool_output_policy(tmp_path: Path) -> None:

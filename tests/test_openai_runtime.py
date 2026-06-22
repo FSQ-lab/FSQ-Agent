@@ -23,6 +23,7 @@ from fsq_agent.models import (
     OutputSettings,
     RunnerStepResult,
     RuntimeSecretSettings,
+    SkillBundle,
     StepPhase,
     StepPhaseReport,
     StepResult,
@@ -365,18 +366,20 @@ def test_runtime_task_input_uses_goal_only_verification_contract() -> None:
     assert "verification_goal" in task_input
 
 
-def test_runtime_instructions_include_custom_operator_instructions() -> None:
-    settings = Settings(
-        openai_agents=OpenAIAgentsSettings(
-            prompt={"custom_instructions": ["Prefer accessibility locators before coordinate-based actions."]},
-        )
-    )
+def test_runtime_instructions_exclude_loader_diagnostics() -> None:
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
+    knowledge = KnowledgeBundle(items={"project.md": "Use Edge account guidance."}, warnings=["missing optional knowledge"])
+    skills = [SkillBundle(name="automation-basics", kind="markdown", instructions="Use semantic actions.")]
 
-    instructions = runtime._build_instructions(KnowledgeBundle(), [])
+    instructions = runtime._build_instructions(knowledge, skills)
 
-    assert "Custom operator instructions:" in instructions
-    assert "Prefer accessibility locators before coordinate-based actions." in instructions
+    assert "Custom operator instructions:" not in instructions
+    assert "Knowledge warnings:" not in instructions
+    assert "Skill warnings:" not in instructions
+    assert "missing optional knowledge" not in instructions
+    assert "Use Edge account guidance." in instructions
+    assert "Use semantic actions." in instructions
     assert "Final output JSON Schema:" in instructions
     assert "AgentFinalOutput" in instructions
 
@@ -427,15 +430,14 @@ def test_runtime_instructions_include_knowledge_index_content() -> None:
 
 
 def test_prompt_model_builder_and_renderer_use_templates() -> None:
-    settings = OpenAIAgentsSettings(prompt={"custom_instructions": ["Custom."]}).prompt
+    settings = OpenAIAgentsSettings().prompt
     builder = PromptModelBuilder(settings)
     renderer = PromptRenderer(settings)
 
     agent_model = builder.build_agent_prompt(KnowledgeBundle(), [])
     task_model = builder.build_task_prompt(Task(id="task-1", description="Do it.", verification_goal="Done."))
 
-    assert "Custom operator instructions:" in renderer.render_agent_prompt(agent_model)
-    assert "- Custom." in renderer.render_agent_prompt(agent_model)
+    assert "Custom operator instructions:" not in renderer.render_agent_prompt(agent_model)
     assert "Preserve the semantic fidelity of ordered key actions." in renderer.render_agent_prompt(agent_model)
     assert "launch_app harness tool" not in renderer.render_agent_prompt(agent_model)
     assert "kill_app harness tool" not in renderer.render_agent_prompt(agent_model)
@@ -447,40 +449,35 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
     assert "Done." in rendered_task
 
 
-def test_prompt_model_builder_loads_custom_instructions_file(tmp_path: Path) -> None:
+def test_openai_agents_settings_rejects_obsolete_custom_instruction_fields(tmp_path: Path) -> None:
     custom_instructions = tmp_path / "custom-instructions.md"
-    custom_instructions.write_text("First instruction.\n\nSecond instruction.", encoding="utf-8")
-    settings = OpenAIAgentsSettings(prompt={"custom_instructions_path": custom_instructions}).prompt
-    builder = PromptModelBuilder(settings)
-    renderer = PromptRenderer(settings)
 
-    agent_model = builder.build_agent_prompt(KnowledgeBundle(), [])
-    rendered = renderer.render_agent_prompt(agent_model)
+    with pytest.raises(ValueError):
+        OpenAIAgentsSettings(prompt={"custom_instructions": ["Custom."]})
 
-    assert "- First instruction." in rendered
-    assert "- Second instruction." in rendered
+    with pytest.raises(ValueError):
+        OpenAIAgentsSettings(prompt={"custom_instructions_path": custom_instructions})
 
 
 def test_prompt_renderer_injects_model_into_configured_jinja_templates(tmp_path: Path) -> None:
     agent_template = tmp_path / "agent.j2"
     task_template = tmp_path / "task.j2"
-    agent_template.write_text("{{ variables.prefix }}{% for instruction in custom_instructions %} {{ instruction }}{% endfor %}", encoding="utf-8")
+    agent_template.write_text("{{ variables.prefix }}{% for skill in skills %} {{ skill.name }}={{ skill.instructions }}{% endfor %}", encoding="utf-8")
     task_template.write_text("Task {{ task.id }} {{ task.variables.prefix }}", encoding="utf-8")
     settings = OpenAIAgentsSettings(
         prompt={
             "agent_template_path": agent_template,
             "task_template_path": task_template,
-            "custom_instructions": ["Custom."],
             "variables": {"prefix": "Base."},
         },
     ).prompt
     builder = PromptModelBuilder(settings)
     renderer = PromptRenderer(settings)
 
-    agent_model = builder.build_agent_prompt(KnowledgeBundle(), [])
+    agent_model = builder.build_agent_prompt(KnowledgeBundle(), [SkillBundle(name="s", kind="markdown", instructions="Skill.")])
     task_model = builder.build_task_prompt(Task(id="task-1", description="Do it.", acceptance_criteria=["Done."]))
 
-    assert renderer.render_agent_prompt(agent_model) == "Base. Custom."
+    assert renderer.render_agent_prompt(agent_model) == "Base. s=Skill."
     assert renderer.render_task_prompt(task_model) == "Task task-1 Base."
 
 

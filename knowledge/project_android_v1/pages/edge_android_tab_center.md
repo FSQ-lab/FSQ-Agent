@@ -147,7 +147,7 @@
           "strategy": "xpath",
           "selector": "//android.widget.ImageView[@resource-id='com.microsoft.emmx:id/action_button' and @content-desc='Close Google tab']",
           "confidence": "medium",
-          "notes": "Observed for closing the Google tab in a four-tab state. The content-desc is tab-title dependent."
+          "notes": "Close button for a Google tab in a four-tab state. The content-desc is tab-title dependent."
         }
       ],
       "operations": [

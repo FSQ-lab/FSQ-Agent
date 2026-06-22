@@ -126,8 +126,6 @@ class OpenAIAgentPromptConfig(BaseModel):
 
     agent_template_path: Path | None = None
     task_template_path: Path | None = None
-    custom_instructions_path: Path | None = None
-    custom_instructions: list[str] = Field(default_factory=list)
     variables: dict[str, Any] = Field(default_factory=dict)
 
 

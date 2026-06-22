@@ -8,7 +8,7 @@
   "identifiers": [
     {"name": "URL bar contains loaded target", "description": "After submitting a URL or keyword, the URL bar can confirm the loaded target or search engine domain."},
     {"name": "WebView visible", "description": "Loaded web content exposes an Android WebView."},
-    {"name": "Page can scroll", "description": "Successful runs verified content after vertical scroll gestures."}
+    {"name": "Page can scroll", "description": "Page content can be verified after vertical scroll gestures."}
   ],
   "images": [],
   "elements": [
@@ -28,7 +28,7 @@
       "name": "Refresh button",
       "role": "button",
       "reference_locators": [
-        {"strategy": "id", "selector": "com.microsoft.emmx:id/refresh_button", "confidence": "high", "notes": "Successful bottom-mode refresh flow tapped this and verified WebView afterwards."}
+        {"strategy": "id", "selector": "com.microsoft.emmx:id/refresh_button", "confidence": "high", "notes": "Refresh button locator for bottom-toolbar web pages; verify WebView content afterward."}
       ],
       "operations": [
         {"operation": "tap", "result": {"type": "state_change", "to_page_id": "edge_android_web_page", "description": "Reloads the current web page."}}
@@ -58,7 +58,7 @@
       "name": "Control container",
       "role": "toolbar container",
       "reference_locators": [
-        {"strategy": "id", "selector": "com.microsoft.emmx:id/control_container", "confidence": "medium", "notes": "Can disappear after scrolling according to toolbar behavior runs."}
+        {"strategy": "id", "selector": "com.microsoft.emmx:id/control_container", "confidence": "medium", "notes": "Can disappear after scrolling according to toolbar behavior."}
       ],
       "operations": [
         {"operation": "verify_not_visible_after_scroll", "result": {"type": "verify", "to_page_id": null, "description": "Confirms toolbar hide behavior after repeated scroll gestures."}}

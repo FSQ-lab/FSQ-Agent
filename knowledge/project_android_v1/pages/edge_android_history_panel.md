@@ -15,7 +15,7 @@
       "name": "History title or hint",
       "role": "panel marker",
       "reference_locators": [
-        {"strategy": "id", "selector": "com.microsoft.emmx:id/hint_text", "confidence": "high", "notes": "Text contained History in both successful verification cycles."},
+        {"strategy": "id", "selector": "com.microsoft.emmx:id/hint_text", "confidence": "high", "notes": "Primary title locator for the History panel."},
         {"strategy": "id", "selector": "com.microsoft.emmx:id/hub_view_pager", "confidence": "medium", "notes": "Shared hub container verified after opening History."}
       ],
       "operations": [
