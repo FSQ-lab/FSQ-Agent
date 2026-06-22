@@ -52,7 +52,8 @@ Loader diagnostics such as missing optional skills or missing optional knowledge
 | report | fsq_agent/report/SPEC.md | Generates LLM task reports, strict-core evidence reports, and resolves stored reports by run id. |
 | core | fsq_agent/core/SPEC.md | Defines shared execution-core orchestration boundaries, StepRunner protocol, pure waits, harness interface, and evidence coordination. |
 | agent | fsq_agent/agent/SPEC.md | Orchestrates dynamic goal/reference execution through OpenAI Agents SDK, verification, replayable event metadata, and report generation. |
-| cli | fsq_agent/cli/SPEC.md | Exposes the public `init`, `run`, `report`, strict replay, and dynamic-run recording workflows. |
+| playground | fsq_agent/playground/SPEC.md | Serves the local browser playground for Android session setup, dynamic goal/raw-case execution, strict YAML execution, progress polling, screenshots, replay video preview, and report lookup. |
+| cli | fsq_agent/cli/SPEC.md | Exposes the public `init`, `run`, `report`, `playground`, strict replay, dynamic-run recording, and local playground workflows. |
 
 ## Architecture Diagram
 
@@ -65,6 +66,7 @@ flowchart TD
     CLI --> Providers[providers]
     CLI --> Models[models]
     CLI --> Report[report]
+    CLI --> Playground[playground]
     Agent --> Core[core]
     Agent --> Config[config]
     Agent --> Providers[providers]

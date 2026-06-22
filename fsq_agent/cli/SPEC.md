@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provide the public command line surface for fsq-agent: initialize/check runtime readiness, run either dynamic LLM goal/reference execution or strict-core YAML execution with optional explicit provider-backed `assertWithAI`, optionally record dynamic LLM runs into strict-replay FSQ YAML artifacts, and print stored reports from prior runs.
+Provide the public command line surface for fsq-agent: initialize/check runtime readiness, run either dynamic LLM goal/reference execution or strict-core YAML execution with optional explicit provider-backed `assertWithAI`, optionally record dynamic LLM runs into strict-replay FSQ YAML artifacts, print stored reports from prior runs, and start the local browser playground.
 
 ## Dependencies
 
@@ -12,6 +12,7 @@ Provide the public command line surface for fsq-agent: initialize/check runtime 
 - `core`: Composes deterministic `ExecutableStep` execution, pure waits, runner events, and evidence manifest writing at the entry boundary.
 - `fsq`: Loads `.codex.yaml` FSQ cases and converts parsed cases into strict-core executable steps.
 - `agent`: Runs dynamic LLM goal/reference task workflows and persists recordable safe event metadata.
+- `playground`: Starts the local browser playground server from loaded settings and CLI host/port/browser options.
 - `report`: Generates strict-core reports and resolves stored LLM or strict-core reports by run id.
 - `tools`: Provides `get_runtime_secret` and `wait_ms` CommonTool event metadata that dynamic recording may convert into replayable strict YAML dependencies.
 
@@ -30,6 +31,7 @@ Current commands:
 - `fsq-agent run --strict --case-yaml PATH --config PATH --workspace PATH --tracing/--no-tracing`: Run one `.codex.yaml` FSQ case through the strict-core path. The case is parsed and converted into `ExecutableStep` records, strict replay refs such as `{runtimeSecret: NAME}` are validated and resolved in memory before external UI actions begin, and steps are executed through `StepSequenceRunner` with the configured Android harness/driver and `harness.strict_core.step_interval_seconds`. `StepSequenceRunner` pacing must not inject `waitMs` commands or synthetic evidence steps. The run writes `evidence-manifest.json`, generates `core-report.md/json`, and prints generated paths. Locator fallback, action repair, recovery, testcase mutation, and strict-mode recording are not allowed. If the parsed case contains an explicitly authored `assertWithAI` step, CLI applies any tracing override before provider validation, validates provider readiness, builds a provider-backed AI assertion evaluator through `providers`, and injects it into `AndroidHarness` before execution.
 - `fsq-agent run --strict --case-dir PATH --config PATH --workspace PATH --tracing/--no-tracing`: Run discovered `*.codex.yaml` files serially through the same deterministic strict-core path. Execution continues after failed cases, writes a directory-run summary, and exits nonzero when any case fails.
 - `fsq-agent report --run-id ID --format markdown|json --config PATH --workspace PATH`: Print a stored report from the configured runs directory. The command resolves either `report.md/json` for LLM runs or `core-report.md/json` for strict-core runs and fails when no matching report exists or when the run id is ambiguous.
+- `fsq-agent playground --config PATH --workspace PATH --host HOST --port PORT --open-browser/--no-open-browser`: Load the same runtime settings used by other CLI commands and start the local single-user playground HTTP server. The command blocks until the server exits, serves the package-owned static browser UI, optionally opens the browser, and delegates runtime behavior to the `playground` module. Startup failures from configuration or server binding errors must render concise CLI errors and exit nonzero.
 
 `--goal`, `--case-yaml`, and `--case-dir` are mutually exclusive. `--strict --goal` is invalid because strict-core execution requires authored YAML steps. `--strict --record` and `--strict --record-on-failure` are invalid because recording is a dynamic-run post-processing workflow. `--record-on-failure` without `--record` is invalid. Relative case paths resolve against `cases.dir` first, then the current working directory.
 
@@ -104,6 +106,7 @@ This helper is not a public CLI command. It reads a completed dynamic run direct
 - `_strict_replay.py`: Internal strict-entry helper that validates and resolves strict replay refs, including runtime-secret refs, before deterministic core execution.
 - `_formatting.py`: Logging-backed CLI rendering helpers for task results, live events, strict run summaries, and report paths.
 - `_logging.py`: CLI logging configuration.
+- `playground` command handler in `_main.py`: Thin adapter that loads settings, maps host/port/browser flags into `PlaygroundServerOptions`, and calls `run_playground` without reimplementing playground routing or execution.
 - `SPEC.md`: Module design.
 
 ## Error Handling
@@ -117,7 +120,7 @@ Recording failures happen after a dynamic run and must not change that dynamic r
 ## Design Decisions
 
 - CLI commands are thin adapters over module APIs, not a second orchestration layer.
-- The public command surface is intentionally limited to `init`, `run`, and `report`. Deleted command names are not retained as compatibility aliases.
+- The public command surface is intentionally limited to `init`, `run`, `report`, and `playground`. Deleted command names are not retained as compatibility aliases.
 - `run` applies `--tracing` or `--no-tracing` as a one-run override after `load_settings` returns and before LLM or provider-backed AI assertion validation. Sensitive tracing is never enabled by CLI.
 - Android app id and serial are local environment-backed settings resolved by `config` from `FSQ_ANDROID_APP_ID` and `FSQ_ANDROID_SERIAL`; CLI does not expose app id or serial flags.
 - Streaming CLI output logs live `RunEvent` values from the agent. Rich format is optimized for humans and includes `HH:MM:SS LEVEL` log prefixes so operators can distinguish informational, warning, and error events. JSONL format emits one raw serialized event per log message for CI and log processors; the CLI formatter bypasses prefixes for those raw JSONL records so the stream remains machine-readable.
@@ -129,4 +132,5 @@ Recording failures happen after a dynamic run and must not change that dynamic r
 - `run --strict` is strict-core execution. It parses FSQ YAML, uses config-owned Android settings, and does not construct or invoke LLM components for planning, recovery, locator fallback, action repair, or final verification. The sole provider-backed exception is an explicitly authored `assertWithAI` step, for which CLI may build and inject an AI assertion evaluator before execution.
 - Directory execution is intentionally serial because UI automation cases share external device and application state. Each case still creates independent run state so SDK sessions, harness context, and CommonTool state do not leak across cases.
 - `report` is a lookup/print command only; report generation happens during execution. It resolves either LLM reports or strict-core reports without exposing separate report commands.
+- `playground` is a local developer convenience entry point. CLI owns only argument parsing, settings loading, and server startup; the `playground` module owns HTTP routes, browser assets, session state, execution adapters, screenshot preview, replay video handling, and report lookup.
 - CLI logging never emits API key values; it may log the configured API key environment variable name and whether it is present.
