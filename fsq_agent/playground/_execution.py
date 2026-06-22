@@ -15,10 +15,10 @@ from fsq_agent.config import Settings, validate_runtime_settings, validate_stric
 from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, StepSequenceRunner, UiAutomator2AndroidDriver
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ExecutableStep, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
+from fsq_agent.playground._recording import record_dynamic_result
 from fsq_agent.playground._state import PlaygroundState
 from fsq_agent.providers import build_ai_assertion_evaluator
 from fsq_agent.report import CoreEvidenceReportGenerator
-from fsq_agent.recording import StrictCaseRecording, record_dynamic_run_as_strict_case
 
 
 def start_dynamic_goal_execution(
@@ -30,6 +30,8 @@ def start_dynamic_goal_execution(
 	case_yaml_path: str | None = None,
 	strict_case_yaml_path: str | None = None,
 	device_id: str | None,
+	record: bool = True,
+	record_on_failure: bool = True,
 ) -> threading.Thread:
 	thread = threading.Thread(
 		target=_run_dynamic_task,
@@ -41,6 +43,8 @@ def start_dynamic_goal_execution(
 			"case_yaml_path": case_yaml_path,
 			"strict_case_yaml_path": strict_case_yaml_path,
 			"device_id": device_id,
+			"record": record,
+			"record_on_failure": record_on_failure,
 		},
 		name=f"fsq-playground-{request_id}",
 		daemon=True,
@@ -109,6 +113,8 @@ def _run_dynamic_task(
 	case_yaml_path: str | None,
 	strict_case_yaml_path: str | None,
 	device_id: str | None,
+	record: bool,
+	record_on_failure: bool,
 ) -> None:
 	run_settings = settings.model_copy(deep=True)
 	if device_id:
@@ -126,7 +132,10 @@ def _run_dynamic_task(
 			result = _run_strict_case_yaml(run_settings, state, request_id, strict_case_yaml_path)
 		else:
 			raise ValueError("goal, case_yaml_path, or strict_case_yaml_path is required")
-		state.finish_task(request_id, result, recording=None if strict_case_yaml_path else _record_dynamic_result(run_settings, task, result))
+		recording = None
+		if not strict_case_yaml_path and record:
+			recording = record_dynamic_result(run_settings, task, result, allow_failure=record_on_failure)
+		state.finish_task(request_id, result, recording=recording)
 	except BaseException as exc:  # noqa: BLE001 - background failures must be visible through progress state.
 		state.fail_task(request_id, exc)
 
@@ -364,23 +373,3 @@ def _looks_like_screenshot_path(path: str) -> bool:
 	return "/screenshots/" in normalized and normalized.endswith((".png", ".jpg", ".jpeg", ".webp"))
 
 
-def _record_dynamic_result(settings: Settings, task: Task, result: TaskResult) -> dict[str, object]:
-	run_dir = Path(settings.output.runs_dir) / result.report.run_id
-	try:
-		recording = record_dynamic_run_as_strict_case(
-			run_dir=run_dir,
-			task=task,
-			result=result,
-			settings=settings,
-			allow_failure=True,
-		)
-		return recording.to_json()
-	except Exception as exc:  # noqa: BLE001 - recording must not change dynamic run status.
-		recording_path = run_dir / "recording.json"
-		recording = StrictCaseRecording(status="failed", recording_path=recording_path, errors=[str(exc)])
-		try:
-			recording_path.parent.mkdir(parents=True, exist_ok=True)
-			recording_path.write_text(json.dumps(recording.to_json(), indent=2, ensure_ascii=False), encoding="utf-8")
-		except OSError:
-			pass
-		return recording.to_json()

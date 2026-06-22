@@ -28,6 +28,8 @@ class PlaygroundServerOptions:
     port: int = 8765
     open_browser: bool = True
     static_path: Path | None = None
+    record: bool = True
+    record_on_failure: bool = True
 
 
 class PlaygroundServer:
@@ -200,6 +202,8 @@ class PlaygroundServer:
                 case_yaml_path=case_yaml_path.strip() if has_case_yaml else None,
                 strict_case_yaml_path=strict_case_yaml_path.strip() if has_strict_case_yaml else None,
                 device_id=self.state.session.device_id,
+                record=self.options.record,
+                record_on_failure=self.options.record_on_failure,
             )
             return 202, {"requestId": request_id}
         if path.startswith("/replay-video/"):

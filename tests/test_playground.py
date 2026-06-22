@@ -6,7 +6,7 @@ from urllib.request import urlopen
 from fsq_agent.config import Settings
 from fsq_agent.models import ReportArtifact, RunEvent, TaskResult, VerificationResult
 from fsq_agent.playground._android import AndroidTarget, parse_adb_devices, resolve_auto_session
-from fsq_agent.playground._execution import task_from_case_yaml, task_from_goal
+from fsq_agent.playground._execution import _run_dynamic_task, task_from_case_yaml, task_from_goal
 from fsq_agent.playground._server import PlaygroundServer, PlaygroundServerOptions
 from fsq_agent.playground._state import BusyError, PlaygroundState
 
@@ -471,6 +471,79 @@ def test_playground_execute_starts_strict_yaml(monkeypatch) -> None:
     assert captured["goal"] is None
     assert captured["case_yaml_path"] is None
     assert captured["strict_case_yaml_path"] == "case.codex.yaml"
+    assert captured["record"] is True
+    assert captured["record_on_failure"] is True
+
+
+def test_playground_execute_passes_recording_options(monkeypatch) -> None:
+    captured = {}
+
+    def fake_start_dynamic_goal_execution(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("fsq_agent.playground._server.start_dynamic_goal_execution", fake_start_dynamic_goal_execution)
+    server = PlaygroundServer(Settings(), PlaygroundServerOptions(record=False, record_on_failure=False))
+    server.state.create_session("device-1")
+
+    status, payload = server.handle_post("/execute", {"goal": "Do it"})
+
+    assert status == 202
+    assert payload["requestId"]
+    assert captured["record"] is False
+    assert captured["record_on_failure"] is False
+
+
+def test_playground_dynamic_goal_records_with_failure_drafts(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    state = PlaygroundState()
+    request_id = state.start_task("Do it")
+    captured = {}
+
+    class FakeAgent:
+        async def run(self, task, event_sink=None):
+            captured["task"] = task
+            return TaskResult(
+                task_id=task.id,
+                status="failed",
+                steps=[],
+                verification=VerificationResult(status="failed", summary="not done"),
+                report=ReportArtifact(run_id="run-1", path=tmp_path / "report.md"),
+            )
+
+    class FakeRecording:
+        def __init__(self, recording_path: Path) -> None:
+            self.recording_path = recording_path
+
+        def to_json(self):
+            return {"status": "skipped", "recording_path": str(self.recording_path), "draft": True}
+
+    def fake_record_dynamic_run_as_strict_case(**kwargs):
+        captured.update(kwargs)
+        return FakeRecording(kwargs["run_dir"] / "recording.json")
+
+    monkeypatch.setattr("fsq_agent.playground._execution.validate_runtime_settings", lambda _settings: None)
+    monkeypatch.setattr("fsq_agent.playground._execution.FsqAgent.from_settings", lambda _settings: FakeAgent())
+    monkeypatch.setattr("fsq_agent.playground._recording._record_dynamic_run_as_strict_case", fake_record_dynamic_run_as_strict_case)
+
+    _run_dynamic_task(
+        settings=settings,
+        state=state,
+        request_id=request_id,
+        goal="Do it",
+        case_yaml_path=None,
+        strict_case_yaml_path=None,
+        device_id=None,
+        record=True,
+        record_on_failure=True,
+    )
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert captured["task"].planning_reference_kind == "goal"
+    assert captured["allow_failure"] is True
+    assert progress["result"]["recording"]["status"] == "skipped"
+    assert progress["result"]["recording"]["draft"] is True
 
 
 def test_playground_execute_clears_strict_replay_dir_at_start(tmp_path: Path, monkeypatch) -> None:

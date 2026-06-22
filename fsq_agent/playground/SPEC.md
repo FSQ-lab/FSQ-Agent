@@ -14,8 +14,6 @@ The playground is an entry-layer convenience surface. It reuses existing FSQ-Age
 - `fsq`: Loads strict FSQ YAML cases and converts them into executable steps for strict mode.
 - `core`: Uses Android harness/driver capabilities for session metadata, screenshot capture, and strict-core step execution.
 - `report`: Resolves generated report paths for completed runs.
-- `recording`: Records completed playground dynamic runs into run-local strict replay YAML artifacts using the post-run recorder.
-
 The module must not be imported by `models`, `config`, `providers`, `tools`, `observation`, `knowledge`, `skills`, `fsq`, `core`, `agent`, or `report`. `cli` may import `playground` to expose the public command.
 
 ## Public Interface
@@ -51,9 +49,10 @@ Initial HTTP API:
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
-- `_server.py`: Local HTTP server, JSON route dispatch, static serving, lifecycle, and safe path handling.
+- `_server.py`: Local HTTP server, JSON route dispatch, static serving, lifecycle, safe path handling, and dynamic recording option propagation.
 - `_state.py`: In-memory session/task state, one-task lock, progress event buffering with optional sequence-window projection, final result summaries, and request id generation.
 - `_android.py`: ADB discovery, setup schema generation, Android session metadata, and screenshot helper boundaries.
+- `_recording.py`: Playground-owned dynamic post-run recording adapter around the existing strict case recorder, including recording failure normalization.
 - `_execution.py`: Dynamic goal/raw-case execution adapter around `FsqAgent.run`, strict YAML execution adapter around core runner contracts, event capture, result/report shaping, recording, and error normalization.
 - `static/`: Package-owned browser assets.
 - `SPEC.md`: Module design.
