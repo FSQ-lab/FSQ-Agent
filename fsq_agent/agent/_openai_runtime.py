@@ -196,7 +196,7 @@ class OpenAIAgentsRuntime:
                     payload={"platform": self.settings.harness.platform},
                 ),
             )
-            set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+            set_tracing_disabled(self._sdk_tracing_disabled())
             await self._emit(
                 event_sink,
                 RunEvent(
@@ -475,7 +475,7 @@ class OpenAIAgentsRuntime:
                 message="Generating key actions from the planning reference and page knowledge.",
             ),
         )
-        set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+        set_tracing_disabled(self._sdk_tracing_disabled())
         provider_session = build_model_provider_session(self.settings)
         provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
         try:
@@ -627,7 +627,7 @@ class OpenAIAgentsRuntime:
             events_path,
         )
         evidence_input = self._replace_secret_values(evidence_input, self._runtime_secret_values())
-        set_tracing_disabled(not self.settings.openai_agents.tracing_enabled)
+        set_tracing_disabled(self._sdk_tracing_disabled())
         provider_session = build_model_provider_session(self.settings)
         provider = provider_session.create_agents_provider(openai_provider_type=OpenAIProvider, async_openai_type=AsyncOpenAI)
         try:
@@ -685,6 +685,12 @@ class OpenAIAgentsRuntime:
         if inspect.isawaitable(result):
             await result
 
+    def _sdk_tracing_disabled(self) -> bool:
+        if not self.settings.openai_agents.tracing_enabled:
+            return True
+        export_api_key = os.getenv("OPENAI_API_KEY")
+        return not bool(export_api_key and export_api_key.strip())
+
     def _build_run_config(self, run_config_cls: Any, tool_output_trimmer_cls: Any, provider: Any, run_id: str = "") -> Any:
         trimming = self.settings.openai_agents.context_trimming
         local_output = self.settings.openai_agents.local_tool_output
@@ -710,7 +716,11 @@ class OpenAIAgentsRuntime:
                 trimmable_tools,
                 artifact_store,
             )
-        return run_config_cls(model_provider=provider, call_model_input_filter=input_filter)
+        return run_config_cls(
+            model_provider=provider,
+            call_model_input_filter=input_filter,
+            tracing_disabled=self._sdk_tracing_disabled(),
+        )
 
     def _build_harness(self, run_id: str) -> HarnessInterface:
         if self.harness_factory is not None:

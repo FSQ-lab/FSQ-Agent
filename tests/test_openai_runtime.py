@@ -725,7 +725,7 @@ def test_verification_evidence_builder_does_not_attach_images_from_paths(tmp_pat
     assert "visual_artifacts" not in model_input
 
 
-def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
+def test_runtime_builds_run_config_with_tool_output_trimmer(monkeypatch: pytest.MonkeyPatch) -> None:
     class _RunConfig:
         def __init__(self, **kwargs: Any) -> None:
             self.kwargs = kwargs
@@ -734,12 +734,14 @@ def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
         def __init__(self, **kwargs: Any) -> None:
             self.kwargs = kwargs
 
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     settings = Settings(openai_agents=OpenAIAgentsSettings())
     runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
 
     run_config = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider")
 
     assert run_config.kwargs["model_provider"] == "provider"
+    assert run_config.kwargs["tracing_disabled"] is True
     input_filter = run_config.kwargs["call_model_input_filter"]
     assert input_filter.recent_tool_outputs == 3
     assert input_filter.sdk_filter.kwargs == {
@@ -748,6 +750,42 @@ def test_runtime_builds_run_config_with_tool_output_trimmer() -> None:
         "preview_chars": 1000,
         "trimmable_tools": None,
     }
+
+
+def test_runtime_builds_run_config_enables_sdk_tracing_with_openai_export_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RunConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _ToolOutputTrimmer:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+    monkeypatch.setenv("OPENAI_API_KEY", "trace-key")
+    settings = Settings(openai_agents=OpenAIAgentsSettings())
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
+
+    run_config = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider")
+
+    assert run_config.kwargs["tracing_disabled"] is False
+
+
+def test_runtime_builds_run_config_respects_explicit_tracing_disable(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RunConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class _ToolOutputTrimmer:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+    monkeypatch.setenv("OPENAI_API_KEY", "trace-key")
+    settings = Settings(openai_agents=OpenAIAgentsSettings(tracing_enabled=False))
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
+
+    run_config = runtime._build_run_config(_RunConfig, _ToolOutputTrimmer, provider="provider")
+
+    assert run_config.kwargs["tracing_disabled"] is True
 
 
 def test_provider_session_builds_azure_openai_agents_provider(monkeypatch: pytest.MonkeyPatch) -> None:
