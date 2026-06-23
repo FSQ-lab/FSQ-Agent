@@ -17,6 +17,7 @@ const REPLAY_FAST_MAX_DELAY_MS = 1600;
 const REPLAY_FAST_FALLBACK_DELAY_MS = 500;
 const REPLAY_FAST_FINAL_FRAME_HOLD_MS = 700;
 const REPLAY_FAST_TIME_SCALE = 10;
+const PROGRESS_POLL_INTERVAL_MS = 500;
 
 const els = {
   status: document.getElementById('server-status'),
@@ -230,7 +231,7 @@ async function startExecution(payload) {
 
 function startProgressPolling() {
   if (state.progressTimer) window.clearInterval(state.progressTimer);
-  state.progressTimer = window.setInterval(refreshProgress, 1000);
+  state.progressTimer = window.setInterval(refreshProgress, PROGRESS_POLL_INTERVAL_MS);
   refreshProgress();
 }
 

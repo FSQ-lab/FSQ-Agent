@@ -739,6 +739,8 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "progress-run-id" in html
     assert "progressSequence" in script
     assert "lastProgressSequence" in script
+    assert "const PROGRESS_POLL_INTERVAL_MS = 500;" in script
+    assert "window.setInterval(refreshProgress, PROGRESS_POLL_INTERVAL_MS)" in script
     assert "after_sequence=${state.lastProgressSequence}" in script
     assert "function updateLastProgressSequence" in script
     assert "setServerStatus" in script
