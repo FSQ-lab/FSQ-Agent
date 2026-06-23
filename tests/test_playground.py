@@ -575,6 +575,66 @@ platform: android
     assert not replay_dir.exists()
 
 
+def test_playground_strict_yaml_execution_uses_standard_step_adapter(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings()
+    settings.cases.dir = tmp_path / "cases"
+    settings.output.runs_dir = tmp_path / "runs"
+    settings.harness.android.serial = "device-1"
+    settings.cases.dir.mkdir()
+    case_path = settings.cases.dir / "strict_case.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Strict Case
+platform: android
+appId: com.microsoft.emmx
+---
+- launchApp
+""",
+        encoding="utf-8",
+    )
+    state = PlaygroundState()
+    request_id = state.start_task("Strict")
+    captured = {}
+
+    class FakeDriver:
+        def __init__(self, *, app_id: str, serial: str | None) -> None:
+            captured["driver"] = {"app_id": app_id, "serial": serial}
+
+    def fake_run_strict_core_steps(**kwargs):
+        captured["steps"] = kwargs["steps"]
+        output_dir = kwargs["output_dir"]
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report_path = output_dir / "core-report.md"
+        json_path = output_dir / "core-report.json"
+        manifest_path = output_dir / "evidence-manifest.json"
+        report_path.write_text("report", encoding="utf-8")
+        json_path.write_text('{"summary":{"status":"passed","failed_steps":0}}', encoding="utf-8")
+        manifest_path.write_text("{}", encoding="utf-8")
+        return ReportArtifact(run_id=kwargs["run_id"], path=report_path, evidence_manifest_path=manifest_path)
+
+    monkeypatch.setattr("fsq_agent.playground._execution.UiAutomator2AndroidDriver", FakeDriver)
+    monkeypatch.setattr("fsq_agent.playground._execution._run_strict_core_steps", fake_run_strict_core_steps)
+
+    _run_dynamic_task(
+        settings=settings,
+        state=state,
+        request_id=request_id,
+        goal=None,
+        case_yaml_path=None,
+        strict_case_yaml_path="strict_case.codex.yaml",
+        device_id=None,
+        record=True,
+        record_on_failure=True,
+    )
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["result"]["status"] == "success"
+    assert captured["driver"] == {"app_id": "com.microsoft.emmx", "serial": "device-1"}
+    assert captured["steps"][0].action_name == "launchApp"
+
+
 def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:
     monkeypatch.setattr(
         "fsq_agent.playground._android.discover_adb_targets",
