@@ -292,13 +292,15 @@ class PlaygroundServer:
             return self._evidence_replay_response(replay_id, run_id)
         manifest = self._read_replay_manifest(manifest_path, replay_id, run_id)
         frames = []
-        for frame in manifest["frames"]:
+        for index, frame in enumerate(manifest["frames"], start=1):
             frame_path = (manifest_path.parent / str(frame.get("path") or "")).resolve()
             if not _is_relative_to(frame_path, manifest_path.parent) or not frame_path.is_file():
                 continue
             frames.append(
                 {
+                    "index": index,
                     "timestamp": frame.get("timestamp"),
+                    "path": str(frame.get("path") or ""),
                     "screenshot": base64.b64encode(frame_path.read_bytes()).decode("ascii"),
                 }
             )
@@ -318,9 +320,14 @@ class PlaygroundServer:
         if not frames:
             frames.extend(self._event_replay_frames(run_dir))
         frames.sort(key=lambda frame: frame.get("timestamp") or 0)
+        self._assign_frame_indexes(frames)
         if not frames:
             return 404, {"error": "Replay frames not found."}
         return 200, {"requestId": replay_id, "runId": run_id, "frames": frames}
+
+    def _assign_frame_indexes(self, frames: list[dict[str, object]]) -> None:
+        for index, frame in enumerate(frames, start=1):
+            frame["index"] = index
 
     def _frames_from_artifact_refs(
         self,
@@ -346,6 +353,7 @@ class PlaygroundServer:
             frames.append(
                 {
                     "timestamp": timestamps.get(relative_path) or self._artifact_timestamp(artifact),
+                    "path": relative_path,
                     "screenshot": base64.b64encode(frame_path.read_bytes()).decode("ascii"),
                 }
             )

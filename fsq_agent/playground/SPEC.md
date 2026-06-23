@@ -38,7 +38,7 @@ Initial HTTP API:
 | `POST /execute` | Start one dynamic goal, raw YAML-reference, or strict YAML execution and return a request id immediately. |
 | `GET /task-progress/{request_id}` | Return progress and final result metadata for one request id. Without query parameters it returns accumulated events for compatibility; with `after_sequence` it returns only events whose sequence is greater than the supplied value so browser polling can append new progress without re-rendering history. |
 | `GET /screenshot` | Return a base64 screenshot and timestamp when available, or a structured unavailable/error response. |
-| `GET /replay/{request_or_run_id}` | Return persisted timestamped screenshot frames for one playground request id or run id. |
+| `GET /replay/{request_or_run_id}` | Return persisted timestamped screenshot frames for one playground request id or run id, including the frame index, source path when available, and base64 screenshot bytes used by browser replay-video generation. |
 | `GET /replay-video/{request_or_run_id}` | Return metadata for a stored run-local replay video when available. |
 | `POST /replay-video/{request_or_run_id}` | Store a browser-generated run-local replay video. |
 | `GET /replay-video-file/{request_or_run_id}` | Return the generated replay video bytes for browser playback. |
@@ -68,6 +68,6 @@ The playground returns JSON errors for API failures and does not expose tracebac
 - Strict YAML execution follows strict-core semantics: parse authored YAML, execute deterministic steps through the configured Android harness, and generate core evidence reports.
 - Playground records completed dynamic runs using the post-run recorder with `allow_failure=True`.
 - Browser progress polling is incremental: the server may project only events after the caller's last rendered sequence, and the static UI appends those events to the existing progress list instead of clearing and rebuilding the entire history on every tick.
-- After execution completes and a replay video is available or generated, the Preview pane displays that video directly.
+- After execution completes, the browser loads the replay frames used for replay-video generation and displays that screenshot set in the Progress pane. When a replay video is available or generated, the Preview pane displays that video directly.
 - The replay video preview uses the browser's native video controls for playback progress, seeking, and pause/resume controls.
 - The static UI does not expose a manual replay button; replay frames remain an internal source for browser-side replay video generation.

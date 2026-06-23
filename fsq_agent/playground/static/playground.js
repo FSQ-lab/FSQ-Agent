@@ -258,8 +258,10 @@ async function refreshProgress() {
         await refreshPreviewFromReplay(progress.result.runId);
       }
       if (state.replayRequestId) {
+        const replay = await loadReplayFrames(state.replayRequestId);
+        appendReplayFramesProgress(replay.frames);
         appendReplayVideoGeneratingProgress();
-        const replayVideo = await ensureReplayVideoGenerated(state.replayRequestId);
+        const replayVideo = await ensureReplayVideoGenerated(state.replayRequestId, replay.frames);
         if (replayVideo?.videoUrl) {
           appendProgress('Replay video saved', null, [], 'success');
           await showReplayVideoPreview(replayVideo.videoUrl);
@@ -611,6 +613,26 @@ function appendReplayVideoGeneratingProgress() {
   );
 }
 
+function appendReplayFramesProgress(frames) {
+  appendProgress(
+    {
+      title: 'Replay frames loaded',
+      message: `${frames.length} screenshot${frames.length === 1 ? '' : 's'} will be used for the replay video.`,
+    },
+    null,
+    [{ label: 'Screenshots', value: replayFrameSummaries(frames) }],
+    frames.length > 0 ? 'success' : 'failed',
+  );
+}
+
+function replayFrameSummaries(frames) {
+  return frames.map((frame) => ({
+    index: frame.index ?? null,
+    timestamp: frame.timestamp ?? null,
+    path: frame.path || '',
+  }));
+}
+
 async function loadReplayVideo(requestId) {
   return api(`/replay-video/${encodeURIComponent(requestId)}`);
 }
@@ -627,8 +649,10 @@ async function loadReplayFrames(requestId) {
   const replay = await api(`/replay/${encodeURIComponent(requestId)}`);
   const frames = (replay.frames || [])
     .filter((frame) => typeof frame.screenshot === 'string')
-    .map((frame) => ({
+    .map((frame, index) => ({
+      index: Number.isFinite(Number(frame.index)) ? Number(frame.index) : index + 1,
       timestamp: Number.isFinite(Number(frame.timestamp)) ? Number(frame.timestamp) : null,
+      path: typeof frame.path === 'string' ? frame.path : '',
       src: `data:image/png;base64,${frame.screenshot}`,
     }));
   return { frames };

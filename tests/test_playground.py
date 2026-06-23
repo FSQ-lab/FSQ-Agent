@@ -264,6 +264,8 @@ def test_playground_server_persists_replay_frames(tmp_path: Path) -> None:
 
     assert status == 200
     assert [frame["timestamp"] for frame in payload["frames"]] == [1000, 1800]
+    assert [frame["index"] for frame in payload["frames"]] == [1, 2]
+    assert [frame["path"] for frame in payload["frames"]] == ["frame-0001-1000.png", "frame-0002-1800.png"]
     assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"frame-1"
     assert (settings.output.runs_dir / "run-1" / "playground-replay" / "replay-manifest.json").exists()
     assert progress is not None
@@ -304,6 +306,8 @@ def test_playground_server_replay_uses_evidence_screenshots(tmp_path: Path) -> N
     assert status == 200
     assert payload["runId"] == "run-1"
     assert isinstance(payload["frames"][0]["timestamp"], int)
+    assert payload["frames"][0]["index"] == 1
+    assert payload["frames"][0]["path"] == "artifacts/screenshots/step-1.png"
     assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"evidence-frame"
 
 
@@ -336,7 +340,22 @@ def test_playground_server_replay_falls_back_to_event_screenshots(tmp_path: Path
     assert status == 200
     assert payload["runId"] == "run-1"
     assert isinstance(payload["frames"][0]["timestamp"], int)
+    assert payload["frames"][0]["index"] == 1
+    assert payload["frames"][0]["path"] == "artifacts/screenshots/step-1.png"
     assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"event-frame"
+
+
+def test_playground_static_progress_summarizes_replay_frames() -> None:
+    static_dir = Path(__file__).parents[1] / "fsq_agent" / "playground" / "static"
+    script = (static_dir / "playground.js").read_text(encoding="utf-8")
+    styles = (static_dir / "playground.css").read_text(encoding="utf-8")
+
+    assert "appendReplayFramesProgress" in script
+    assert "replayFrameSummaries" in script
+    assert "renderReplayFrameGallery" not in script
+    assert "progress-frame-gallery" not in styles
+    assert "src: `data:image/png;base64,${frame.screenshot}`" in script
+    assert "path: frame.path || ''" in script
 
 
 def test_playground_server_preview_endpoint_returns_latest_screenshot(tmp_path: Path) -> None:
