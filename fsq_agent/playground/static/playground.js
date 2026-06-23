@@ -17,7 +17,7 @@ const REPLAY_FAST_MAX_DELAY_MS = 1600;
 const REPLAY_FAST_FALLBACK_DELAY_MS = 500;
 const REPLAY_FAST_FINAL_FRAME_HOLD_MS = 700;
 const REPLAY_FAST_TIME_SCALE = 10;
-const PROGRESS_POLL_INTERVAL_MS = 500;
+const PROGRESS_POLL_INTERVAL_MS = 750;
 
 const els = {
   status: document.getElementById('server-status'),
