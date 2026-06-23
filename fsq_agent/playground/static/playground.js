@@ -12,9 +12,10 @@ const state = {
 };
 
 const REPLAY_FAST_SAME_EVENT_DELAY_MS = 180;
-const REPLAY_FAST_ACTION_DELAY_MS = 700;
-const REPLAY_FAST_MAX_DELAY_MS = 900;
+const REPLAY_FAST_ACTION_DELAY_MS = 900;
+const REPLAY_FAST_MAX_DELAY_MS = 1600;
 const REPLAY_FAST_FALLBACK_DELAY_MS = 500;
+const REPLAY_FAST_FINAL_FRAME_HOLD_MS = 700;
 const REPLAY_FAST_TIME_SCALE = 10;
 
 const els = {
@@ -669,16 +670,26 @@ async function generateReplayVideo(frames) {
   context.drawImage(firstImage, 0, 0, canvas.width, canvas.height);
   const chunks = [];
   const stream = canvas.captureStream(30);
+  const videoTrack = stream.getVideoTracks()[0];
+  const requestCanvasFrame = () => {
+    if (videoTrack && typeof videoTrack.requestFrame === 'function') {
+      videoTrack.requestFrame();
+    }
+  };
   const recorder = new MediaRecorder(stream, { mimeType });
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data);
   };
   recorder.start(1000);
+  requestCanvasFrame();
   for (let index = 1; index < frames.length; index += 1) {
     await waitMs(replayFrameDelay(frames[index - 1], frames[index]));
     const image = await loadImageElement(frames[index].src);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    requestCanvasFrame();
   }
+  await waitMs(REPLAY_FAST_FINAL_FRAME_HOLD_MS);
+  requestCanvasFrame();
   await new Promise((resolve) => {
     recorder.onstop = resolve;
     recorder.stop();

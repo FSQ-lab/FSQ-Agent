@@ -666,6 +666,15 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "pendingReplayVideoCleanup" in script
     assert "replayVideoInFlight" in script
     assert "replayDurationFixing" in script
+    assert "const REPLAY_FAST_ACTION_DELAY_MS = 800;" in script
+    assert "const REPLAY_FAST_MAX_DELAY_MS = 1600;" in script
+    assert "const REPLAY_FAST_FALLBACK_DELAY_MS = 800;" in script
+    assert "const REPLAY_FAST_FINAL_FRAME_HOLD_MS = 1000;" in script
+    assert "const REPLAY_FAST_TIME_SCALE = 6;" in script
+    assert "REPLAY_FAST_FINAL_FRAME_HOLD_MS" in script
+    assert "requestCanvasFrame();" in script
+    assert "await waitMs(REPLAY_FAST_FINAL_FRAME_HOLD_MS);" in script
+    assert script.index("await waitMs(REPLAY_FAST_FINAL_FRAME_HOLD_MS);") < script.index("recorder.stop();")
     assert "liveVideoRecorder" not in script
     assert "liveVideoChunks" not in script
     assert "function clearPage()" in script
