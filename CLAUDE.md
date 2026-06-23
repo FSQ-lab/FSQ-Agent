@@ -1,7 +1,15 @@
-# fsq-agent Agent Instructions
+# Claude Instructions
 
-This repository uses Spec-Driven Development.
+This repository uses Python Spec-Driven Development.
 
-Read root `SPEC.md` first. It is the project-level specification and module navigation source of truth. Before changing code, also read the relevant module-level `SPEC.md` files.
+Root `SPEC.md` is the project-level source of truth. Relevant module `SPEC.md` files must be read before changes.
 
-Do not treat `CLAUDE.md` as the project specification. Implementation must follow confirmed `SPEC.md` files, and completion requires independent diff-based SPEC implementation audit.
+For non-trivial work:
+
+1. Use `$requirements-to-design` to clarify requirements and produce a confirmed design document.
+2. After the user confirms the design, use `$spec-driven` with the design document path.
+3. `$spec-driven` updates SPEC files, waits for SPEC confirmation, implements, verifies, synchronizes, and audits.
+
+Use installed skills when available. For Python architecture decisions, apply `$python-architecture` through the SDD flow.
+
+Do not treat this file as a specification. Keep project and module requirements in `SPEC.md` files.

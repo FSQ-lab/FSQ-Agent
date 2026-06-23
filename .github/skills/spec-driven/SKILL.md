@@ -1,23 +1,39 @@
 ---
 name: spec-driven
-description: Use when translating an approved design into SPEC.md files, changing public behavior, adding modules, modifying module boundaries, or checking SPEC/code synchronization before implementation.
-user-invocable: true
-argument-hint: "[task or design document path]"
+description: Use when the user invokes spec-driven with an approved design path, asks to update SPEC.md files from a confirmed design, or wants Python SDD implementation run from confirmed specs.
 ---
 
 # Spec-Driven Development
 
-Use this skill after requirements have been clarified and, for non-trivial work, a design document has been approved. This skill turns design intent into project and module specifications. It does not implement code.
+Translate approved design intent into root/module `SPEC.md` files, get confirmation, then carry the work through implementation, verification, synchronization, and audit. This is the main execution skill after `requirements-to-design`.
 
 ## Core Rule
 
-`SPEC.md` files are the source of truth for implementation:
+`SPEC.md` files are the source of truth for implementation.
 
 - Root `SPEC.md` owns repository-wide architecture, module navigation, dependency diagrams, and global development rules.
-- Module `SPEC.md` files own module contracts, public interfaces, internal structure, dependencies, error handling, and design decisions.
-- `CLAUDE.md` and `AGENTS.md` are agent entry points only. They must point agents to root `SPEC.md`; they are not specifications.
+- Module `SPEC.md` files own module contracts, public interfaces, internal structure, dependencies, error handling, testing contracts, and design decisions.
+- `CLAUDE.md` and `AGENTS.md` are thin agent entry points only. They point agents to root `SPEC.md`; they are not specifications.
 
-Implementation must not start until the relevant root/module `SPEC.md` changes are reviewed and confirmed.
+Implementation must not start until relevant `SPEC.md` changes are reviewed and confirmed.
+
+## Required Flow
+
+Do not stop after updating `SPEC.md`. Once the user confirms the SPEC changes, continue in the same turn whenever feasible:
+
+```text
+approved design document
+  -> update root/module SPEC.md
+  -> user confirms SPEC.md changes
+  -> implement against confirmed SPEC.md
+  -> run verification
+  -> run SPEC/code synchronization check
+  -> run spec-implementation-audit
+  -> fix blocking gaps or ask for decision
+  -> final report
+```
+
+If the user invokes this with a task instead of a design path, identify whether an approved design already exists. If not and the change is non-trivial, stop and tell the user to invoke `requirements-to-design` first.
 
 ## Input Path
 
@@ -27,48 +43,75 @@ When a confirmed design document exists, read it before editing specs:
 docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
 ```
 
-The design document is an input to SPEC updates, not an implementation authority. Once `SPEC.md` is confirmed, code must be implemented against `SPEC.md`, not the design document or conversation history.
+The design document is input to SPEC updates, not implementation authority. Once `SPEC.md` is confirmed, code must be implemented against `SPEC.md`.
 
-## Principle 1: Design First, Code Second
+## Python Architecture Integration
+
+For Python projects or Python modules, apply the sibling `python-architecture` rules layer before:
+
+- Choosing module ownership.
+- Writing or updating module `SPEC.md` files.
+- Implementing code.
+- Running the synchronization and audit checks.
+
+When this bundle is installed under `.github/skills/`, the references are expected at:
+
+```text
+.github/skills/python-architecture/SKILL.md
+.github/skills/python-architecture/references/architecture-levels.md
+.github/skills/python-architecture/references/module-spec-template.md
+.github/skills/python-architecture/references/implementation-rules.md
+.github/skills/python-architecture/references/audit-checklist.md
+```
+
+Load only the reference needed for the current phase:
+
+- SPEC design or module ownership: `architecture-levels.md` and `module-spec-template.md`.
+- Implementation: `implementation-rules.md`.
+- Synchronization or audit: `audit-checklist.md`.
+
+If the sibling files are unavailable, apply the local Python rules below and continue.
+
+### Python Rules Summary
+
+- Default to the simplest architecture level that satisfies the SPEC.
+- Do not introduce Repository, Unit of Work, Service Layer, Clean Architecture, or DDD patterns without a SPEC-recorded reason.
+- Public APIs are exported through module entry points such as `__init__.py`.
+- Internal modules use the project convention, usually `_name.py`, and must not be imported across module boundaries.
+- Domain logic must not depend on FastAPI, Django, Flask, SQLAlchemy sessions, HTTP request objects, or CLI argument parsers unless the module SPEC explicitly permits that coupling.
+- Pydantic schemas, serializers, ORM models, and DTOs are boundary models unless the SPEC explicitly chooses a simpler combined model.
+
+## SPEC Update Procedure
 
 ### New module or feature
 
-1. Read root `SPEC.md` and any relevant module `SPEC.md` files.
-2. Read the confirmed design document when one exists.
+1. Read root `SPEC.md` and relevant module `SPEC.md` files.
+2. Read the confirmed design document.
 3. Decide which module owns the feature, or whether a new module is needed.
-4. Write or update the relevant module `SPEC.md` files.
-5. If adding a module or changing module relationships, update root `SPEC.md` module table and architecture diagram.
-6. Get user confirmation on the SPEC changes before writing implementation code.
-7. Implement only after confirmation.
-8. Run the synchronization check.
+4. For Python work, choose the Python architecture level and write the rationale into SPEC.
+5. Write or update relevant module `SPEC.md` files.
+6. If adding a module or changing module relationships, update root `SPEC.md` module table and architecture diagram.
+7. Ask the user to confirm SPEC changes before implementation.
+8. Implement only after confirmation.
+9. Run verification, synchronization, and audit.
 
-### Modify existing functionality
+### Existing functionality change
 
-1. Read root `SPEC.md` and the current `SPEC.md` for every module you will touch.
+1. Read root `SPEC.md` and current module specs for every touched module.
 2. Read the confirmed design document when one exists.
-3. Determine impact: public interface change, module contract change, internal-only change, or cross-module dependency change.
-4. Update the relevant `SPEC.md` files to reflect the intended change.
-5. Get user confirmation before modifying implementation code.
+3. Determine impact: public interface, module contract, internal-only, or cross-module dependency change.
+4. Update relevant specs.
+5. Ask the user to confirm SPEC changes before implementation.
 6. Implement only after confirmation.
-7. Run the synchronization check.
+7. Run verification, synchronization, and audit.
 
-### Bug fix that does not change public interfaces or intended behavior
+### Narrow bug fix
 
-1. Read root `SPEC.md` and the relevant module `SPEC.md` files.
-2. Fix the code.
-3. Verify the relevant `SPEC.md` files are still accurate after the fix.
-4. Update specs only if the bug reveals inaccurate or incomplete specification.
+Bug fixes that do not change public interfaces or intended behavior may skip design-doc creation. Still read relevant specs, fix code, verify specs remain accurate, and update specs only if the bug reveals inaccurate or incomplete specification.
 
-## What Is Forbidden
+## Module SPEC Structure
 
-- Writing implementation code and then backfilling `SPEC.md` afterward.
-- Treating a design document, chat transcript, implementation plan, or test result as the source of truth after `SPEC.md` exists.
-- Starting implementation before relevant `SPEC.md` files are confirmed, except for narrow bug fixes that do not change public interfaces or intended behavior.
-- Updating `CLAUDE.md` or `AGENTS.md` as if they were project specifications.
-
-## SPEC Structure
-
-Every module has exactly one `SPEC.md`. It contains these sections in order unless the project root `SPEC.md` defines a compatible local convention:
+Every module has exactly one `SPEC.md`. Use this structure unless root `SPEC.md` defines a compatible local convention:
 
 ```text
 # Module: {name}
@@ -76,7 +119,9 @@ Every module has exactly one `SPEC.md`. It contains these sections in order unle
 ## Dependencies
 ## Public Interface
 ## Internal Structure
-## Error Handling        (if applicable)
+## Python Architecture        (for Python modules)
+## Error Handling             (if applicable)
+## Testing Contract
 ## Design Decisions
 ```
 
@@ -88,42 +133,62 @@ Root `SPEC.md` should contain repository-wide sections such as:
 ## Module Table
 ## Architecture Diagram
 ## Development Rules
+## Python Architecture Rules   (for Python repositories)
 ```
 
-## Module Boundary Discipline
+## Implementation Rules
 
-1. Each module is a directory with a public entry point such as `__init__.py` when the project uses package modules.
-2. Public API surface is exported only from the module entry point, using explicit public declarations where applicable.
-3. Internal implementation files follow the project's internal-file convention, such as prefixing files with `_`.
-4. Shared data structures and exceptions live in the project-designated shared model module when the project has one.
-5. Module dependencies must follow the DAG documented in root `SPEC.md`.
-6. Cross-module interaction uses public exports only. Do not import another module's internal files.
+After SPEC confirmation:
 
-## Change Synchronization
+1. Re-read confirmed root/module specs.
+2. Implement only what the confirmed specs require.
+3. If implementation reveals a missing or wrong SPEC decision, stop and update SPEC first.
+4. Keep edits scoped to affected modules and tests.
+5. For behavior changes, write or update tests before production code unless the user explicitly accepts a generated-code or throwaway exception.
+6. Run the repository's available verification commands.
 
-After implementation, verify all relevant specs still match code:
+## Change Synchronization Check
+
+After implementation, verify relevant specs still match code:
 
 - [ ] Root `SPEC.md` module table matches actual modules.
 - [ ] Root `SPEC.md` architecture diagram matches actual project dependencies.
 - [ ] Module `SPEC.md` Public Interface matches exported public symbols.
 - [ ] Module `SPEC.md` Dependencies match actual imports from other project modules.
-- [ ] Module `SPEC.md` Internal Structure lists actual files in the module directory.
-- [ ] Agent entry files such as `CLAUDE.md` and `AGENTS.md` remain thin pointers to root `SPEC.md`.
+- [ ] Module `SPEC.md` Internal Structure lists actual module files.
+- [ ] Python Architecture section matches package layout, import direction, framework boundaries, and model boundaries.
+- [ ] Agent entry files remain thin pointers to root `SPEC.md`.
 
-If any item is out of sync, fix the spec or code before considering the task done.
+If anything is out of sync, fix the spec or code before completion.
 
-## Workflow Summary
+## Audit Gate
+
+Before claiming completion, run the sibling `spec-implementation-audit` procedure or apply it directly. If available, read:
 
 ```text
-requirements-to-design
-  -> confirmed design document
-  -> spec-driven updates root/module SPEC.md
-  -> user confirms SPEC.md
-  -> implementation
-  -> synchronization check
-  -> spec-implementation-audit
+.github/skills/spec-implementation-audit/SKILL.md
 ```
 
-## Applying to `$ARGUMENTS`
+Audit against:
 
-Start by identifying whether `$ARGUMENTS` is a task description or a design document path. Then identify affected modules, read root `SPEC.md` and the relevant module specs, and follow the appropriate workflow branch above.
+```text
+root SPEC.md + relevant module SPEC.md files + actual diff
+```
+
+Tests, lint, and summaries are supporting evidence only. They do not replace diff-based SPEC audit.
+
+If blocking gaps exist:
+
+- Fix implementation gaps and re-audit.
+- If SPEC and implementation cannot be reconciled, ask the user for a design decision.
+- Do not claim completion while blocking gaps remain.
+
+## Required Final Report
+
+End with:
+
+- Specs updated and confirmed.
+- Files implemented.
+- Verification commands run and results.
+- Synchronization check result.
+- Audit result, including any accepted human decisions.

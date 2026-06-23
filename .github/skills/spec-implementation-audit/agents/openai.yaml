@@ -1,0 +1,6 @@
+interface:
+  display_name: "SPEC Audit"
+  short_description: "Audit diff against confirmed SPEC"
+  default_prompt: "Use $spec-implementation-audit to audit the implementation diff against confirmed SPEC.md files."
+policy:
+  allow_implicit_invocation: false

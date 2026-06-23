@@ -1,0 +1,6 @@
+interface:
+  display_name: "Python Architecture"
+  short_description: "Python module boundary rules"
+  default_prompt: "Use $python-architecture to review Python package boundaries, public APIs, and architecture level."
+policy:
+  allow_implicit_invocation: false
