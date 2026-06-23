@@ -14,7 +14,7 @@ from fsq_agent.agent import FsqAgent
 from fsq_agent.config import Settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, StepSequenceRunner, UiAutomator2AndroidDriver
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ExecutableStep, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
+from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, EvidencePolicy, ExecutableStep, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
 from fsq_agent.playground._recording import record_dynamic_result
 from fsq_agent.playground._state import PlaygroundState
 from fsq_agent.providers import build_ai_assertion_evaluator
@@ -164,7 +164,7 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		RunEvent(run_id=run_id, task_id=case.id, type="run_started", title="Strict YAML started", message=str(case_path)),
 	)
 	steps = _resolve_strict_replay_steps(
-		FsqExecutableStepAdapter().to_executable_steps(case),
+		FsqExecutableStepAdapter(default_evidence_policy=_playground_strict_evidence_policy()).to_executable_steps(case),
 		settings,
 	)
 	harness = AndroidHarness(
@@ -200,6 +200,14 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		steps=[],
 		verification=VerificationResult(status="success" if status == "passed" else "failed", summary=summary),
 		report=ReportArtifact(run_id=run_id, path=artifact.path, evidence_manifest_path=artifact.evidence_manifest_path),
+	)
+
+
+def _playground_strict_evidence_policy() -> EvidencePolicy:
+	return EvidencePolicy(
+		capture_after=True,
+		capture_on_failure=True,
+		artifact_kinds=["screenshot"],
 	)
 
 

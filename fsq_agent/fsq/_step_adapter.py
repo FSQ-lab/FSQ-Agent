@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from fsq_agent.models import (
     ANDROID_ACTION_DEFINITIONS_BY_NAME,
     ConfigurationError,
+    EvidencePolicy,
     ExecutableStep,
     FsqCase,
     RuntimeSecretRef,
@@ -19,6 +20,9 @@ _RUNTIME_SECRET_PLACEHOLDER = "__FSQ_RUNTIME_SECRET__"
 
 
 class FsqExecutableStepAdapter:
+    def __init__(self, default_evidence_policy: EvidencePolicy | None = None) -> None:
+        self.default_evidence_policy = default_evidence_policy
+
     def to_executable_steps(self, case: FsqCase) -> list[ExecutableStep]:
         return [self._to_step(case, command, index) for index, command in enumerate(case.commands)]
 
@@ -38,6 +42,7 @@ class FsqExecutableStepAdapter:
             kind=self._step_kind(action_name),
             action_name=action_name,
             params=params,
+            evidence_policy=self._evidence_policy(action_name),
             timeout_ms=timeout_ms,
             metadata={
                 "case_id": case.id,
@@ -128,6 +133,11 @@ class FsqExecutableStepAdapter:
     def _timeout_ms(self, params: dict[str, Any]) -> int | None:
         timeout = params.get("timeout")
         return timeout if isinstance(timeout, int) and timeout >= 1 else None
+
+    def _evidence_policy(self, action_name: str) -> EvidencePolicy:
+        if action_name == _WAIT_ACTION_NAME or self.default_evidence_policy is None:
+            return EvidencePolicy()
+        return self.default_evidence_policy.model_copy(deep=True)
 
     def _validation_errors(self, error: ValidationError) -> list[dict[str, object]]:
         try:

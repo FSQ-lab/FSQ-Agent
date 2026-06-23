@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import ConfigurationError
+from fsq_agent.models import ConfigurationError, EvidencePolicy
 
 
 FSQ_CASE = """
@@ -140,6 +140,32 @@ platform: android
     assert steps[1].action_name == "waitMs"
     assert steps[1].params == {"duration_ms": 1, "reason": "settle"}
     assert steps[1].kind == "action"
+
+
+def test_fsq_executable_step_adapter_applies_default_evidence_policy_except_waits(tmp_path: Path) -> None:
+    case_path = tmp_path / "evidence.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Evidence Case
+platform: android
+---
+- launchApp
+- waitMs:
+    duration_ms: 1
+    reason: settle
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+    policy = EvidencePolicy(capture_after=True, capture_on_failure=True, artifact_kinds=["screenshot"])
+
+    steps = FsqExecutableStepAdapter(default_evidence_policy=policy).to_executable_steps(case)
+
+    assert steps[0].evidence_policy.artifact_kinds == ["screenshot"]
+    assert steps[0].evidence_policy is not policy
+    assert steps[1].action_name == "waitMs"
+    assert steps[1].evidence_policy.artifact_kinds == []
 
 
 def test_fsq_executable_step_adapter_raises_for_malformed_command(tmp_path: Path) -> None:

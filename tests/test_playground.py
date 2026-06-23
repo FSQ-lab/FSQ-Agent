@@ -559,6 +559,9 @@ name: Strict Case
 platform: android
 ---
 - launchApp
+- waitMs:
+    duration_ms: 1
+    reason: settle
 """,
         encoding="utf-8",
     )
@@ -590,6 +593,9 @@ platform: android
 appId: com.microsoft.emmx
 ---
 - launchApp
+- waitMs:
+    duration_ms: 1
+    reason: settle
 """,
         encoding="utf-8",
     )
@@ -633,6 +639,9 @@ appId: com.microsoft.emmx
     assert progress["result"]["status"] == "success"
     assert captured["driver"] == {"app_id": "com.microsoft.emmx", "serial": "device-1"}
     assert captured["steps"][0].action_name == "launchApp"
+    assert captured["steps"][0].evidence_policy.artifact_kinds == ["screenshot"]
+    assert captured["steps"][1].action_name == "waitMs"
+    assert captured["steps"][1].evidence_policy.artifact_kinds == []
 
 
 def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:
