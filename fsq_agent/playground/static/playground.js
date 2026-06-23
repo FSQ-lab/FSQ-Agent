@@ -81,7 +81,7 @@ function clearPage() {
   els.progress.innerHTML = '';
   els.reportContent.textContent = '';
   clearPreview();
-  els.runSelected.disabled = false;
+  setRunButtonIdle();
 
   const goalMode = els.runModeInputs.find((input) => input.value === 'goal');
   if (goalMode) goalMode.checked = true;
@@ -94,7 +94,11 @@ async function refreshStatus() {
   try {
     const status = await api('/status');
     setServerStatus(status.busy ? 'Running' : 'Ready', status.busy ? 'running' : 'ready');
-    els.runSelected.disabled = Boolean(status.busy);
+    if (state.currentRequestId) {
+      setRunButtonCancel();
+    } else {
+      setRunButtonIdle({ disabled: Boolean(status.busy) });
+    }
     if (status.session?.connected) {
       els.sessionMessage.textContent = `Connected to ${status.session.displayName || status.session.deviceId}`;
     } else {
@@ -189,6 +193,10 @@ async function runYaml() {
 }
 
 async function runSelected() {
+  if (state.currentRequestId) {
+    await cancelExecution();
+    return;
+  }
   if (currentRunMode() === 'yaml' || currentRunMode() === 'strict-yaml') {
     await runYaml();
     return;
@@ -205,7 +213,7 @@ function updateRunMode() {
   const isYaml = mode === 'yaml' || mode === 'strict-yaml';
   els.goal.hidden = isYaml;
   els.caseYaml.hidden = !isYaml;
-  els.runSelected.textContent = 'Run';
+  if (!state.currentRequestId) setRunButtonIdle();
 }
 
 async function startExecution(payload) {
@@ -222,11 +230,47 @@ async function startExecution(payload) {
     const result = await api('/execute', { method: 'POST', body: JSON.stringify(payload) });
     state.currentRequestId = result.requestId;
     state.replayRequestId = result.requestId;
+    setRunButtonCancel();
     startProgressPolling();
     await refreshStatus();
   } catch (error) {
     appendProgress(`Error: ${error.message}`);
   }
+}
+
+async function cancelExecution() {
+  const requestId = state.currentRequestId;
+  if (!requestId) return;
+  setRunButtonCancel({ disabled: true });
+  try {
+    const progress = await api(`/cancel/${encodeURIComponent(requestId)}`, { method: 'POST', body: JSON.stringify({}) });
+    if (state.progressTimer) {
+      window.clearInterval(state.progressTimer);
+      state.progressTimer = null;
+    }
+    appendProgress('Cancelled by user', null, [], 'failed');
+    state.currentRequestId = null;
+    state.replayRequestId = progress.result?.runId || progress.runId || state.replayRequestId;
+    setRunButtonIdle();
+    await refreshStatus();
+  } catch (error) {
+    appendProgress(`Cancel error: ${error.message}`, null, [], 'failed');
+    setRunButtonCancel();
+  }
+}
+
+function setRunButtonCancel({ disabled = false } = {}) {
+  els.runSelected.textContent = 'Cancel';
+  els.runSelected.classList.remove('primary');
+  els.runSelected.classList.add('cancel');
+  els.runSelected.disabled = disabled;
+}
+
+function setRunButtonIdle({ disabled = false } = {}) {
+  els.runSelected.textContent = 'Run';
+  els.runSelected.classList.add('primary');
+  els.runSelected.classList.remove('cancel');
+  els.runSelected.disabled = disabled;
 }
 
 function startProgressPolling() {
@@ -250,6 +294,8 @@ async function refreshProgress() {
     if (progress.status !== 'running') {
       window.clearInterval(state.progressTimer);
       state.progressTimer = null;
+      state.currentRequestId = null;
+      setRunButtonIdle();
       appendProgress(`Finished: ${progress.status}`, null, [], statusFromValue(progress.status));
       if (progress.error) appendProgress(`Error: ${progress.error}`, null, [], 'failed');
       if (progress.result?.runId) {

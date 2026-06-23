@@ -17,7 +17,7 @@ import webbrowser
 from fsq_agent.config import Settings
 from fsq_agent.fsq import FsqCaseLoader
 from fsq_agent.playground._android import build_android_setup_schema, capture_android_screenshot, resolve_auto_session
-from fsq_agent.playground._execution import start_dynamic_goal_execution
+from fsq_agent.playground._execution import PlaygroundExecutionHandle, start_dynamic_goal_execution
 from fsq_agent.playground._state import BusyError, PlaygroundState
 from fsq_agent.report import resolve_report_path
 
@@ -39,6 +39,7 @@ class PlaygroundServer:
         self.state = PlaygroundState()
         self._httpd: _PlaygroundHTTPServer | None = None
         self._thread: Thread | None = None
+        self._execution_handles: dict[str, PlaygroundExecutionHandle] = {}
         self._static_root = (self.options.static_path or Path(__file__).parent / "static").resolve()
 
     @property
@@ -194,7 +195,7 @@ class PlaygroundServer:
                 return 409, {"error": str(exc)}
             if has_strict_case_yaml:
                 self._reset_replay_for_known_run(request_id, self._strict_case_run_id(strict_case_yaml_path.strip()))
-            start_dynamic_goal_execution(
+            handle = start_dynamic_goal_execution(
                 settings=self.settings,
                 state=self.state,
                 request_id=request_id,
@@ -205,10 +206,20 @@ class PlaygroundServer:
                 record=self.options.record,
                 record_on_failure=self.options.record_on_failure,
             )
+            self._execution_handles[request_id] = handle
             return 202, {"requestId": request_id}
         if path.startswith("/replay-video/"):
             replay_id = unquote(path.removeprefix("/replay-video/")).strip()
             return self._store_replay_video(replay_id, body)
+        if path.startswith("/cancel/"):
+            request_id = unquote(path.removeprefix("/cancel/")).strip()
+            cancelled = self.state.request_cancel(request_id)
+            if cancelled is None:
+                return 404, {"error": "Task progress not found."}
+            handle = self._execution_handles.pop(request_id, None)
+            if handle is not None:
+                handle.cancel()
+            return 200, cancelled
         return 404, {"error": "Not found."}
 
     def handle_delete(self, path: str) -> tuple[int, object]:

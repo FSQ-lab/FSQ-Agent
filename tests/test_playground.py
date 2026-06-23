@@ -6,7 +6,7 @@ from urllib.request import urlopen
 from fsq_agent.config import Settings
 from fsq_agent.models import ReportArtifact, RunEvent, TaskResult, VerificationResult
 from fsq_agent.playground._android import AndroidTarget, parse_adb_devices, resolve_auto_session
-from fsq_agent.playground._execution import _run_dynamic_task, task_from_case_yaml, task_from_goal
+from fsq_agent.playground._execution import _event_sink, _run_dynamic_task, task_from_case_yaml, task_from_goal
 from fsq_agent.playground._server import PlaygroundServer, PlaygroundServerOptions
 from fsq_agent.playground._state import BusyError, PlaygroundState
 
@@ -243,6 +243,57 @@ def test_playground_state_assigns_sequence_for_unsequenced_events() -> None:
     assert [event["sequence"] for event in incremental_progress["events"]] == [2]
 
 
+def test_playground_state_cancel_request_marks_task_cancelled() -> None:
+    state = PlaygroundState()
+    request_id = state.start_task("Cancelable")
+
+    payload = state.request_cancel(request_id)
+
+    assert payload is not None
+    assert payload["status"] == "cancelled"
+    assert payload["cancelRequested"] is True
+    assert state.is_cancel_requested(request_id) is True
+    assert state.current_request_id is None
+
+
+def test_playground_server_cancel_endpoint_cancels_current_task(tmp_path: Path) -> None:
+    server = PlaygroundServer(Settings(), PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Cancelable")
+
+    class FakeHandle:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    handle = FakeHandle()
+    server._execution_handles[request_id] = handle  # type: ignore[assignment]
+
+    status, payload = server.handle_post(f"/cancel/{request_id}", {})
+
+    assert status == 200
+    assert payload["status"] == "cancelled"
+    assert payload["cancelRequested"] is True
+    assert handle.cancelled is True
+    assert server.state.current_request_id is None
+
+
+def test_playground_event_sink_ignores_events_after_cancel() -> None:
+    state = PlaygroundState()
+    request_id = state.start_task("Cancelable")
+    sink = _event_sink(state, request_id)
+
+    sink(RunEvent(run_id="run-1", task_id="task", type="run_started", title="Started"))
+    state.request_cancel(request_id)
+    sink(RunEvent(run_id="run-1", task_id="task", type="planning_update", title="Late event"))
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["status"] == "cancelled"
+    assert [event["title"] for event in progress["events"]] == ["Started"]
+
+
 def test_playground_server_persists_replay_frames(tmp_path: Path) -> None:
     settings = Settings()
     settings.output.runs_dir = tmp_path / "runs"
@@ -356,6 +407,20 @@ def test_playground_static_progress_summarizes_replay_frames() -> None:
     assert "progress-frame-gallery" not in styles
     assert "src: `data:image/png;base64,${frame.screenshot}`" in script
     assert "path: frame.path || ''" in script
+
+
+def test_playground_static_run_button_can_cancel() -> None:
+    static_dir = Path(__file__).parents[1] / "fsq_agent" / "playground" / "static"
+    script = (static_dir / "playground.js").read_text(encoding="utf-8")
+    styles = (static_dir / "playground.css").read_text(encoding="utf-8")
+
+    assert "cancelExecution" in script
+    assert "setRunButtonCancel" in script
+    assert "setRunButtonIdle" in script
+    assert "Cancel" in script
+    assert "button.cancel" in styles
+    assert "#run-selected" in styles
+    assert "min-width: 80px" in styles
 
 
 def test_playground_server_preview_endpoint_returns_latest_screenshot(tmp_path: Path) -> None:
@@ -563,6 +628,47 @@ def test_playground_dynamic_goal_records_with_failure_drafts(tmp_path: Path, mon
     assert captured["allow_failure"] is True
     assert progress["result"]["recording"]["status"] == "skipped"
     assert progress["result"]["recording"]["draft"] is True
+
+
+def test_playground_dynamic_goal_does_not_overwrite_cancelled_task(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    state = PlaygroundState()
+    request_id = state.start_task("Do it")
+
+    class FakeAgent:
+        async def run(self, task, event_sink=None):
+            state.request_cancel(request_id)
+            if event_sink is not None:
+                event_sink(RunEvent(run_id="run-1", task_id=task.id, type="planning_update", title="Late event"))
+            return TaskResult(
+                task_id=task.id,
+                status="success",
+                steps=[],
+                verification=VerificationResult(status="success", summary="done"),
+                report=ReportArtifact(run_id="run-1", path=tmp_path / "report.md"),
+            )
+
+    monkeypatch.setattr("fsq_agent.playground._execution.validate_runtime_settings", lambda _settings: None)
+    monkeypatch.setattr("fsq_agent.playground._execution.FsqAgent.from_settings", lambda _settings: FakeAgent())
+
+    _run_dynamic_task(
+        settings=settings,
+        state=state,
+        request_id=request_id,
+        goal="Do it",
+        case_yaml_path=None,
+        strict_case_yaml_path=None,
+        device_id=None,
+        record=True,
+        record_on_failure=True,
+    )
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["status"] == "cancelled"
+    assert progress["result"] is None
+    assert progress["events"] == []
 
 
 def test_playground_execute_clears_strict_replay_dir_at_start(tmp_path: Path, monkeypatch) -> None:

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import threading
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from pydantic import ValidationError
@@ -21,6 +22,36 @@ from fsq_agent.providers import build_ai_assertion_evaluator
 from fsq_agent.report import CoreEvidenceReportGenerator
 
 
+class PlaygroundTaskCancelled(RuntimeError):
+	pass
+
+
+@dataclass
+class PlaygroundExecutionHandle:
+	request_id: str
+	thread: threading.Thread | None = None
+	_lock: threading.Lock = field(default_factory=threading.Lock)
+	_loop: asyncio.AbstractEventLoop | None = None
+	_task: asyncio.Task[None] | None = None
+	_cancel_requested: bool = False
+
+	def attach(self, loop: asyncio.AbstractEventLoop, task: asyncio.Task[None]) -> None:
+		with self._lock:
+			self._loop = loop
+			self._task = task
+			cancel_requested = self._cancel_requested
+		if cancel_requested:
+			loop.call_soon_threadsafe(task.cancel)
+
+	def cancel(self) -> None:
+		with self._lock:
+			self._cancel_requested = True
+			loop = self._loop
+			task = self._task
+		if loop is not None and task is not None and not task.done():
+			loop.call_soon_threadsafe(task.cancel)
+
+
 def start_dynamic_goal_execution(
 	*,
 	settings: Settings,
@@ -32,25 +63,28 @@ def start_dynamic_goal_execution(
 	device_id: str | None,
 	record: bool = True,
 	record_on_failure: bool = True,
-) -> threading.Thread:
+) -> PlaygroundExecutionHandle:
+	handle = PlaygroundExecutionHandle(request_id=request_id)
 	thread = threading.Thread(
-		target=_run_dynamic_task,
+		target=_run_dynamic_task_thread,
 		kwargs={
-			"settings": settings,
-			"state": state,
-			"request_id": request_id,
-			"goal": goal,
-			"case_yaml_path": case_yaml_path,
-			"strict_case_yaml_path": strict_case_yaml_path,
-			"device_id": device_id,
-			"record": record,
-			"record_on_failure": record_on_failure,
+		"handle": handle,
+		"settings": settings,
+		"state": state,
+		"request_id": request_id,
+		"goal": goal,
+		"case_yaml_path": case_yaml_path,
+		"strict_case_yaml_path": strict_case_yaml_path,
+		"device_id": device_id,
+		"record": record,
+		"record_on_failure": record_on_failure,
 		},
 		name=f"fsq-playground-{request_id}",
 		daemon=True,
 	)
+	handle.thread = thread
 	thread.start()
-	return thread
+	return handle
 
 
 def task_from_goal(goal: str) -> Task:
@@ -116,37 +150,119 @@ def _run_dynamic_task(
 	record: bool,
 	record_on_failure: bool,
 ) -> None:
+	asyncio.run(
+		_run_dynamic_task_async(
+			settings=settings,
+			state=state,
+			request_id=request_id,
+			goal=goal,
+			case_yaml_path=case_yaml_path,
+			strict_case_yaml_path=strict_case_yaml_path,
+			device_id=device_id,
+			record=record,
+			record_on_failure=record_on_failure,
+		)
+	)
+
+
+def _run_dynamic_task_thread(
+	*,
+	handle: PlaygroundExecutionHandle,
+	settings: Settings,
+	state: PlaygroundState,
+	request_id: str,
+	goal: str | None,
+	case_yaml_path: str | None,
+	strict_case_yaml_path: str | None,
+	device_id: str | None,
+	record: bool,
+	record_on_failure: bool,
+) -> None:
+	loop = asyncio.new_event_loop()
+	asyncio.set_event_loop(loop)
+	task = loop.create_task(
+		_run_dynamic_task_async(
+			settings=settings,
+			state=state,
+			request_id=request_id,
+			goal=goal,
+			case_yaml_path=case_yaml_path,
+			strict_case_yaml_path=strict_case_yaml_path,
+			device_id=device_id,
+			record=record,
+			record_on_failure=record_on_failure,
+		)
+	)
+	handle.attach(loop, task)
+	try:
+		loop.run_until_complete(task)
+	except asyncio.CancelledError:
+		state.request_cancel(request_id)
+	finally:
+		asyncio.set_event_loop(None)
+		loop.close()
+
+
+async def _run_dynamic_task_async(
+	*,
+	settings: Settings,
+	state: PlaygroundState,
+	request_id: str,
+	goal: str | None,
+	case_yaml_path: str | None,
+	strict_case_yaml_path: str | None,
+	device_id: str | None,
+	record: bool,
+	record_on_failure: bool,
+) -> None:
 	run_settings = settings.model_copy(deep=True)
 	if device_id:
 		run_settings.harness.android.serial = device_id
 	try:
+		_raise_if_cancelled(state, request_id)
 		if goal:
 			validate_runtime_settings(run_settings)
 			task = task_from_goal(goal)
-			result = _run_agent_task(run_settings, state, request_id, task)
+			result = await _run_agent_task_async(run_settings, state, request_id, task)
 		elif case_yaml_path:
 			validate_runtime_settings(run_settings)
 			task = task_from_case_yaml(case_yaml_path, run_settings)
-			result = _run_agent_task(run_settings, state, request_id, task)
+			result = await _run_agent_task_async(run_settings, state, request_id, task)
 		elif strict_case_yaml_path:
 			result = _run_strict_case_yaml(run_settings, state, request_id, strict_case_yaml_path)
 		else:
 			raise ValueError("goal, case_yaml_path, or strict_case_yaml_path is required")
+		if state.is_cancel_requested(request_id):
+			return
 		recording = None
 		if not strict_case_yaml_path and record:
 			recording = record_dynamic_result(run_settings, task, result, allow_failure=record_on_failure)
 		state.finish_task(request_id, result, recording=recording)
+	except asyncio.CancelledError:
+		state.request_cancel(request_id)
+		raise
+	except PlaygroundTaskCancelled as exc:
+		state.request_cancel(request_id)
 	except BaseException as exc:  # noqa: BLE001 - background failures must be visible through progress state.
 		state.fail_task(request_id, exc)
 
 
 def _run_agent_task(settings: Settings, state: PlaygroundState, request_id: str, task: Task) -> TaskResult:
 	return asyncio.run(
-		FsqAgent.from_settings(settings).run(
-			task,
-			event_sink=_event_sink(state, request_id),
-		)
+		_run_agent_task_async(settings, state, request_id, task)
 	)
+
+
+async def _run_agent_task_async(settings: Settings, state: PlaygroundState, request_id: str, task: Task) -> TaskResult:
+	return await FsqAgent.from_settings(settings).run(
+		task,
+		event_sink=_event_sink(state, request_id),
+	)
+
+
+def _raise_if_cancelled(state: PlaygroundState, request_id: str) -> None:
+	if state.is_cancel_requested(request_id):
+		raise PlaygroundTaskCancelled("Cancelled by user.")
 
 
 def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id: str, path_text: str) -> TaskResult:
@@ -172,9 +288,10 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		artifact_store=ArtifactStore(run_dir=run_dir),
 		ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
 	)
+	cancellable_harness = _CancellableHarness(harness, state, request_id)
 	artifact = _run_strict_core_steps(
 		case_path=case_path,
-		harness=harness,
+		harness=cancellable_harness,
 		output_dir=run_dir,
 		run_id=run_id,
 		steps=steps,
@@ -209,6 +326,42 @@ def _playground_strict_evidence_policy() -> EvidencePolicy:
 		capture_on_failure=True,
 		artifact_kinds=["screenshot"],
 	)
+
+
+class _CancellableHarness:
+	def __init__(self, harness: AndroidHarness, state: PlaygroundState, request_id: str) -> None:
+		self._harness = harness
+		self._state = state
+		self._request_id = request_id
+
+	def _check_cancelled(self) -> None:
+		_raise_if_cancelled(self._state, self._request_id)
+
+	def get_context(self):
+		self._check_cancelled()
+		return self._harness.get_context()
+
+	def action_space(self):
+		return self._harness.action_space()
+
+	def before_action(self, step: ExecutableStep, context) -> None:
+		self._check_cancelled()
+		return self._harness.before_action(step, context)
+
+	def invoke_action(self, step: ExecutableStep, context):
+		self._check_cancelled()
+		return self._harness.invoke_action(step, context)
+
+	def after_action(self, step: ExecutableStep, context, action_result) -> None:
+		self._check_cancelled()
+		return self._harness.after_action(step, context, action_result)
+
+	def capture_artifact(self, *args, **kwargs):
+		self._check_cancelled()
+		return self._harness.capture_artifact(*args, **kwargs)
+
+	def classify_error(self, error: BaseException, phase, step: ExecutableStep):
+		return self._harness.classify_error(error, phase, step)
 
 
 def _resolve_case_yaml_path(path_text: str, settings: Settings) -> Path:
@@ -338,6 +491,8 @@ def _validate_resolved_params(step: ExecutableStep, params: dict[str, Any]) -> N
 
 def _event_sink(state: PlaygroundState, request_id: str) -> Callable[[RunEvent], None]:
 	def sink(event: RunEvent) -> None:
+		if state.is_cancel_requested(request_id):
+			return
 		state.add_event(request_id, event)
 		_preview = _preview_from_dynamic_event(event)
 		if _preview is not None:

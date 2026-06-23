@@ -36,6 +36,7 @@ Initial HTTP API:
 | `DELETE /session` | Clear active session metadata when no task is running. |
 | `GET /runtime-info` | Return platform/runtime metadata, preview capability, app id presence, selected device id, and last run summary. |
 | `POST /execute` | Start one dynamic goal, raw YAML-reference, or strict YAML execution and return a request id immediately. |
+| `POST /cancel/{request_id}` | Request cooperative cancellation for the currently running task and return the updated task state. |
 | `GET /task-progress/{request_id}` | Return progress and final result metadata for one request id. Without query parameters it returns accumulated events for compatibility; with `after_sequence` it returns only events whose sequence is greater than the supplied value so browser polling can append new progress without re-rendering history. |
 | `GET /screenshot` | Return a base64 screenshot and timestamp when available, or a structured unavailable/error response. |
 | `GET /replay/{request_or_run_id}` | Return persisted timestamped screenshot frames for one playground request id or run id, including the frame index, source path when available, and base64 screenshot bytes used by browser replay-video generation. |
@@ -45,6 +46,8 @@ Initial HTTP API:
 | `GET /reports/{run_id}` | Resolve a stored Markdown or JSON report for one run id and return safe metadata or content. |
 
 `POST /execute` accepts exactly one of `goal`, `caseYamlPath`, or `strictCaseYamlPath`. `goal` constructs a dynamic `Task` equivalent to CLI `--goal`. `caseYamlPath` resolves against `settings.cases.dir` first, then the current working directory, reads the complete UTF-8 file as raw text, and constructs a dynamic raw-case reference task equivalent to CLI non-strict `--case-yaml`; it must not parse YAML into strict executable steps. `strictCaseYamlPath` resolves the same way but parses the YAML, resolves strict replay references, executes steps through the deterministic core runner, and writes `core-report.md/json` plus `evidence-manifest.json`. Playground strict YAML execution requests screenshot evidence on generated non-`waitMs` steps so the browser preview/replay can use strict-run artifacts without changing CLI strict behavior. Playground dynamic execution should attempt post-run recording with `allow_failure=True`, matching CLI `--record --record-on-failure`; strict YAML execution does not record again.
+
+When a task is running, the browser Run button becomes Cancel and calls `POST /cancel/{request_id}`. Cancellation is cooperative: playground state records the request immediately, dynamic execution suppresses late progress events and result overwrite after cancellation without raising from SDK stream callbacks, and strict YAML execution observes cancellation at Android harness boundaries before starting subsequent platform operations. Completed cancelled tasks must remain cancelled even if the background worker later returns.
 
 ## Internal Structure
 
