@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fsq_agent.core import EvidenceRecorder, StepSequenceRunner
+from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent.core import EvidenceRecorder, StepRunner, StepSequenceRunner
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import (
     EvidencePolicy,
@@ -73,7 +74,8 @@ def test_fsq_steps_sequence_runner_and_recorder_write_evidence_manifest(tmp_path
     case_path = tmp_path / "manifest_smoke.codex.yaml"
     case_path.write_text(FSQ_CASE, encoding="utf-8")
     case = FsqCaseLoader().load_case(case_path)
-    steps = FsqExecutableStepAdapter().to_executable_steps(case)
+    registry = build_capability_registry()
+    steps = FsqExecutableStepAdapter(registry_snapshot=registry.snapshot()).to_executable_steps(case)
     steps[1] = steps[1].model_copy(
         update={
             "evidence_policy": EvidencePolicy(
@@ -84,7 +86,14 @@ def test_fsq_steps_sequence_runner_and_recorder_write_evidence_manifest(tmp_path
         }
     )
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path / "run-1")
-    bundle = StepSequenceRunner(harness=SmokeHarness(), evidence_recorder=recorder).run_steps(
+    bundle = StepSequenceRunner(
+        step_runner=StepRunner(
+            harness=SmokeHarness(),
+            capability_registry=registry,
+            executor_bindings=build_capability_executor_bindings(),
+        ),
+        evidence_recorder=recorder,
+    ).run_steps(
         run_id="run-1",
         steps=steps,
     )
@@ -106,11 +115,10 @@ def test_fsq_steps_sequence_runner_and_recorder_write_evidence_manifest(tmp_path
         "step_index": 1,
         "metadata": {"case_name": "Manifest Smoke Case", "platform": "android"},
     }
-    assert [event["event_type"] for event in manifest["events"]].count("artifact_captured") == 4
-    assert [artifact["kind"] for artifact in manifest["artifacts"]] == [
-        "screenshot",
-        "ui_tree",
-        "screenshot",
-        "ui_tree",
-    ]
-    assert manifest["artifacts"][0]["path"] == "artifacts/screenshot/manifest_smoke-step-002-prepare-before-action.screenshot"
+    assert [event["event_type"] for event in manifest["events"]].count("artifact_captured") == 12
+    artifact_reasons = [event["payload"]["reason"] for event in manifest["events"] if event["event_type"] == "artifact_captured"]
+    assert artifact_reasons.count("before-action") == 6
+    assert artifact_reasons.count("after-action") == 6
+    assert [artifact["kind"] for artifact in manifest["artifacts"]] == ["screenshot", "ui_tree"] * 6
+    assert manifest["artifacts"][0]["path"] == "artifacts/screenshot/manifest_smoke-step-001-prepare-before-action.screenshot"
+    assert manifest["artifacts"][4]["path"] == "artifacts/screenshot/manifest_smoke-step-002-prepare-before-action.screenshot"

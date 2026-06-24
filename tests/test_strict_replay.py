@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from fsq_agent._capability_bootstrap import build_capability_registry
 from fsq_agent.cli._strict_replay import collect_runtime_secret_refs, resolve_strict_replay_steps
 from fsq_agent.config._settings import Settings
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
@@ -23,7 +24,9 @@ platform: android
 """,
         encoding="utf-8",
     )
-    return FsqExecutableStepAdapter().to_executable_steps(FsqCaseLoader().load_case(case_path))
+    return FsqExecutableStepAdapter(registry_snapshot=build_capability_registry().snapshot()).to_executable_steps(
+        FsqCaseLoader().load_case(case_path)
+    )
 
 
 def test_resolve_strict_replay_steps_substitutes_runtime_secret_in_memory(

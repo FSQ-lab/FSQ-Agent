@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import json
 from pathlib import Path
 from urllib.request import urlopen
@@ -763,10 +764,50 @@ appId: com.microsoft.emmx
     assert progress is not None
     assert progress["result"]["status"] == "success"
     assert captured["driver"] == {"app_id": "com.microsoft.emmx", "serial": "device-1"}
-    assert captured["steps"][0].action_name == "launchApp"
-    assert captured["steps"][0].evidence_policy.artifact_kinds == ["screenshot"]
-    assert captured["steps"][1].action_name == "waitMs"
-    assert captured["steps"][1].evidence_policy.artifact_kinds == []
+    assert captured["steps"][0].action_name == "launch_app"
+    assert captured["steps"][0].metadata["authored_action_name"] == "launchApp"
+
+
+def test_playground_strict_yaml_runs_outside_async_event_loop(monkeypatch) -> None:
+    settings = Settings()
+    state = PlaygroundState()
+    request_id = state.start_task("Strict")
+    captured = {}
+
+    def fake_run_strict_case_yaml(_settings, _state, _request_id, path_text):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            captured["running_loop"] = False
+        else:
+            captured["running_loop"] = True
+        captured["path_text"] = path_text
+        return TaskResult(
+            task_id="strict",
+            status="success",
+            steps=[],
+            verification=VerificationResult(status="success", summary="ok"),
+            report=ReportArtifact(run_id="run-1", path=Path("core-report.md")),
+        )
+
+    monkeypatch.setattr("fsq_agent.playground._execution._run_strict_case_yaml", fake_run_strict_case_yaml)
+
+    _run_dynamic_task(
+        settings=settings,
+        state=state,
+        request_id=request_id,
+        goal=None,
+        case_yaml_path=None,
+        strict_case_yaml_path="strict_case.codex.yaml",
+        device_id=None,
+        record=True,
+        record_on_failure=True,
+    )
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["status"] == "success"
+    assert captured == {"running_loop": False, "path_text": "strict_case.codex.yaml"}
 
 
 def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:

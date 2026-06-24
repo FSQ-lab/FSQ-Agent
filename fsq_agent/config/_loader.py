@@ -61,6 +61,12 @@ def _reject_obsolete_settings(data: dict[str, Any]) -> None:
             "Obsolete verification configuration is no longer supported.",
             context={"config_key": "verification", "removed_key": "verification.mode"},
         )
+    harness = data.get("harness")
+    if isinstance(harness, dict) and "strict_core" in harness:
+        raise ConfigurationError(
+            "Obsolete strict-core step interval configuration is no longer supported; use execution.post_action_delay_seconds instead.",
+            context={"config_key": "harness.strict_core", "replacement_key": "execution.post_action_delay_seconds"},
+        )
     openai_agents = data.get("openai_agents")
     if not isinstance(openai_agents, dict):
         return

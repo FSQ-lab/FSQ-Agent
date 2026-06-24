@@ -56,7 +56,8 @@ openai_agents:
     assert settings.output.runs_dir == tmp_path / "workspace" / "output" / "runs"
     assert settings.output.runs_dir.exists()
     assert settings.cases.dir == tmp_path / "cases"
-    assert settings.harness.strict_core.step_interval_seconds == 1.0
+    assert settings.execution.post_action_delay_seconds.platform == 1.0
+    assert settings.execution.post_action_delay_seconds.common == 0.0
     assert settings.agent_context.knowledge.root_dir == tmp_path / "knowledge"
     assert settings.agent_context.knowledge.skills.dir == tmp_path / "knowledge" / "skills"
     assert settings.pre_plan.knowledge_dir == tmp_path / "knowledge"
@@ -121,15 +122,16 @@ harness:
     assert settings.harness.android.serial == "emulator-5554"
 
 
-def test_load_settings_accepts_strict_core_step_interval(tmp_path: Path) -> None:
+def test_load_settings_accepts_post_action_delay_defaults(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
-harness:
-  strict_core:
-    step_interval_seconds: 0
+execution:
+    post_action_delay_seconds:
+        platform: 0
+        common: 0.25
 """,
         ),
         encoding="utf-8",
@@ -137,24 +139,43 @@ harness:
 
     settings = load_settings(config_path)
 
-    assert settings.harness.strict_core.step_interval_seconds == 0
+    assert settings.execution.post_action_delay_seconds.platform == 0
+    assert settings.execution.post_action_delay_seconds.common == 0.25
 
 
-def test_load_settings_rejects_negative_strict_core_step_interval(tmp_path: Path) -> None:
+def test_load_settings_rejects_negative_post_action_delay(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         _base_config(
             tmp_path,
             """
-harness:
-  strict_core:
-    step_interval_seconds: -0.1
+execution:
+    post_action_delay_seconds:
+        platform: -0.1
 """,
         ),
         encoding="utf-8",
     )
 
     with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
+
+
+def test_load_settings_rejects_obsolete_strict_core_step_interval(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+    strict_core:
+        step_interval_seconds: 0
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Obsolete strict-core step interval"):
         load_settings(config_path)
 
 

@@ -107,18 +107,24 @@ class AndroidHarnessSettings(BaseModel):
         self._serial = value
 
 
-class StrictCoreHarnessSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    step_interval_seconds: float = Field(default=1.0, ge=0)
-
-
 class HarnessSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     platform: Literal["android"] = "android"
     android: AndroidHarnessSettings = Field(default_factory=AndroidHarnessSettings)
-    strict_core: StrictCoreHarnessSettings = Field(default_factory=StrictCoreHarnessSettings)
+
+
+class PostActionDelaySettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    platform: float = Field(default=1.0, ge=0)
+    common: float = Field(default=0.0, ge=0)
+
+
+class ExecutionSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    post_action_delay_seconds: PostActionDelaySettings = Field(default_factory=PostActionDelaySettings)
 
 
 class OpenAIAgentPromptConfig(BaseModel):

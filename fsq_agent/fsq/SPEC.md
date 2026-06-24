@@ -2,57 +2,58 @@
 
 ## Purpose
 
-Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository, including generated strict replay refs and pure waits, and convert parsed cases into deterministic execution-core steps for strict-core execution. Dynamic LLM execution that uses a YAML file reads that file as raw text in the CLI layer and deliberately bypasses this module.
+Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository, including generated strict replay refs and pure waits, resolve authored action names through the capability registry, and convert parsed cases into deterministic canonical execution-core steps for strict-core execution. Dynamic LLM execution that uses a YAML file reads that file as raw text in the CLI layer and deliberately bypasses this module.
 
 Goal-only FSQ cases may omit the command document or provide an empty command list; parsed goal-only cases produce no executable steps.
 
 ## Dependencies
 
-- `models`: Uses `FsqCase`, `FsqCaseConfig`, shared configuration errors, execution-core contracts such as `ExecutableStep`, `SourceRef`, and `EvidencePolicy`, strict replay refs such as `RuntimeSecretRef`, `WaitMsParams`, and the shared Android action registry for deterministic Android command payload normalization and step kind classification.
+- `models`: Uses `FsqCase`, `FsqCaseConfig`, shared configuration errors, execution-core contracts such as `ExecutableStep`, `SourceRef`, and `EvidencePolicy`, strict replay refs such as `RuntimeSecretRef`, capability registry snapshots, replay policy metadata, and shared capability parameter models for deterministic command payload normalization and step kind classification.
+
+The fsq module must not import `capabilities`, `core`, or `tools`. It receives a `CapabilityRegistrySnapshot` from entry code and resolves authored command names through that serializable snapshot.
 
 ## Public Interface
 
 Current `__init__.py` exports via `__all__`:
 
 - `FsqCaseLoader`: Loads `.codex.yaml` FSQ cases from explicit paths or the configured read-only case directory for strict-core execution. It accepts traditional metadata-plus-command cases and goal-only metadata cases.
-- `FsqExecutableStepAdapter`: Converts an `FsqCase` command document into ordered `ExecutableStep` records for deterministic core execution.
+- `FsqExecutableStepAdapter`: Converts an `FsqCase` command document into ordered canonical `ExecutableStep` records for deterministic core execution using a registry snapshot.
 - `is_fsq_case_file`: Detects FSQ case file names.
 
 The first deterministic step adapter exposes a narrow API:
 
 ```python
-adapter = FsqExecutableStepAdapter()
+adapter = FsqExecutableStepAdapter(registry_snapshot=registry.snapshot())
 steps = adapter.to_executable_steps(case)
 ```
 
-`FsqExecutableStepAdapter` preserves FSQ action names exactly in `ExecutableStep.action_name`, including names such as `tapOn`, `inputText`, `pressKey`, `assertVisible`, `assert`, `performActions`, and generated replay command `waitMs`. It should not translate Android action names into platform driver method names; platform harnesses own that mapping. `waitMs` is not a platform driver method and is handled later as a core-owned pure wait.
+`FsqExecutableStepAdapter` resolves authored FSQ action names and replay aliases through the registry and stores the canonical capability name in `ExecutableStep.action_name`. Authored names such as `tapOn`, `inputText`, `pressKey`, `assertVisible`, `assert`, `assertWithAI`, and generated replay alias `waitMs` are preserved in `ExecutableStep.metadata["authored_action_name"]`.
 
-The adapter should normalize each known Android YAML command into `ExecutableStep.params` by looking up the action in `ANDROID_ACTION_DEFINITIONS_BY_NAME`, validating object-shaped payloads against the registry's shared parameter model, then storing `model_dump(mode="json", exclude_none=True)`. Known Android action payloads should be authored in the same field shape as their parameter models rather than relying on action-specific scalar shorthand. The first-batch canonical forms are:
+The adapter should normalize each known YAML command into `ExecutableStep.params` by resolving the action alias to a `CapabilityDefinition`, validating object-shaped payloads against `capability.params_model`, then storing `model_dump(mode="json", exclude_none=True)`. Known action payloads should be authored in the same field shape as their parameter models rather than relying on action-specific scalar shorthand. The first-batch canonical forms are:
 
-| FSQ command shape | `action_name` | `params` |
+| FSQ command shape | canonical `action_name` | `params` |
 |---|---|---|
-| `launchApp` | `launchApp` | `{}` |
-| `killApp` | `killApp` | `{}` |
-| `pressKey: {key: Enter}` | `pressKey` | `{"key": "Enter"}` |
-| `tapOn: {target: Login}` | `tapOn` | `{"target": "Login"}` |
-| `performActions: {actions: [...]}` | `performActions` | `{"actions": [...]}` |
-| `inputText: {text: bing.com, ...}` | `inputText` | validated `AndroidInputTextParams` dump |
-| `assertVisible: {...}` | `assertVisible` | validated `AndroidAssertVisibleParams` dump |
-| `assertNotVisible: {...}` | `assertNotVisible` | validated `AndroidAssertNotVisibleParams` dump |
-| `longPressOn: {...}` | `longPressOn` | validated `AndroidLongPressOnParams` dump |
+| `launchApp` | `launch_app` | `{}` |
+| `killApp` | `kill_app` | `{}` |
+| `pressKey: {key: Enter}` | `press_key` | `{"key": "Enter"}` |
+| `tapOn: {target: Login}` | `tap_on` | `{"target": "Login"}` |
+| `inputText: {text: bing.com, ...}` | `input_text` | validated `AndroidInputTextParams` dump |
+| `assertVisible: {...}` | `assert_visible` | validated `AndroidAssertVisibleParams` dump |
+| `assertNotVisible: {...}` | `assert_not_visible` | validated `AndroidAssertNotVisibleParams` dump |
+| `longPressOn: {...}` | `long_press_on` | validated `AndroidLongPressOnParams` dump |
 | `swipe: {...}` | `swipe` | validated `AndroidSwipeParams` dump |
-| `assert: {element: ..., text: ...}` | `assert` | validated `AndroidAssertStateParams` dump |
-| `assertWithAI: {prompt: ...}` | `assertWithAI` | validated `AndroidAssertWithAIParams` dump |
-| `inputText: {text: {runtimeSecret: TEST_PASSWORD}, ...}` | `inputText` | pre-resolution params preserving `{"text": {"runtimeSecret": "TEST_PASSWORD"}}` for strict entry resolution |
-| `waitMs: {duration_ms: 1000, reason: settle}` | `waitMs` | validated `WaitMsParams` dump |
+| `assert: {element: ..., text: ...}` | `assert_state` | validated `AndroidAssertStateParams` dump |
+| `assertWithAI: {prompt: ...}` | `assert_with_ai` | validated `AndroidAssertWithAIParams` dump |
+| `inputText: {text: {runtimeSecret: TEST_PASSWORD}, ...}` | `input_text` | pre-resolution params preserving `{"text": {"runtimeSecret": "TEST_PASSWORD"}}` for strict entry resolution |
+| `waitMs: {duration_ms: 1000, reason: settle}` | `wait_ms` | validated `WaitMsParams` dump |
 
-For Android commands containing `runtimeSecret` replay refs, `FsqExecutableStepAdapter` may validate the non-secret shape using placeholder text while preserving the `RuntimeSecretRef` object/dict in `ExecutableStep.params`. Final Android driver parameter validation with the real secret value is owned by the strict CLI entry after in-memory resolution.
+For commands containing `runtimeSecret` replay refs, `FsqExecutableStepAdapter` may validate the non-secret shape using placeholder text while preserving the `RuntimeSecretRef` object/dict in `ExecutableStep.params`. Final capability parameter validation with the real secret value is owned by the strict CLI entry after in-memory resolution.
 
 Runner-owned metadata such as valid `timeout` values should be extracted before driver parameter validation and stored in `ExecutableStep.timeout_ms`, not passed through to driver parameter models. The original raw command remains available in `ExecutableStep.metadata` for evidence and debugging.
 
-The first-batch step kind mapping for known Android actions is owned by the same Android action registry:
+Step kind mapping for known actions is owned by capability metadata:
 
-| FSQ action | `ExecutableStep.kind` |
+| Authored alias | `ExecutableStep.kind` |
 |---|---|
 | `launchApp` | `setup` |
 | `killApp` | `teardown` |
@@ -65,18 +66,28 @@ Each generated step should include:
 
 - `step_id`: stable within the case, using the case id and one-based command index, for example `fundamental_test_bing_com_website-step-001`.
 - `source_ref`: `source_type="fsq"`, `source_id` set to the case path string, `step_index` set to the zero-based command index, and metadata containing the case name and platform.
-- `metadata`: the original command payload and selected case metadata useful for evidence and debugging.
+- `metadata`: the original command payload, `authored_action_name`, canonical `capability_name`, replay metadata when applicable, and selected case metadata useful for evidence and debugging.
 - `timeout_ms`: copied from command object `timeout` when present and valid.
-- `evidence_policy`: default shared model policy for now. Rich FSQ evidence controls are a later batch.
+- `evidence_policy`: default shared model policy. Rich FSQ evidence controls are a later batch; during execution, `core.StepRunner` derives the effective evidence policy from capability metadata and any explicit step policy.
 
-Malformed command entries that cannot be reduced to one FSQ action must raise `ConfigurationError` with the case path and command index. Known Android command payloads that fail shared parameter model validation, including legacy scalar shorthand such as `pressKey: Enter` or `performActions: [...]`, must also raise `ConfigurationError` before execution starts, with enough context to identify the case path, command index, action name, and validation problem. A generated `inputText.text.runtimeSecret` ref is valid only as a pre-resolution replay value; other redaction markers or unresolved secret-like objects are invalid. Optional commands are still converted into executable steps; optional/non-blocking execution semantics belong to the core runner or a later policy layer, not this adapter.
+Malformed command entries that cannot be reduced to one FSQ action must raise `ConfigurationError` with the case path and command index. Unknown actions, ambiguous aliases, actions without replay support in strict input, and payloads that fail the resolved capability parameter model validation must also raise `ConfigurationError` before execution starts, with enough context to identify the case path, command index, action name, and validation problem. A generated `inputText.text.runtimeSecret` ref is valid only as a pre-resolution replay value; other redaction markers or unresolved secret-like objects are invalid. Optional commands are still converted into executable steps; optional/non-blocking execution semantics belong to the core runner or a later policy layer, not this adapter.
 
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
 - `_loader.py`: YAML parsing, validation of FSQ document shape, goal-only case normalization, and batch discovery.
-- `_step_adapter.py`: Converts loaded FSQ commands into ordered `ExecutableStep` records for deterministic core execution.
+- `_step_adapter.py`: Converts loaded FSQ commands into ordered canonical `ExecutableStep` records using a capability registry snapshot.
 - `SPEC.md`: Module design.
+
+## Python Architecture
+
+- Architecture level: 2 Simple Package.
+- Public API: `FsqCaseLoader`, `FsqExecutableStepAdapter`, and `is_fsq_case_file` exported from `__init__.py`.
+- Internal modules: `_loader.py` and `_step_adapter.py` are private implementation modules.
+- Domain boundaries: this module owns deterministic YAML loading and conversion to shared executable-step contracts. It does not execute steps, resolve real secrets, construct registries, create harnesses, or generate reports.
+- Boundary models: parsed cases, executable steps, runtime secret refs, and capability metadata models come from `models`.
+- Dependency direction: imports public `models` only; registry snapshots are passed in by entry modules.
+- Rationale: focused parsing/normalization behavior fits Level 2 and does not require orchestration layers.
 
 ## Error Handling
 
@@ -89,8 +100,9 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Unsupported 
 - Configured `cases.dir` is treated as read-only input. Strict-core execution may parse FSQ case files from it, while dynamic LLM execution may read case files from it as raw text. Generated files and evidence must be written under the output root.
 - Markdown conversion reports are intentionally ignored and are not loaded as task inputs.
 - FSQ commands are deterministic ordered input for the strict-core execution path when converted by `FsqExecutableStepAdapter`. Generated recorded cases may include strict replay refs and pure wait commands, but those are still deterministic authored input by the time strict execution begins.
-- Deterministic Android command payload normalization uses the shared Android action registry from `models`. Authored Android command payloads use the same object field names as the registry's parameter models, which keeps case parsing, future case generation, harness dispatch, and function-call schemas aligned to one payload contract while preserving FSQ action names in `ExecutableStep.action_name`. Strict replay refs are the sole exception: the adapter may preserve `RuntimeSecretRef` values in pre-resolution params so the CLI strict entry can resolve them before final driver validation.
-- `waitMs` is a generated strict replay command for pure elapsed-time waits. It is validated by `WaitMsParams`, converted into an `ExecutableStep`, and handled by the execution core without invoking Android harness or driver actions.
+- Deterministic command payload normalization uses the capability registry snapshot. Authored command payloads use the same object field names as the resolved capability parameter models, which keeps case parsing, future case generation, harness dispatch, and SDK schemas aligned to one payload contract while preserving authored names in metadata. Strict replay refs are the sole exception: the adapter may preserve `RuntimeSecretRef` values in pre-resolution params so the CLI strict entry can resolve them before final validation.
+- Capability decorators and platform action catalogs are declaration-time inputs only. FSQ parsing consumes resolved `CapabilityDefinition` data from the registry snapshot and must not inspect decorated functions or platform catalog objects directly.
+- `waitMs` is a generated strict replay alias for the decorated `wait_ms` CommonTool capability. It is validated by `WaitMsParams`, converted into an `ExecutableStep(action_name="wait_ms")`, and later handled by `StepRunner` through the normal registry path without invoking Android harness or driver actions.
 - `assertWithAI` is parsed and validated like any other authored assertion command. This module does not evaluate AI assertions, build provider-backed evaluators, capture screenshots, or decide assertion verdicts.
 - `launchApp` and `killApp` are treated as setup and teardown step kinds for strict-core execution.
 - Commands marked `optional: true` are still converted into executable steps; optional/non-blocking execution semantics do not belong to this adapter.

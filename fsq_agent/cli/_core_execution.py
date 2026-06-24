@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from fsq_agent.core import EvidenceRecorder, HarnessInterface, StepSequenceRunner
+from fsq_agent.cli._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent.core import CapabilityExecutorBindings, CapabilityRegistry, EvidenceRecorder, HarnessInterface, StepRunner, StepSequenceRunner
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import EvidenceBundle, ExecutableStep, ReportArtifact, ReportGenerationError
+from fsq_agent.models import EvidenceBundle, ExecutableStep, PostActionDelaySettings, ReportArtifact, ReportGenerationError
 from fsq_agent.report import CoreEvidenceReportGenerator
 
 
@@ -12,18 +13,26 @@ def run_fsq_core_case(
     harness: HarnessInterface,
     output_dir: str | Path,
     run_id: str,
+    registry: CapabilityRegistry | None = None,
+    executors: CapabilityExecutorBindings | None = None,
     steps: list[ExecutableStep] | None = None,
-    step_interval_seconds: float = 1.0,
+    post_action_delay_seconds: PostActionDelaySettings | None = None,
 ) -> EvidenceBundle:
+    registry = registry or build_capability_registry()
+    executors = executors or build_capability_executor_bindings()
     if steps is None:
         case = FsqCaseLoader().load_case(Path(case_path))
-        steps = FsqExecutableStepAdapter().to_executable_steps(case)
+        steps = FsqExecutableStepAdapter(registry_snapshot=registry.snapshot()).to_executable_steps(case)
     normal_steps, teardown_steps = _split_trailing_teardown_steps(steps)
     recorder = EvidenceRecorder(run_id=run_id, output_dir=Path(output_dir))
     bundle = StepSequenceRunner(
-        harness=harness,
+        step_runner=StepRunner(
+            harness=harness,
+            capability_registry=registry,
+            executor_bindings=executors,
+            post_action_delay_seconds=post_action_delay_seconds,
+        ),
         evidence_recorder=recorder,
-        step_interval_seconds=step_interval_seconds,
     ).run_steps(
         run_id=run_id,
         steps=normal_steps,
@@ -46,16 +55,20 @@ def run_strict_fsq_core_case(
     harness: HarnessInterface,
     output_dir: str | Path,
     run_id: str,
+    registry: CapabilityRegistry | None = None,
+    executors: CapabilityExecutorBindings | None = None,
     steps: list[ExecutableStep] | None = None,
-    step_interval_seconds: float = 1.0,
+    post_action_delay_seconds: PostActionDelaySettings | None = None,
 ) -> ReportArtifact:
     bundle = run_fsq_core_case(
         case_path=case_path,
         harness=harness,
         output_dir=output_dir,
         run_id=run_id,
+        registry=registry,
+        executors=executors,
         steps=steps,
-        step_interval_seconds=step_interval_seconds,
+        post_action_delay_seconds=post_action_delay_seconds,
     )
     if bundle.manifest_path is None:
         raise ReportGenerationError(

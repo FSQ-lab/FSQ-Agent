@@ -1,8 +1,6 @@
 # Android Harness Skill
 
-## Scope
-
-Use this skill when the configured harness platform is Android. Treat it as runtime tool guidance for current harness action tools, not as backend-specific driver guidance.
+Use when `harness.platform` is Android. Follow the active harness tool schema; do not rely on backend-only driver fields.
 
 ## Tool Selection
 
@@ -10,26 +8,26 @@ Use this skill when the configured harness platform is Android. Treat it as runt
 |---|---|---|
 | Launch app | `launch_app` | Use at the start of each Android case to foreground the configured target app before business actions. |
 | Kill app | `kill_app` | Use at the end of each Android case after final evidence is collected to clean up app state. |
-| Find visible UI | `assert_visible`, `assert_not_visible`, or current harness evidence | Prefer resource id or accessibility id, then xpath. |
+| Find visible UI | `assert_visible`, `assert_not_visible`, `ui_tree`, or evidence | Prefer resource id or accessibility id, then xpath. |
 | Tap element | `tap_on` | Re-evaluate stale or missing targets before retrying. |
 | Enter text | `input_text` | Verify the target field before setting text. |
 | Press key | `press_key` | Use the semantic key requested by the FSQ step. |
-| Wait / pause | `wait_ms` | Use this for FSQ `performActions` pause and page-load waits. Do not use scroll, long_press, or any gesture as a wait substitute. |
-| Screenshot evidence | current harness artifact refs or CommonTool artifact utilities when exposed | Capture concise evidence for important assertions. |
-| AI visual assertion | `assert_with_ai` | For `assertWithAI`, use fresh evidence after the relevant wait/state change before deciding the assertion result. |
+| Wait / pause | `wait_ms` | Use for FSQ pauses and page-load waits; gestures are not waits. |
+| Screenshot evidence | harness artifact refs or CommonTool artifact utilities | Capture concise assertion evidence. |
+| AI visual assertion | `assert_with_ai` | Wait/observe first, then use the returned verdict. |
 
 ## Argument Rules
 
-- Follow the active harness tool schema exactly. Do not add backend-only fields that are not exposed by the tool schema.
-- Do not call session management from the agent loop; session ownership belongs to the harness and driver.
+- Follow the active harness tool schema exactly. Do not add backend-only fields.
+- Do not call session management; session ownership belongs to the harness and driver.
 - Treat `launchApp` and `killApp` as case lifecycle setup and teardown. Use `launch_app` before the main case path and `kill_app` before finishing the case when those tools are exposed. Do not report either lifecycle action as satisfying a business key action unless the case explicitly tests launch or kill behavior.
 - Do not use gestures, close buttons, or app lifecycle cleanup as proof that a required `pressKey` action succeeded.
-- Do not use gestures as waits. For FSQ `performActions` pause or page-load delays, call `wait_ms` with the required duration so waiting does not scroll, tap, long-press, or otherwise change UI state.
-- Treat the tool output text and harness result metadata as the executed action. If the result contradicts the intended key action, do not count it as satisfied.
+- Use `wait_ms` for FSQ pauses or page-load delays so waiting does not change UI state.
+- Treat tool output and harness metadata as the executed action. If they contradict the intended key action, do not count it as satisfied.
 
 ## Correct Key Examples
 
-Use one payload from the matching semantic action below. Do not combine fields across examples.
+Use one payload from the matching semantic action. Do not combine fields.
 
 ### `pressKey: {key: Back}`
 
@@ -64,9 +62,8 @@ Do not call `press_key` with conflicting or backend-only identities:
 
 ## Tool Usage Error Recovery
 
-- If `press_key` returns an argument validation error, rebuild the payload from the active schema and the semantic action.
-- If a `pressKey` step with `key: Enter` accidentally returns output for Back, do not count it as Enter. Retry Enter with the schema-valid Enter payload.
-- If a `pressKey` step with `key: Back` accidentally returns output for Enter, do not count it as Back. Retry Back with the schema-valid Back payload.
-- After retrying a key action, verify the resulting UI state with a fresh observation such as page source, visible text, or screenshot evidence.
-- Before `assertWithAI`, use `wait_ms` for any required pause and keep the page at the intended visual assertion state. Do not scroll or long-press merely to wait before taking the visual assertion screenshot.
-- For `assertWithAI`, do not claim the visual assertion is satisfied from a screenshot path alone. Use the exposed harness `assert_with_ai` action and its returned verdict before deciding whether the visual assertion is satisfied.
+- If `press_key` validation fails, rebuild the payload from the active schema and requested semantic key.
+- If a `pressKey` action returns the wrong key result, do not count it. Retry the requested key with the schema-valid payload.
+- After retrying a key action, verify UI state with fresh page source, visible text, or screenshot evidence.
+- Before `assertWithAI`, use `wait_ms` for required pauses and keep the page at the intended visual state.
+- For `assertWithAI`, do not decide from a screenshot path alone; call `assert_with_ai` and use its verdict.

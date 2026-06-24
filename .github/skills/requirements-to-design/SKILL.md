@@ -1,64 +1,62 @@
 ---
 name: requirements-to-design
-description: Use when requirements are unclear, a feature or behavior change is requested, or non-trivial development needs a confirmed design before SPEC.md changes.
-user-invocable: true
-argument-hint: "[idea, feature request, or problem statement]"
+description: Use when the user invokes requirements-to-design, asks to start an SDD design phase, or wants non-trivial Python work clarified into a confirmed design document before SPEC.md changes.
 ---
 
 # Requirements To Design
 
-Use this skill to turn an idea into a reviewed design document. This is the SDD front end. It clarifies intent and records design decisions, but it does not update `SPEC.md` files and does not implement code.
+Turn an idea into a reviewed design document. This skill is the front door of the SDD workflow. It clarifies intent and records design decisions, but it does not update `SPEC.md` files and does not implement code.
 
 ## Hard Gate
 
-Do not write implementation code during this skill. Do not update module `SPEC.md` files during this skill unless the user explicitly switches to `spec-driven`.
-
-The terminal state is a confirmed design document and a handoff to `spec-driven`.
+Do not write implementation code. Do not update root or module `SPEC.md` files. The terminal state is a confirmed design document and a prompt for the user to invoke `spec-driven` with that design document path.
 
 ## Process
 
-### 1. Explore project context
+### 1. Explore Context
 
-Read enough local context to understand the existing project shape before asking detailed questions:
+Read enough local context before detailed questions:
 
-- Root `SPEC.md` when present.
-- Relevant module `SPEC.md` files when the affected area is obvious.
-- Existing docs, recent commits, or project instructions when useful.
+- Root `SPEC.md`, if present.
+- Relevant module `SPEC.md` files, if the affected area is obvious.
+- `AGENTS.md`, `CLAUDE.md`, pyproject metadata, package layout, tests, and recent docs when useful.
 
-If no root `SPEC.md` exists yet, note that `sdd-init` may be needed before implementation.
+If no root `SPEC.md` exists, note that the target repository should create one before `spec-driven` implementation begins.
 
-### 2. Check scope
+### 2. Check Scope
 
-If the request spans multiple independent subsystems, stop and propose decomposition. Each independent subsystem should get its own design document and later its own SPEC update cycle.
+If the request spans multiple independent subsystems, stop and propose decomposition. Each independent subsystem should get its own design document and later its own `SPEC.md` update cycle.
 
-### 3. Ask clarifying questions
+### 3. Ask Clarifying Questions
 
-Ask one question at a time. Prefer multiple choice when it helps the user answer quickly. Focus on:
+Ask one question at a time. Prefer multiple choice when it helps. Focus on:
 
 - Goal and success criteria.
 - User-visible behavior.
 - Constraints and non-goals.
-- Affected modules or ownership boundaries.
-- Risks, edge cases, and rollout concerns.
+- Affected modules and ownership boundaries.
+- Risks, edge cases, rollout, and compatibility.
+- For Python work: project type, package boundary, public API shape, persistence/framework coupling, and expected verification commands.
 
-### 4. Propose approaches
+### 4. Propose Approaches
 
-Present 2-3 approaches with trade-offs and a recommendation. Keep the recommendation explicit, but let the user choose or revise.
+Present 2-3 approaches with trade-offs and a recommendation. For Python architecture work, include the simplest viable architecture level and why a higher level is or is not justified.
 
-### 5. Present the design in sections
+### 5. Present Design Sections
 
-Present the design in reviewable sections scaled to complexity. Cover what applies:
+Present reviewable sections scaled to complexity:
 
 - Purpose and scope.
 - Architecture and module ownership.
-- Data or control flow.
+- Python package/module boundaries.
 - Public behavior and interfaces.
+- Data/control flow.
 - Error handling and edge cases.
 - Verification and audit expectations.
 
-Ask for confirmation after each meaningful section. Revise until the user approves the design.
+Ask for confirmation after meaningful sections and revise until approved.
 
-### 6. Write the design document
+### 6. Write the Design Document
 
 Save the confirmed design to:
 
@@ -66,46 +64,42 @@ Save the confirmed design to:
 docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
 ```
 
-The document should include:
+Include:
 
 - Goal.
 - Scope and non-goals.
 - Proposed design.
+- Python architecture level and rationale when the project is Python.
 - Affected root/module specs expected to change.
 - Open questions resolved during discussion.
 - Verification expectations.
 
-### 7. Self-review the design document
+### 7. Self-Review
 
-Before handoff, check and fix:
+Before handoff, fix:
 
-- Placeholder text such as `TBD`, `TODO`, or vague promises.
+- Placeholder text such as `TBD` or `TODO`.
 - Internal contradictions.
-- Scope that is too broad for one SPEC update cycle.
-- Ambiguous requirements that could be implemented two different ways.
-- Hidden implementation assumptions that should be made explicit.
+- Scope too broad for one SPEC update cycle.
+- Ambiguous requirements that could be implemented two ways.
+- Hidden implementation assumptions that should be explicit.
 
-### 8. User review gate
+### 8. User Review Gate
 
 Ask the user to review the written design document. Do not proceed until the user confirms it.
 
 ### 9. Handoff
 
-After confirmation, invoke or instruct use of `spec-driven` with the design document path. The next step is to translate the design into root/module `SPEC.md` updates.
+After confirmation, end with exactly this shape:
+
+```text
+Design document: docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
+Next step: invoke spec-driven with this design document path.
+```
 
 ## Boundaries
 
 - The design document is not the implementation source of truth.
-- After `SPEC.md` files are updated and confirmed, implementation must follow `SPEC.md`, not this design document.
-- Do not invoke Superpowers `writing-plans` as the next step.
-- Do not require TDD.
+- After `SPEC.md` files are updated and confirmed, implementation must follow `SPEC.md`, not this design document or chat history.
+- Do not invoke an implementation plan as the next step.
 - Do not start implementation from the design document.
-
-## Output Shape
-
-End with:
-
-```text
-Design document: docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
-Next step: use spec-driven to update root/module SPEC.md files from this design.
-```

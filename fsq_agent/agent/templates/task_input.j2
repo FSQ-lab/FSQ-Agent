@@ -2,17 +2,17 @@ Structured task input:
 {{ task.input_json }}
 
 {% if task.key_actions %}
-Execution key actions:
+Key actions:
 {% for action in task.key_actions %}
 - {{ action }}
 {% endfor %}
 {% else %}
-Execution key actions: none provided. Derive the execution path from the description and knowledge.
+Key actions: none provided; derive the path from task input and knowledge.
 {% endif %}
 
 {% if task.verification_goal %}
-Final verification goal:
+Verification goal:
 {{ task.verification_goal }}
 {% else %}
-Final verification goal: none provided. Finish with clear evidence for the executable task flow and report inconclusive if the final goal cannot be proven.
+Final verification goal: none provided. Collect clear flow evidence and report inconclusive if success cannot be proven.
 {% endif %}

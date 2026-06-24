@@ -45,7 +45,7 @@ def _isolate_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_only_public_commands_are_registered() -> None:
-    assert set(main.commands) == {"init", "run", "report"}
+    assert set(main.commands) == {"init", "run", "report", "playground"}
 
 
 def test_run_rejects_missing_or_conflicting_sources(tmp_path: Path) -> None:
@@ -148,8 +148,10 @@ harness:
     platform: android
     android:
         backend: uiautomator2
-    strict_core:
-        step_interval_seconds: 0.25
+execution:
+    post_action_delay_seconds:
+        platform: 0.25
+        common: 0
 """,
     )
     case_path = tmp_path / "cases" / "strict_cli.codex.yaml"
@@ -181,7 +183,8 @@ harness:
     assert calls["strict"]["case_path"] == case_path.resolve()
     assert calls["strict"]["run_id"] == "strict_cli"
     assert calls["strict"]["output_dir"] == tmp_path / "workspace" / "output" / "runs" / "strict_cli"
-    assert calls["strict"]["step_interval_seconds"] == 0.25
+    assert calls["strict"]["post_action_delay_seconds"].platform == 0.25
+    assert calls["strict"]["post_action_delay_seconds"].common == 0
     assert "core-report.md" in result.output
     assert "evidence-manifest.json" in result.output
 

@@ -1,11 +1,10 @@
 from dataclasses import asdict, dataclass, field
-import json
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 
-from fsq_agent.models import AgentFinalOutput, AgentTaskInput, ConfigurationError, KnowledgeBundle, OpenAIAgentPromptConfig, SkillBundle, Task
+from fsq_agent.models import AgentTaskInput, ConfigurationError, KnowledgeBundle, OpenAIAgentPromptConfig, SkillBundle, Task
 
 
 _DEFAULT_TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -29,7 +28,6 @@ class PromptSkill:
 class AgentPromptModel:
     private_knowledge: list[PromptKeyValue] = field(default_factory=list)
     skills: list[PromptSkill] = field(default_factory=list)
-    final_output_schema_json: str = ""
     variables: dict[str, Any] = field(default_factory=dict)
 
 
@@ -59,7 +57,6 @@ class PromptModelBuilder:
                 )
                 for skill in skills
             ],
-            final_output_schema_json=json.dumps(AgentFinalOutput.model_json_schema(), indent=2, ensure_ascii=False),
             variables=dict(self.settings.variables),
         )
 

@@ -15,11 +15,19 @@ For non-trivial development:
 
 Bug fixes that do not change public interfaces or intended behavior may skip the design document, but must still read relevant `SPEC.md` files and verify that the specs remain accurate.
 
+## Decorated Capability Execution
+
+All executable behavior is declared through decorator-driven capability metadata. The neutral `capabilities` module owns the shared declaration decorators, catalog-backed platform validation, and reflection/discovery helpers that produce `models.CapabilityDefinition` records. The capability registry is the source of truth for canonical names, aliases, parameter schemas, executor routing, replay policy, sensitivity, evidence policy, platform/backend ownership, and provenance. Dynamic LLM execution and strict replay both create canonical executable invocations and route them through `StepRunner`.
+
+Decorator unification is a declaration-layer concern, not an execution-layer merge. CommonTool utilities remain implemented and executed by `tools`; harness-owned and driver/platform actions remain implemented and executed by `core` harnesses and drivers. Both domains use the same declaration metadata and the same `CapabilityDefinition` contract.
+
+`StepRunner` is the common execution manager for CommonTool, harness-owned, and driver/platform capabilities. It looks up the capability registry, validates params, applies evidence, post-action delay, and sensitivity policy, invokes the appropriate executor binding, emits structured safe events, and returns normalized runner results. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True`, a default step evidence policy resolves to the standard screenshot and UI-tree capture policy before the action, after the action, and on failure; explicit non-default `ExecutableStep.evidence_policy` values remain caller overrides. For every capability, the effective post-action delay resolves from `CapabilityDefinition.post_action_delay_seconds` when set, otherwise from configured `execution.post_action_delay_seconds` defaults for platform or CommonTool capabilities. A positive delay is execution timing only, occurs after invoke and before finalize/after-action/failure evidence capture, and must not create synthetic `waitMs` commands, evidence steps, replay commands, or action results. Executable paths must not branch on names such as `waitMs`, `wait_ms`, `get_runtime_secret`, or Android command names.
+
 ## Recorded Strict Case Artifacts
 
-Dynamic LLM runs may optionally record the actual successful replayable execution trace as a generated strict FSQ `.codex.yaml` artifact under the run output directory. Recording is a CLI-owned post-run behavior: the agent runtime persists events, while the CLI recorder converts replayable harness actions plus supported CommonTool dependencies into a strict candidate case. Generated cases must never mutate source cases or `cases.dir`, and runtime secret values must never be written to YAML, manifests, events, or reports.
+Dynamic LLM runs may optionally record the actual successful replayable execution trace as a generated strict FSQ `.codex.yaml` artifact under the run output directory. Recording is a CLI-owned post-run behavior: the agent runtime persists normalized capability events, while the CLI recorder converts replayable capability results into a strict candidate case according to `ReplayPolicy` metadata. Generated cases must never mutate source cases or `cases.dir`, and runtime secret values must never be written to YAML, manifests, events, or reports.
 
-Recorded strict cases may contain replay-only syntax such as `runtimeSecret` parameter references and `waitMs` pure-wait commands. Strict execution resolves `runtimeSecret` references in memory before UI actions begin and executes `waitMs` without platform driver side effects.
+Recorded strict cases may contain replay-only syntax such as `runtimeSecret` parameter references and `waitMs` aliases. Strict execution bootstraps the capability registry before YAML parsing, resolves `runtimeSecret` references in memory before external actions begin, and resolves `waitMs` through the registry to the decorated `wait_ms` CommonTool capability.
 
 ## Dynamic LLM Pre-Plan and Goal Verification
 
@@ -29,7 +37,7 @@ Dynamic LLM `--case-yaml` and `--case-dir` runs read authored case files as raw 
 
 ## Runtime Configuration Defaults
 
-Default local LLM runs use GitHub Copilot provider authentication with Copilot model `gpt-5.5` and tracing enabled. Azure OpenAI remains available only when config explicitly selects `openai_agents.provider: azure_openai`; Azure endpoint, deployment/model, and API key values come from fixed environment variable names rather than YAML fields. Local user values such as Android app id, Android device serial, account secrets, and Azure provider values belong in process environment or `.env`. YAML config owns developer policy and runtime shape such as provider selection, tracing default, harness platform/backend, harness strict-core step interval, runtime secret allowlist, agent context knowledge-root resources, workspace root, cases root, and output root.
+Default local LLM runs use GitHub Copilot provider authentication with Copilot model `gpt-5.5` and tracing enabled. Azure OpenAI remains available only when config explicitly selects `openai_agents.provider: azure_openai`; Azure endpoint, deployment/model, and API key values come from fixed environment variable names rather than YAML fields. Local user values such as Android app id, Android device serial, account secrets, and Azure provider values belong in process environment or `.env`. YAML config owns developer policy and runtime shape such as provider selection, tracing default, harness platform/backend, execution post-action delay defaults, runtime secret allowlist, agent context knowledge-root resources, workspace root, cases root, and output root.
 
 ## Prompt Context Boundaries
 
@@ -41,19 +49,20 @@ Loader diagnostics such as missing optional skills or missing optional knowledge
 
 | Module | SPEC | Purpose |
 |---|---|---|
-| models | fsq_agent/models/SPEC.md | Owns shared domain models, result types, replay reference models, and exceptions. |
-| config | fsq_agent/config/SPEC.md | Loads and validates env/YAML runtime, provider, harness/driver, tracing, strict-core pacing, strict replay secret, agent context, common tool, and workspace configuration. |
+| models | fsq_agent/models/SPEC.md | Owns shared domain models, capability metadata/registry contracts, invocation/result contracts, replay reference models, and exceptions. |
+| capabilities | fsq_agent/capabilities/SPEC.md | Owns neutral capability declaration decorators, catalog-backed platform action validation, and metadata discovery helpers used by `tools` and `core`. |
+| config | fsq_agent/config/SPEC.md | Loads and validates env/YAML runtime, provider, harness/driver, tracing, execution post-action delay, strict replay secret, agent context, common tool, and workspace configuration. |
 | providers | fsq_agent/providers/SPEC.md | Builds shared Azure OpenAI and GitHub Copilot provider sessions for agent runs, verifier/pre-planner calls, and provider-backed AI assertion evaluators. |
-| tools | fsq_agent/tools/SPEC.md | Provides SDK-neutral CommonTool capabilities, recordable wait/runtime-secret metadata, and the OpenAI Agents SDK adapter for file, artifact, wait, and allowlisted runtime-secret utilities. |
+| tools | fsq_agent/tools/SPEC.md | Provides SDK-neutral CommonTool capability hosts declared through `capabilities` and the CommonTool executor binding for file, artifact, wait, and allowlisted runtime-secret utilities. |
 | observation | fsq_agent/observation/SPEC.md | Persists run event timelines; screenshots, UI trees, and other observations are represented by harness or CommonTool artifact refs. |
 | knowledge | fsq_agent/knowledge/SPEC.md | Loads project-specific application knowledge and task-referenced knowledge assets. |
-| fsq | fsq_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases, validates replay references, and converts parsed cases into deterministic strict-core executable steps. |
+| fsq | fsq_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases, resolves authored action aliases through the capability registry, validates replay references, and converts parsed cases into canonical deterministic executable steps. |
 | skills | fsq_agent/skills/SPEC.md | Loads complete configured automation skill instruction bundles and skips or fails broken bundles according to requiredness. |
-| report | fsq_agent/report/SPEC.md | Generates LLM task reports, strict-core evidence reports, and resolves stored reports by run id. |
-| core | fsq_agent/core/SPEC.md | Defines shared execution-core orchestration boundaries, StepRunner protocol, pure waits, harness interface, and evidence coordination. |
-| agent | fsq_agent/agent/SPEC.md | Orchestrates dynamic goal/reference execution through OpenAI Agents SDK, verification, replayable event metadata, and report generation. |
+| report | fsq_agent/report/SPEC.md | Generates LLM task reports, strict-core evidence reports, reconstructs tool calls from structured capability metadata, and resolves stored reports by run id. |
+| core | fsq_agent/core/SPEC.md | Defines the shared `StepRunner` execution manager, capability executor routing, harness/driver interfaces, and evidence coordination. |
+| agent | fsq_agent/agent/SPEC.md | Orchestrates dynamic goal/reference execution through OpenAI Agents SDK, registry-driven capability tool exposure, verification, replayable event metadata, and report generation. |
 | playground | fsq_agent/playground/SPEC.md | Serves the local browser playground for Android session setup, dynamic goal/raw-case execution, strict YAML execution, progress polling, screenshots, replay video preview, and report lookup. |
-| cli | fsq_agent/cli/SPEC.md | Exposes the public `init`, `run`, `report`, `playground`, strict replay, dynamic-run recording, and local playground workflows. |
+| cli | fsq_agent/cli/SPEC.md | Exposes the public `init`, `run`, `report`, `playground`, capability registry bootstrap, strict replay, dynamic-run recording, and local playground workflows. |
 
 ## Architecture Diagram
 
@@ -86,15 +95,29 @@ flowchart TD
     Skills --> Models
     Report --> Models
     Core --> Models
+    Capabilities[capabilities] --> Models
+    Tools --> Capabilities
+    Core --> Capabilities
 ```
 
 ## Development Rules
 
 - Each module exposes public symbols only from `__init__.py` using explicit `__all__`.
 - Internal implementation files are prefixed with `_`.
-- Shared data structures and exceptions live only in the `models` module.
+- Shared data structures and exceptions live only in the `models` module. Capability declaration decorators, catalog-backed platform validation, and decorated-method discovery live only in the `capabilities` module.
 - Module imports must follow the DAG in the architecture diagram.
+- Package-private composition helpers at the `fsq_agent` package root may compose public module APIs for shared entry-layer bootstrap. They must remain private, must not expose public module contracts, and must not be imported by `models`, `capabilities`, `tools`, `fsq`, `core`, `providers`, or `report`.
+- `capabilities` may import `models` only among project modules. It must not import `tools`, `core`, `agent`, `cli`, `fsq`, `providers`, `report`, `playground`, SDK objects, concrete drivers, or backend runtime types.
 - Provider construction lives in `providers`; `core` must use provider-neutral protocols and must not import provider/runtime modules.
-- Cross-platform local utilities live behind the CommonTool interface in `tools`; platform actions and AI assertions belong to harnesses.
+- Cross-platform local utilities live as CommonTool capabilities in `tools`; platform actions and AI assertions live as harness or driver capabilities in `core`. Both domains declare executable metadata through `capabilities`. All executable capabilities must be registered before strict YAML parsing or SDK tool exposure.
+- Replay, sensitivity, evidence, and tool-origin behavior must come from capability metadata and normalized `StepRunner` results, not hard-coded tool-name sets.
 - Public interface changes require `SPEC.md` update and user confirmation before implementation.
 - `CLAUDE.md` and `AGENTS.md` are agent entry points only. They must point to this root `SPEC.md` and must not duplicate project specification content.
+
+## Python Architecture Rules
+
+- Use the lowest architecture level that keeps the module clear, testable, and changeable.
+- `models`, `capabilities`, `tools`, `fsq`, `report`, `knowledge`, `skills`, `config`, `providers`, `observation`, and `playground` default to Level 2 Simple Package unless a module SPEC records a stronger need.
+- `core`, `agent`, and `cli` use Level 3 Layered Application because they coordinate execution flows, external SDKs, harnesses, providers, persistence, and user entry points.
+- Public APIs must be exported from module `__init__.py` files, and internal implementation modules must remain private across module boundaries.
+- Do not introduce Repository, Unit of Work, Clean Architecture, or DDD patterns unless a confirmed SPEC records the concrete reason.

@@ -42,6 +42,7 @@ class _FakeFunctionTool:
         self.name = kwargs["name"]
         self.description = kwargs["description"]
         self.params_json_schema = kwargs["params_json_schema"]
+        self.strict_json_schema = kwargs.get("strict_json_schema", True)
         self.on_invoke_tool = kwargs["on_invoke_tool"]
 
 
@@ -53,11 +54,13 @@ class _FakeHarness:
         driver_method: str = "tap_on",
         fsq_action_name: str = "tapOn",
         capture_evidence: bool = True,
+        strict: bool = True,
     ) -> None:
         self.tool_name = tool_name
         self.driver_method = driver_method
         self.fsq_action_name = fsq_action_name
         self.capture_evidence = capture_evidence
+        self.strict = strict
         self.steps: list[Any] = []
         self.calls: list[str] = []
 
@@ -71,6 +74,7 @@ class _FakeHarness:
                 driver_method=self.driver_method,
                 fsq_action_name=self.fsq_action_name,
                 capture_evidence=self.capture_evidence,
+                strict=self.strict,
             )
         ]
 
@@ -380,8 +384,8 @@ def test_runtime_instructions_exclude_loader_diagnostics() -> None:
     assert "missing optional knowledge" not in instructions
     assert "Use Edge account guidance." in instructions
     assert "Use semantic actions." in instructions
-    assert "Final output JSON Schema:" in instructions
-    assert "AgentFinalOutput" in instructions
+    assert "Final output JSON Schema:" not in instructions
+    assert "AgentFinalOutput structured output required by the SDK" in instructions
 
 
 def test_runtime_instructions_use_configured_prompt_templates(tmp_path: Path) -> None:
@@ -438,14 +442,14 @@ def test_prompt_model_builder_and_renderer_use_templates() -> None:
     task_model = builder.build_task_prompt(Task(id="task-1", description="Do it.", verification_goal="Done."))
 
     assert "Custom operator instructions:" not in renderer.render_agent_prompt(agent_model)
-    assert "Preserve the semantic fidelity of ordered key actions." in renderer.render_agent_prompt(agent_model)
+    assert "Preserve ordered key-action semantic fidelity." in renderer.render_agent_prompt(agent_model)
     assert "launch_app harness tool" not in renderer.render_agent_prompt(agent_model)
     assert "kill_app harness tool" not in renderer.render_agent_prompt(agent_model)
     assert "tool usage error" in renderer.render_agent_prompt(agent_model)
     rendered_task = renderer.render_task_prompt(task_model)
     assert "Structured task input:" in rendered_task
     assert '"id": "task-1"' in rendered_task
-    assert "Final verification goal:" in rendered_task
+    assert "Verification goal:" in rendered_task
     assert "Done." in rendered_task
 
 
@@ -488,7 +492,7 @@ async def test_harness_tool_adapter_delegates_to_step_runner(monkeypatch: pytest
     runner_calls: list[tuple[Any, str, Any]] = []
 
     class _FakeStepRunner:
-        def __init__(self, harness: Any) -> None:
+        def __init__(self, harness: Any, **_: Any) -> None:
             self.harness = harness
 
         def run_step(self, run_id: str, step: Any) -> RunnerStepResult:
@@ -525,7 +529,10 @@ async def test_harness_tool_adapter_delegates_to_step_runner(monkeypatch: pytest
     assert payload["result"]["output"] == {"params": {"target": "Downloads"}}
     assert runner_calls[0][0] is harness
     assert runner_calls[0][1] == "run-1"
-    assert runner_calls[0][2].action_name == "tapOn"
+    assert runner_calls[0][2].action_name == "tap_on"
+    assert runner_calls[0][2].metadata["authored_action_name"] == "tapOn"
+    assert runner_calls[0][2].evidence_policy.capture_before is False
+    assert runner_calls[0][2].evidence_policy.artifact_kinds == []
     assert harness.steps == []
 
 
@@ -548,7 +555,8 @@ async def test_harness_tool_adapter_applies_evidence_policy_to_mutating_action()
     assert payload["result"]["artifact_refs"] == payload["artifact_refs"]
     assert payload["runner_result"]["phase_reports"][0]["phase"] == "prepare"
     assert payload["runner_result"]["phase_reports"][2]["phase"] == "finalize"
-    assert harness.steps[0].action_name == "tapOn"
+    assert harness.steps[0].action_name == "tap_on"
+    assert harness.steps[0].metadata["authored_action_name"] == "tapOn"
     assert harness.steps[0].kind == "action"
     assert harness.steps[0].evidence_policy.capture_before is True
     assert harness.steps[0].evidence_policy.capture_after is True
@@ -560,6 +568,16 @@ async def test_harness_tool_adapter_applies_evidence_policy_to_mutating_action()
         "capture:screenshot:after-action:agent-tap_on-1:finalize:session-1",
         "capture:ui_tree:after-action:agent-tap_on-1:finalize:session-1",
     ]
+
+
+def test_harness_tool_adapter_passes_schema_strictness() -> None:
+    harness = _FakeHarness(tool_name="perform_actions", driver_method="perform_actions", fsq_action_name="performActions", strict=False)
+    adapter = HarnessToolAdapter(harness, run_id="run-1")
+
+    tools = adapter.build_tools(_FakeFunctionTool)
+
+    assert tools[0].name == "perform_actions"
+    assert tools[0].strict_json_schema is False
 
 
 @pytest.mark.asyncio
@@ -579,7 +597,8 @@ async def test_harness_tool_adapter_keeps_default_evidence_policy_for_assertion_
     assert payload["status"] == "passed"
     assert payload["artifact_refs"] == []
     assert payload["result"]["artifact_refs"] == []
-    assert harness.steps[0].action_name == "assertVisible"
+    assert harness.steps[0].action_name == "assert_visible"
+    assert harness.steps[0].metadata["authored_action_name"] == "assertVisible"
     assert harness.steps[0].kind == "assertion"
     assert harness.steps[0].evidence_policy.capture_before is False
     assert harness.steps[0].evidence_policy.artifact_kinds == []
@@ -587,7 +606,7 @@ async def test_harness_tool_adapter_keeps_default_evidence_policy_for_assertion_
 
 
 @pytest.mark.asyncio
-async def test_harness_tool_adapter_uses_schema_evidence_flag_not_action_name() -> None:
+async def test_harness_tool_adapter_uses_registry_metadata_for_effective_evidence_policy() -> None:
     harness = _FakeHarness(capture_evidence=False)
     adapter = HarnessToolAdapter(harness, run_id="run-1")
 
@@ -597,11 +616,17 @@ async def test_harness_tool_adapter_uses_schema_evidence_flag_not_action_name() 
     payload = json.loads(output)
     assert payload["status"] == "passed"
     assert payload["fsq_action_name"] == "tapOn"
-    assert payload["artifact_refs"] == []
-    assert harness.steps[0].action_name == "tapOn"
-    assert harness.steps[0].evidence_policy.capture_before is False
-    assert harness.steps[0].evidence_policy.artifact_kinds == []
-    assert not any(call.startswith("capture:") for call in harness.calls)
+    assert [ref["kind"] for ref in payload["artifact_refs"]] == ["screenshot", "ui_tree", "screenshot", "ui_tree"]
+    assert harness.steps[0].action_name == "tap_on"
+    assert harness.steps[0].metadata["authored_action_name"] == "tapOn"
+    assert harness.steps[0].evidence_policy.capture_before is True
+    assert harness.steps[0].evidence_policy.artifact_kinds == ["screenshot", "ui_tree"]
+    assert [call for call in harness.calls if call.startswith("capture:")] == [
+        "capture:screenshot:before-action:agent-tap_on-1:prepare:session-1",
+        "capture:ui_tree:before-action:agent-tap_on-1:prepare:session-1",
+        "capture:screenshot:after-action:agent-tap_on-1:finalize:session-1",
+        "capture:ui_tree:after-action:agent-tap_on-1:finalize:session-1",
+    ]
 
 
 @pytest.mark.asyncio

@@ -1,16 +1,26 @@
 from pathlib import Path
 from typing import Any
 
-from fsq_agent.core import StepRunner
+from pydantic import BaseModel
+
+from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent.core import CapabilityExecutorBindings, CapabilityRegistry, StepRunner
 from fsq_agent.models import (
+    CapabilityDefinition,
+    CapabilityExecutionResult,
     EvidencePolicy,
     ExecutableStep,
     FailureCategory,
     HarnessActionResult,
     HarnessArtifactRef,
     HarnessContext,
+    PostActionDelaySettings,
     StepPhase,
 )
+
+
+class NoParams(BaseModel):
+    pass
 
 
 class SuccessfulHarness:
@@ -151,9 +161,18 @@ def _tap_step() -> ExecutableStep:
     )
 
 
+def _runner(harness: Any, post_action_delay_seconds: PostActionDelaySettings | None = None) -> StepRunner:
+    return StepRunner(
+        harness=harness,
+        capability_registry=build_capability_registry(),
+        executor_bindings=build_capability_executor_bindings(),
+        post_action_delay_seconds=post_action_delay_seconds,
+    )
+
+
 def test_step_runner_runs_successful_step_through_three_phases() -> None:
     harness = SuccessfulHarness()
-    runner = StepRunner(harness=harness)
+    runner = _runner(harness)
 
     result = runner.run_step(run_id="run-1", step=_tap_step())
 
@@ -183,7 +202,7 @@ def test_step_runner_runs_successful_step_through_three_phases() -> None:
 
 def test_step_runner_executes_wait_ms_without_harness_calls() -> None:
     harness = SuccessfulHarness()
-    runner = StepRunner(harness=harness)
+    runner = _runner(harness)
     step = ExecutableStep(step_id="wait-1", kind="action", action_name="waitMs", params={"duration_ms": 1, "reason": "settle"})
 
     result = runner.run_step(run_id="run-1", step=step)
@@ -191,8 +210,88 @@ def test_step_runner_executes_wait_ms_without_harness_calls() -> None:
     assert result.status == "passed"
     assert harness.calls == []
     assert [phase.phase for phase in result.phase_reports] == ["prepare", "invoke", "finalize"]
-    assert result.phase_reports[1].metadata == {"duration_ms": 1, "reason": "settle"}
+    metadata = result.phase_reports[1].metadata
+    assert metadata["capability_name"] == "wait_ms"
+    assert metadata["executor_kind"] == "common"
+    assert metadata["duration_ms"] == 1
+    assert metadata["reason"] == "settle"
+    assert metadata["replay"] == {"kind": "fsq_command", "alias": "waitMs"}
+    assert metadata["common_output"]["type"] == "wait_completed"
     assert "harness_call_start" not in [event.event_type for event in runner.events]
+
+
+def test_step_runner_applies_platform_delay_after_invoke_before_finalize(monkeypatch) -> None:
+    harness = SuccessfulHarness()
+
+    def fake_sleep(seconds: float) -> None:
+        harness.calls.append(f"sleep:{seconds}")
+
+    monkeypatch.setattr("fsq_agent.core.runner._runner.time.sleep", fake_sleep)
+    runner = _runner(harness, PostActionDelaySettings(platform=0.25, common=0.0))
+    step = ExecutableStep(step_id="step-1", kind="action", action_name="tapOn", params={"target": "Login"})
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    assert result.status == "passed"
+    assert harness.calls == [
+        "get_context",
+        "before:tap_on:session-1",
+        "invoke:tap_on:session-1",
+        "sleep:0.25",
+        "after:tap_on:passed",
+    ]
+    assert result.phase_reports[1].metadata["post_action_delay_seconds"] == 0.25
+    invoke_finish_events = [event for event in runner.events if event.event_type == "phase_finish" and event.phase == "invoke"]
+    assert invoke_finish_events[0].payload == {"status": "passed", "post_action_delay_seconds": 0.25}
+
+
+def test_step_runner_uses_common_delay_and_skips_zero_sleep(monkeypatch) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("fsq_agent.core.runner._runner.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    registry = CapabilityRegistry.from_definitions(
+        [CapabilityDefinition(name="custom_common", executor_kind="common", params_model=NoParams)]
+    )
+    bindings = CapabilityExecutorBindings()
+    bindings.bind_common(
+        "custom_common",
+        lambda step: CapabilityExecutionResult(capability_name=step.action_name, executor_kind="common", status="passed"),
+    )
+    runner = StepRunner(
+        harness=SuccessfulHarness(),
+        capability_registry=registry,
+        executor_bindings=bindings,
+        post_action_delay_seconds=PostActionDelaySettings(platform=0.0, common=0.1),
+    )
+
+    result = runner.run_step(run_id="run-1", step=ExecutableStep(step_id="common-1", kind="action", action_name="custom_common"))
+
+    assert result.status == "passed"
+    assert sleep_calls == [0.1]
+    assert result.phase_reports[1].metadata["post_action_delay_seconds"] == 0.1
+
+    sleep_calls.clear()
+    zero_delay_registry = CapabilityRegistry.from_definitions(
+        [CapabilityDefinition(name="zero_common", executor_kind="common", params_model=NoParams, post_action_delay_seconds=0)]
+    )
+    zero_delay_bindings = CapabilityExecutorBindings()
+    zero_delay_bindings.bind_common(
+        "zero_common",
+        lambda step: CapabilityExecutionResult(capability_name=step.action_name, executor_kind="common", status="passed"),
+    )
+    zero_delay_runner = StepRunner(
+        harness=SuccessfulHarness(),
+        capability_registry=zero_delay_registry,
+        executor_bindings=zero_delay_bindings,
+        post_action_delay_seconds=PostActionDelaySettings(platform=0.0, common=0.1),
+    )
+
+    zero_delay_result = zero_delay_runner.run_step(
+        run_id="run-1",
+        step=ExecutableStep(step_id="common-2", kind="action", action_name="zero_common"),
+    )
+
+    assert zero_delay_result.phase_reports[1].metadata["post_action_delay_seconds"] == 0
+    assert sleep_calls == []
 
 
 def test_step_runner_wraps_invoke_exception_and_still_finalizes() -> None:
@@ -268,6 +367,92 @@ def test_step_runner_captures_before_and_after_artifacts_from_policy() -> None:
     assert [event.event_type for event in runner.events].count("artifact_captured") == 4
     assert "capture:screenshot:before-action:step-1:prepare" in harness.calls
     assert "capture:ui_tree:after-action:step-1:finalize" in harness.calls
+
+
+def test_step_runner_derives_capture_evidence_policy_from_capability_metadata() -> None:
+    harness = CapturingHarness()
+    runner = _runner(harness)
+    step = ExecutableStep(
+        step_id="step-1",
+        kind="action",
+        action_name="tapOn",
+        params={"target": "Login"},
+    )
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    prepare_report = result.phase_reports[0]
+    finalize_report = result.phase_reports[2]
+    assert result.status == "passed"
+    assert [artifact.kind for artifact in prepare_report.artifact_refs] == ["screenshot", "ui_tree"]
+    assert [artifact.kind for artifact in finalize_report.artifact_refs] == ["screenshot", "ui_tree"]
+    assert "before:tap_on:session-1" in harness.calls
+    assert "invoke:tap_on:session-1" in harness.calls
+    assert "capture:screenshot:before-action:step-1:prepare" in harness.calls
+    assert "capture:ui_tree:after-action:step-1:finalize" in harness.calls
+
+
+def test_step_runner_preserves_explicit_evidence_policy_over_capability_metadata() -> None:
+    harness = CapturingHarness()
+    runner = _runner(harness)
+    step = ExecutableStep(
+        step_id="step-1",
+        kind="action",
+        action_name="tapOn",
+        params={"target": "Login"},
+        evidence_policy=EvidencePolicy(capture_before=False, capture_after=True, artifact_kinds=["log"]),
+    )
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    assert result.status == "passed"
+    assert result.phase_reports[0].artifact_refs == []
+    assert [artifact.kind for artifact in result.phase_reports[2].artifact_refs] == ["log"]
+    assert "capture:log:after-action:step-1:finalize" in harness.calls
+    assert not any("capture:screenshot" in call for call in harness.calls)
+    assert not any("capture:ui_tree" in call for call in harness.calls)
+
+
+def test_step_runner_does_not_derive_policy_for_capture_evidence_false_capability() -> None:
+    harness = CapturingHarness()
+    runner = _runner(harness)
+    step = ExecutableStep(
+        step_id="assert-1",
+        kind="assertion",
+        action_name="assertVisible",
+        params={"target": "Login"},
+    )
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    assert result.status == "passed"
+    assert [phase.artifact_refs for phase in result.phase_reports] == [[], [], []]
+    assert "invoke:assert_visible:session-1" in harness.calls
+    assert not any(call.startswith("capture:") for call in harness.calls)
+
+
+def test_step_runner_derives_failure_artifacts_from_capability_metadata() -> None:
+    harness = FailedCapturingHarness()
+    runner = _runner(harness)
+    step = ExecutableStep(
+        step_id="step-1",
+        kind="action",
+        action_name="tapOn",
+        params={"target": "Login"},
+    )
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    assert result.status == "failed"
+    assert [artifact.kind for artifact in result.phase_reports[0].artifact_refs] == ["screenshot", "ui_tree"]
+    assert [artifact.kind for artifact in result.phase_reports[2].artifact_refs] == [
+        "screenshot",
+        "ui_tree",
+        "screenshot",
+        "ui_tree",
+    ]
+    assert "capture:screenshot:failure:step-1:finalize" in harness.calls
+    assert "capture:ui_tree:failure:step-1:finalize" in harness.calls
 
 
 def test_step_runner_captures_failure_artifacts_from_policy() -> None:

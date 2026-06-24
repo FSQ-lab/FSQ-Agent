@@ -1,23 +1,15 @@
-# FSQ Agent Project Knowledge
-
-This file is loaded for every normal goal-driven task as concise Edge Android project guidance.
+# Edge Android Project Knowledge
 
 ## Edge Android Overflow Menu
 
-The Edge Android overflow menu can be horizontally paged. Opening `Browser menu` may show only part of the menu grid.
-
-- To inspect the complete menu, use horizontal swipes inside the visible menu grid to move left or right between menu pages.
-- Items such as `All menu` may require a horizontal swipe before they become visible.
-- After a swipe, refresh the UI observation and verify the expected menu item from the current UI tree or screenshot before treating the menu navigation as complete.
+- `Browser menu` may show only one horizontal page of menu items.
+- Swipe inside the menu grid to reveal hidden items such as `All menu`.
+- After each menu swipe, refresh the UI tree or screenshot before selecting an item.
 
 ## Edge Android MSA Sign-In
 
-Use the account plus password sign-in path for Microsoft account setup.
-
-- The sign-in entry can be reached from the New Tab Page account area or from the Edge overflow menu.
-- If the account panel shows a signed-out state such as `Sign in to sync`, tap that sign-in entry before continuing account-dependent cases.
-- After entering the account email and moving forward, do not assume the next screen is the password field.
-- If the Microsoft sign-in flow shows verification, passkey, authenticator, or another non-password option, look for an option like `Other ways to sign in`, `Use another way`, `Choose another sign-in option`, or similar wording.
-- In the alternate sign-in options, choose the password-based sign-in method, then enter `TEST_ACCOUNT_PASSWORD` using the `get_runtime_secret` tool.
-- Use `TEST_ACCOUNT_EMAIL` and `TEST_ACCOUNT_PASSWORD` only through `get_runtime_secret`; never print or report their values.
-- After submitting the password, verify the signed-in Edge account marker before continuing to account-dependent actions such as opening Microsoft Rewards.
+- Start sign-in from the New Tab Page account area or Edge overflow menu.
+- If signed out, tap `Sign in to sync` or equivalent before account-dependent actions.
+- Use `TEST_ACCOUNT_EMAIL` and `TEST_ACCOUNT_PASSWORD` only through `get_runtime_secret`.
+- After email entry, password may be behind `Other ways to sign in`, `Use another way`, or similar options. Choose password sign-in.
+- After password submission, verify the signed-in Edge account marker before Rewards or other account-only flows.

@@ -5,7 +5,6 @@ from typing import Any
 import pytest
 
 from fsq_agent.cli._core_execution import run_fsq_core_case, run_strict_fsq_core_case
-import fsq_agent.core.runner._sequence as sequence_module
 from fsq_agent.models import (
     EvidenceBundle,
     ExecutableStep,
@@ -13,13 +12,9 @@ from fsq_agent.models import (
     HarnessActionResult,
     HarnessArtifactRef,
     HarnessContext,
+    PostActionDelaySettings,
     StepPhase,
 )
-
-
-@pytest.fixture(autouse=True)
-def _skip_real_sequence_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sequence_module.time, "sleep", lambda seconds: None)
 
 
 FSQ_CASE = """
@@ -115,7 +110,7 @@ def test_run_fsq_core_case_writes_manifest_and_returns_bundle(tmp_path: Path) ->
     assert bundle.run_id == "run-1"
     assert bundle.manifest_path == tmp_path / "runs" / "run-1" / "evidence-manifest.json"
     assert bundle.manifest_path.exists()
-    assert harness.actions == ["launchApp", "tapOn"]
+    assert harness.actions == ["launch_app", "tap_on"]
     assert [step.step_id for step in bundle.steps] == ["core_cli-step-001", "core_cli-step-002"]
 
     manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
@@ -124,14 +119,19 @@ def test_run_fsq_core_case_writes_manifest_and_returns_bundle(tmp_path: Path) ->
     assert [step["step_id"] for step in manifest["steps"]] == ["core_cli-step-001", "core_cli-step-002"]
     assert [step["status"] for step in manifest["steps"]] == ["passed", "passed"]
     assert [event["event_type"] for event in manifest["events"]].count("step_start") == 2
+    assert [artifact["kind"] for artifact in manifest["artifacts"]] == ["screenshot", "ui_tree"] * 4
+    artifact_reasons = [event["payload"]["reason"] for event in manifest["events"] if event["event_type"] == "artifact_captured"]
+    assert artifact_reasons.count("before-action") == 4
+    assert artifact_reasons.count("after-action") == 4
 
 
-def test_run_fsq_core_case_passes_step_interval_to_sequence_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_fsq_core_case_passes_post_action_delay_to_step_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, float] = {}
 
     class FakeSequenceRunner:
-        def __init__(self, *, harness, evidence_recorder, step_interval_seconds: float) -> None:
-            captured["step_interval_seconds"] = step_interval_seconds
+        def __init__(self, *, step_runner, evidence_recorder) -> None:
+            captured["platform"] = step_runner.post_action_delay_seconds.platform
+            captured["common"] = step_runner.post_action_delay_seconds.common
 
         def run_steps(self, *, run_id: str, steps, teardown_steps):
             return EvidenceBundle(bundle_id=f"{run_id}-bundle", run_id=run_id)
@@ -144,17 +144,17 @@ def test_run_fsq_core_case_passes_step_interval_to_sequence_runner(tmp_path: Pat
         output_dir=tmp_path / "runs" / "run-1",
         run_id="run-1",
         steps=[],
-        step_interval_seconds=0.25,
+        post_action_delay_seconds=PostActionDelaySettings(platform=0.25, common=0.1),
     )
 
-    assert captured["step_interval_seconds"] == 0.25
+    assert captured == {"platform": 0.25, "common": 0.1}
     assert bundle.manifest_path == tmp_path / "runs" / "run-1" / "evidence-manifest.json"
 
 
 def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) -> None:
     case_path = tmp_path / "core_cli_teardown.codex.yaml"
     case_path.write_text(FSQ_CASE_WITH_TEARDOWN, encoding="utf-8")
-    harness = CliCoreHarness(fail_action="tapOn")
+    harness = CliCoreHarness(fail_action="tap_on")
 
     bundle = run_fsq_core_case(
         case_path=case_path,
@@ -163,7 +163,7 @@ def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) 
         run_id="run-1",
     )
 
-    assert harness.actions == ["launchApp", "tapOn", "killApp"]
+    assert harness.actions == ["launch_app", "tap_on", "kill_app"]
     assert [step.step_id for step in bundle.steps] == [
         "core_cli_teardown-step-001",
         "core_cli_teardown-step-002",
@@ -177,6 +177,8 @@ def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) 
         "core_cli_teardown-step-002",
         "core_cli_teardown-step-004",
     ]
+    artifact_reasons = [event["payload"]["reason"] for event in manifest["events"] if event["event_type"] == "artifact_captured"]
+    assert artifact_reasons.count("failure") == 2
 
 
 def test_run_strict_fsq_core_case_writes_evidence_and_core_report(tmp_path: Path) -> None:

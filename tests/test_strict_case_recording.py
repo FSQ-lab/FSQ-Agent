@@ -41,8 +41,7 @@ def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_
             tool_name="get_runtime_secret",
             payload={
                 "tool_origin": "common",
-                "recordable": True,
-                "replay_kind": "runtimeSecret",
+                "replay": {"kind": "dependency", "alias": "runtimeSecret"},
                 "runtime_secret_name": "TEST_ACCOUNT_PASSWORD",
                 "sensitive": True,
             },
@@ -58,7 +57,7 @@ def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_
             tool_name="input_text",
             tool_call_id="call-1",
             tool_arguments={"text": "***", "target": "Password field"},
-            payload={"tool_origin": "harness", "fsq_action_name": "inputText"},
+            payload={"tool_origin": "harness", "capability_name": "input_text", "replay": {"kind": "fsq_command", "alias": "inputText"}},
         ),
     )
     _write_event(
@@ -70,7 +69,7 @@ def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_
             title="Tool call completed",
             tool_name="input_text",
             tool_call_id="call-1",
-            payload={"tool_origin": "harness", "fsq_action_name": "inputText", "status": "passed"},
+            payload={"tool_origin": "harness", "capability_name": "input_text", "replay": {"kind": "fsq_command", "alias": "inputText"}, "status": "passed"},
         ),
     )
     _write_event(
@@ -81,7 +80,7 @@ def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_
             type="tool_call_completed",
             title="Tool call completed",
             tool_name="wait_ms",
-            payload={"tool_origin": "common", "recordable": True, "replay_kind": "waitMs", "duration_ms": 1, "reason": "settle"},
+            payload={"tool_origin": "common", "replay": {"kind": "fsq_command", "alias": "waitMs"}, "duration_ms": 1, "reason": "settle"},
         ),
     )
 

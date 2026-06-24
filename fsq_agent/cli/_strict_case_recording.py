@@ -8,6 +8,7 @@ from typing import Any, Literal
 import yaml
 
 from fsq_agent.config import Settings
+from fsq_agent.cli._capability_bootstrap import build_capability_registry
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import ConfigurationError, RunEvent, Task, TaskResult
 
@@ -111,7 +112,7 @@ def record_dynamic_run_as_strict_case(
     )
     try:
         generated_case = FsqCaseLoader().load_case(recorded_case_path)
-        FsqExecutableStepAdapter().to_executable_steps(generated_case)
+        FsqExecutableStepAdapter(registry_snapshot=build_capability_registry().snapshot()).to_executable_steps(generated_case)
         recording.validation_status = "passed"
     except ConfigurationError as exc:
         recording.status = "failed"
@@ -144,7 +145,7 @@ class _RecordingCollector:
             if event.type not in {"tool_call_completed", "tool_call_failed"}:
                 continue
 
-            if self._is_recordable_common_event(event):
+            if self._has_replayable_common_policy(event):
                 self._collect_common(event, commands)
                 continue
 
@@ -161,14 +162,14 @@ class _RecordingCollector:
         if event.type != "tool_call_completed":
             self._skip(event.tool_name, "common tool did not complete successfully")
             return
-        replay_kind = payload.get("replay_kind")
-        if replay_kind == "runtimeSecret":
+        replay = self._replay_policy(payload)
+        if replay.get("kind") == "dependency" and replay.get("alias") == "runtimeSecret":
             name = payload.get("runtime_secret_name")
             if isinstance(name, str) and name.strip():
                 self._pending_runtime_secret_names.append(name)
                 self.required_runtime_secret_names.add(name)
             return
-        if replay_kind == "waitMs":
+        if replay.get("kind") == "fsq_command" and replay.get("alias") == "waitMs":
             duration_ms = payload.get("duration_ms")
             if not isinstance(duration_ms, int):
                 self._skip(event.tool_name, "wait_ms event did not include duration_ms")
@@ -181,7 +182,8 @@ class _RecordingCollector:
 
     def _collect_harness(self, start: RunEvent, event: RunEvent, commands: list[dict[str, Any]]) -> None:
         payload = event.payload
-        fsq_action_name = payload.get("fsq_action_name") or start.payload.get("fsq_action_name")
+        replay = self._replay_policy(payload) or self._replay_policy(start.payload)
+        fsq_action_name = replay.get("alias") or payload.get("fsq_action_name") or start.payload.get("fsq_action_name")
         if not isinstance(fsq_action_name, str) or not fsq_action_name:
             self._skip(start.tool_name, "harness tool did not include fsq_action_name")
             return
@@ -232,8 +234,21 @@ class _RecordingCollector:
         origin = start.payload.get("tool_origin") or event.payload.get("tool_origin")
         return str(origin) if origin else "unknown"
 
-    def _is_recordable_common_event(self, event: RunEvent) -> bool:
-        return event.payload.get("tool_origin") == "common" and event.payload.get("recordable") is True
+    def _has_replayable_common_policy(self, event: RunEvent) -> bool:
+        return event.payload.get("tool_origin") == "common" and bool(self._replay_policy(event.payload))
+
+    def _replay_policy(self, payload: dict[str, Any]) -> dict[str, Any]:
+        replay = payload.get("replay")
+        if isinstance(replay, dict):
+            return replay
+        replay_kind = payload.get("replay_kind")
+        if replay_kind == "runtimeSecret":
+            return {"kind": "dependency", "alias": "runtimeSecret"}
+        if replay_kind == "waitMs":
+            return {"kind": "fsq_command", "alias": "waitMs"}
+        if isinstance(replay_kind, str) and replay_kind:
+            return {"kind": "fsq_command", "alias": replay_kind}
+        return {}
 
     def _pop_unpaired_start(self, starts: list[RunEvent], event: RunEvent) -> RunEvent | None:
         if event.tool_name:

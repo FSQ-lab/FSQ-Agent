@@ -6,6 +6,7 @@ from fsq_agent.models import (
     AgentContextSettings,
     AgentSettings,
     CaseSettings,
+    ExecutionSettings,
     HarnessSettings,
     OpenAIAgentsSettings,
     OutputSettings,
@@ -22,6 +23,7 @@ class Settings(BaseModel):
     agent: AgentSettings = Field(default_factory=AgentSettings)
     openai_agents: OpenAIAgentsSettings = Field(default_factory=OpenAIAgentsSettings)
     harness: HarnessSettings = Field(default_factory=HarnessSettings)
+    execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
     runtime_secrets: RuntimeSecretSettings = Field(default_factory=RuntimeSecretSettings)
     workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
     cases: CaseSettings = Field(default_factory=CaseSettings)
