@@ -10,7 +10,6 @@ from fsq_agent.models import (
     HarnessSettings,
     OpenAIAgentsSettings,
     OutputSettings,
-    PrePlanSettings,
     RuntimeSecretSettings,
     SkillConfig,
     WorkspaceSettings,
@@ -45,7 +44,3 @@ class Settings(BaseModel):
     @knowledge_dir.setter
     def knowledge_dir(self, value: str | Path) -> None:
         self.agent_context.knowledge.root_dir = Path(value)
-
-    @property
-    def pre_plan(self) -> PrePlanSettings:
-        return PrePlanSettings(knowledge_dir=self.agent_context.knowledge.pre_plan.dir or self.knowledge_dir)

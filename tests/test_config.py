@@ -56,11 +56,12 @@ openai_agents:
     assert settings.output.runs_dir == tmp_path / "workspace" / "output" / "runs"
     assert settings.output.runs_dir.exists()
     assert settings.cases.dir == tmp_path / "cases"
+    assert not hasattr(settings, "pre_plan")
     assert settings.execution.post_action_delay_seconds.platform == 1.0
     assert settings.execution.post_action_delay_seconds.common == 0.0
     assert settings.agent_context.knowledge.root_dir == tmp_path / "knowledge"
     assert settings.agent_context.knowledge.skills.dir == tmp_path / "knowledge" / "skills"
-    assert settings.pre_plan.knowledge_dir == tmp_path / "knowledge"
+    assert settings.agent_context.knowledge.pre_plan.dir is None
 
 
 def test_load_settings_defaults_workspace_to_config_directory(tmp_path: Path) -> None:
@@ -249,7 +250,7 @@ agent_context:
     assert settings.agent_context.knowledge.root_dir == tmp_path / "knowledge"
     assert settings.agent_context.knowledge.skills.dir == tmp_path / "knowledge" / "custom-skills"
     assert [skill.name for skill in settings.skills] == ["automation-basics"]
-    assert settings.pre_plan.knowledge_dir == tmp_path / "knowledge" / "project_android_v1"
+    assert settings.agent_context.knowledge.pre_plan.dir == tmp_path / "knowledge" / "project_android_v1"
 
 
 @pytest.mark.parametrize(

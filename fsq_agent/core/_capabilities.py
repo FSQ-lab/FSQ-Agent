@@ -1,5 +1,4 @@
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from fsq_agent.models import CapabilityDefinition, CapabilityExecutionResult, CapabilityRegistrySnapshot, ConfigurationError, ExecutableStep
 

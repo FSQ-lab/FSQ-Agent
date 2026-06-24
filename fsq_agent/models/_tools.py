@@ -140,16 +140,6 @@ class CommonToolResult(BaseModel):
     raw: Any = None
 
 
-class CLIToolConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    command: str
-    args: list[str] = Field(default_factory=list)
-    description: str = ""
-    timeout_seconds: int | None = None
-
-
 class ToolDefinition(CommonToolDefinition):
     model_config = ConfigDict(extra="forbid")
 

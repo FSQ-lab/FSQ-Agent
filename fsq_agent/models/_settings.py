@@ -50,12 +50,6 @@ class RuntimeSecretSettings(BaseModel):
     allowed_env_names: list[str] = Field(default_factory=list)
 
 
-class PrePlanSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    knowledge_dir: Path | None = None
-
-
 class PrePlanKnowledgeSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

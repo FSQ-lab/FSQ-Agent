@@ -96,7 +96,6 @@ from fsq_agent.models._settings import (
     OutputSettings,
     PostActionDelaySettings,
     PrePlanKnowledgeSettings,
-    PrePlanSettings,
     RuntimeSecretSettings,
     WorkspaceSettings,
 )
@@ -238,7 +237,6 @@ __all__ = [
     "WorkspaceSettings",
     "CaseSettings",
     "OutputSettings",
-    "PrePlanSettings",
     "FsqAgentError",
     "ConfigurationError",
     "PlanningError",

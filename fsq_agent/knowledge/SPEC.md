@@ -21,7 +21,6 @@ Current `__init__.py` exports via `__all__`:
 
 - `__init__.py`: Public exports only.
 - `_loader.py`: Knowledge provider protocol, directory-backed provider, file discovery, and loader aggregation.
-- `_bundle.py`: Knowledge aggregation helpers.
 - `SPEC.md`: Module design.
 
 ## Error Handling
