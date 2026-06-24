@@ -285,6 +285,92 @@ def test_step_runner_captures_before_and_after_artifacts_from_policy() -> None:
     assert "capture:ui_tree:after-action:step-1:finalize" in harness.calls
 
 
+def test_step_runner_derives_capture_evidence_policy_from_capability_metadata() -> None:
+    harness = CapturingHarness()
+    runner = _runner(harness)
+    step = ExecutableStep(
+        step_id="step-1",
+        kind="action",
+        action_name="tapOn",
+        params={"target": "Login"},
+    )
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    prepare_report = result.phase_reports[0]
+    finalize_report = result.phase_reports[2]
+    assert result.status == "passed"
+    assert [artifact.kind for artifact in prepare_report.artifact_refs] == ["screenshot", "ui_tree"]
+    assert [artifact.kind for artifact in finalize_report.artifact_refs] == ["screenshot", "ui_tree"]
+    assert "before:tap_on:session-1" in harness.calls
+    assert "invoke:tap_on:session-1" in harness.calls
+    assert "capture:screenshot:before-action:step-1:prepare" in harness.calls
+    assert "capture:ui_tree:after-action:step-1:finalize" in harness.calls
+
+
+def test_step_runner_preserves_explicit_evidence_policy_over_capability_metadata() -> None:
+    harness = CapturingHarness()
+    runner = _runner(harness)
+    step = ExecutableStep(
+        step_id="step-1",
+        kind="action",
+        action_name="tapOn",
+        params={"target": "Login"},
+        evidence_policy=EvidencePolicy(capture_before=False, capture_after=True, artifact_kinds=["log"]),
+    )
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    assert result.status == "passed"
+    assert result.phase_reports[0].artifact_refs == []
+    assert [artifact.kind for artifact in result.phase_reports[2].artifact_refs] == ["log"]
+    assert "capture:log:after-action:step-1:finalize" in harness.calls
+    assert not any("capture:screenshot" in call for call in harness.calls)
+    assert not any("capture:ui_tree" in call for call in harness.calls)
+
+
+def test_step_runner_does_not_derive_policy_for_capture_evidence_false_capability() -> None:
+    harness = CapturingHarness()
+    runner = _runner(harness)
+    step = ExecutableStep(
+        step_id="assert-1",
+        kind="assertion",
+        action_name="assertVisible",
+        params={"target": "Login"},
+    )
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    assert result.status == "passed"
+    assert [phase.artifact_refs for phase in result.phase_reports] == [[], [], []]
+    assert "invoke:assert_visible:session-1" in harness.calls
+    assert not any(call.startswith("capture:") for call in harness.calls)
+
+
+def test_step_runner_derives_failure_artifacts_from_capability_metadata() -> None:
+    harness = FailedCapturingHarness()
+    runner = _runner(harness)
+    step = ExecutableStep(
+        step_id="step-1",
+        kind="action",
+        action_name="tapOn",
+        params={"target": "Login"},
+    )
+
+    result = runner.run_step(run_id="run-1", step=step)
+
+    assert result.status == "failed"
+    assert [artifact.kind for artifact in result.phase_reports[0].artifact_refs] == ["screenshot", "ui_tree"]
+    assert [artifact.kind for artifact in result.phase_reports[2].artifact_refs] == [
+        "screenshot",
+        "ui_tree",
+        "screenshot",
+        "ui_tree",
+    ]
+    assert "capture:screenshot:failure:step-1:finalize" in harness.calls
+    assert "capture:ui_tree:failure:step-1:finalize" in harness.calls
+
+
 def test_step_runner_captures_failure_artifacts_from_policy() -> None:
     harness = CapturingHarness()
     runner = StepRunner(harness=harness)

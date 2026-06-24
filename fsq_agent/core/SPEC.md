@@ -54,14 +54,14 @@ For each invocation, `StepRunner` must:
 1. Resolve the canonical capability from the registry.
 2. Validate params with `capability.params_model`.
 3. Build safe invocation context containing run id, step id, source ref, authored action metadata, and capability metadata.
-4. Derive evidence policy from capability metadata and any explicit step policy.
+4. Derive the effective evidence policy from capability metadata and any explicit step policy. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True` and the default `EvidencePolicy()`, the effective policy must capture `screenshot` and `ui_tree` artifacts before the action, after the action, and on failure. A non-default `ExecutableStep.evidence_policy` is explicit and must not be overwritten by capability metadata.
 5. Route by `executor_kind`: `common` to the CommonTool executor binding, `harness` to a harness-owned handler, and `driver` through the active harness to the platform driver/backend.
 6. Normalize backend output into the shared runner result contract.
 7. Apply sensitivity rules before persistence.
 8. Emit structured events containing safe capability metadata, replay payload fields, artifact refs, and status.
 9. Return `RunnerStepResult`.
 
-`StepRunner` must not contain action-name branches for `waitMs`, `wait_ms`, `get_runtime_secret`, or Android action names. A pure wait is a `common` capability with no harness context requirement. Runtime secret lookup is a sensitive `common` capability.
+`StepRunner` must not contain action-name branches for `waitMs`, `wait_ms`, `get_runtime_secret`, Android action names, or evidence-enabled Android mutations. A pure wait is a `common` capability with no harness context requirement. Runtime secret lookup is a sensitive `common` capability.
 
 `StepSequenceRunner` exposes a narrow API:
 
@@ -125,9 +125,9 @@ Sensitive capabilities must return values in the standard normalized shape `outp
 
 ## Testing Contract
 
-- Unit tests: registry validation, alias resolution, duplicate/ambiguous failures, StepRunner routing by executor kind, evidence policy application, sensitivity redaction, structured event payloads, sequence teardown behavior, and Android harness dispatch.
+- Unit tests: registry validation, alias resolution, duplicate/ambiguous failures, StepRunner routing by executor kind, capability-derived evidence policy application, explicit evidence policy preservation, sensitivity redaction, structured event payloads, sequence teardown behavior, and Android harness dispatch.
 - Integration-style tests with fakes: strict `waitMs` alias resolves to canonical `wait_ms`; dynamic and strict `wait_ms` reach the same decorated implementation; Android aliases resolve to canonical driver capabilities; registry bootstrap does not connect to real Android devices.
-- Regression tests: no `waitMs` action-name special branch in StepRunner, no static Android action registry dependency in FSQ parsing, no name-based CommonTool replay/sensitivity branches.
+- Regression tests: no `waitMs` action-name special branch in StepRunner, no static Android action registry dependency in FSQ parsing, no name-based CommonTool replay/sensitivity branches, and no dynamic/strict drift for `capture_evidence=True` harness or driver capabilities.
 - Verification commands: `./.venv/Scripts/python.exe -m pytest tests/test_core_contracts.py tests/test_step_runner.py tests/test_android_harness.py` plus broader tests when implementation touches CLI/agent/report paths.
 
 ## Design Decisions

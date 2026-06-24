@@ -124,6 +124,10 @@ def test_run_fsq_core_case_writes_manifest_and_returns_bundle(tmp_path: Path) ->
     assert [step["step_id"] for step in manifest["steps"]] == ["core_cli-step-001", "core_cli-step-002"]
     assert [step["status"] for step in manifest["steps"]] == ["passed", "passed"]
     assert [event["event_type"] for event in manifest["events"]].count("step_start") == 2
+    assert [artifact["kind"] for artifact in manifest["artifacts"]] == ["screenshot", "ui_tree"] * 4
+    artifact_reasons = [event["payload"]["reason"] for event in manifest["events"] if event["event_type"] == "artifact_captured"]
+    assert artifact_reasons.count("before-action") == 4
+    assert artifact_reasons.count("after-action") == 4
 
 
 def test_run_fsq_core_case_passes_step_interval_to_sequence_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,6 +181,8 @@ def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) 
         "core_cli_teardown-step-002",
         "core_cli_teardown-step-004",
     ]
+    artifact_reasons = [event["payload"]["reason"] for event in manifest["events"] if event["event_type"] == "artifact_captured"]
+    assert artifact_reasons.count("failure") == 2
 
 
 def test_run_strict_fsq_core_case_writes_evidence_and_core_report(tmp_path: Path) -> None:

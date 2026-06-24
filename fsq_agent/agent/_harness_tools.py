@@ -5,7 +5,7 @@ from typing import Any
 
 from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
 from fsq_agent.core import HarnessInterface, StepRunner
-from fsq_agent.models import CapabilityDefinition, ConfigurationError, EvidencePolicy, ExecutableStep, HarnessFunctionSchema, RunnerStepResult
+from fsq_agent.models import CapabilityDefinition, ConfigurationError, ExecutableStep, HarnessFunctionSchema, RunnerStepResult
 
 
 class HarnessToolAdapter:
@@ -76,7 +76,6 @@ class HarnessToolAdapter:
                     kind=self._step_kind(schema),
                     action_name=action_name,
                     params=params,
-                    evidence_policy=self._evidence_policy(schema),
                     metadata={
                         "run_id": self.run_id,
                         "tool_origin": "harness",
@@ -124,16 +123,6 @@ class HarnessToolAdapter:
 
     def _capability_for_schema(self, schema: HarnessFunctionSchema) -> CapabilityDefinition | None:
         return self._capability_snapshot.resolve(schema.fsq_action_name or schema.driver_method)
-
-    def _evidence_policy(self, schema: HarnessFunctionSchema) -> EvidencePolicy:
-        if schema.capture_evidence:
-            return EvidencePolicy(
-                capture_before=True,
-                capture_after=True,
-                capture_on_failure=True,
-                artifact_kinds=["screenshot", "ui_tree"],
-            )
-        return EvidencePolicy()
 
     def _format_runner_result(
         self,

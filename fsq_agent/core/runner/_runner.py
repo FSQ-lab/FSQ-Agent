@@ -8,6 +8,7 @@ from fsq_agent.models import (
     CapabilityDefinition,
     CapabilityExecutionResult,
     EvidenceArtifactRef,
+    EvidencePolicy,
     ExecutableStep,
     FailureCategory,
     HarnessActionResult,
@@ -56,6 +57,7 @@ class StepRunner:
         self._events = []
         self._last_capability_execution_result = None
         capability, step = self._resolve_capability_step(step)
+        step = self._with_effective_evidence_policy(step, capability)
         state = self._start_step(run_id, step)
         if capability is not None and capability.executor_kind == "common":
             return self._run_common_step(run_id, step, capability, state)
@@ -67,6 +69,28 @@ class StepRunner:
         if capability is not None and capability.name != step.action_name:
             return capability, step.model_copy(update={"action_name": capability.name})
         return capability, step
+
+    def _with_effective_evidence_policy(
+        self,
+        step: ExecutableStep,
+        capability: CapabilityDefinition | None,
+    ) -> ExecutableStep:
+        if capability is None or capability.executor_kind not in {"harness", "driver"}:
+            return step
+        if not capability.capture_evidence or not self._is_default_evidence_policy(step.evidence_policy):
+            return step
+        return step.model_copy(update={"evidence_policy": self._standard_capture_evidence_policy()})
+
+    def _is_default_evidence_policy(self, policy: EvidencePolicy) -> bool:
+        return policy.model_dump(mode="python") == EvidencePolicy().model_dump(mode="python")
+
+    def _standard_capture_evidence_policy(self) -> EvidencePolicy:
+        return EvidencePolicy(
+            capture_before=True,
+            capture_after=True,
+            capture_on_failure=True,
+            artifact_kinds=["screenshot", "ui_tree"],
+        )
 
     def _start_step(self, run_id: str, step: ExecutableStep) -> _StepExecutionState:
         state = _StepExecutionState()

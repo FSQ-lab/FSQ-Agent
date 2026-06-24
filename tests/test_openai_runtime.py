@@ -531,6 +531,8 @@ async def test_harness_tool_adapter_delegates_to_step_runner(monkeypatch: pytest
     assert runner_calls[0][1] == "run-1"
     assert runner_calls[0][2].action_name == "tap_on"
     assert runner_calls[0][2].metadata["authored_action_name"] == "tapOn"
+    assert runner_calls[0][2].evidence_policy.capture_before is False
+    assert runner_calls[0][2].evidence_policy.artifact_kinds == []
     assert harness.steps == []
 
 
@@ -604,7 +606,7 @@ async def test_harness_tool_adapter_keeps_default_evidence_policy_for_assertion_
 
 
 @pytest.mark.asyncio
-async def test_harness_tool_adapter_uses_schema_evidence_flag_not_action_name() -> None:
+async def test_harness_tool_adapter_uses_registry_metadata_for_effective_evidence_policy() -> None:
     harness = _FakeHarness(capture_evidence=False)
     adapter = HarnessToolAdapter(harness, run_id="run-1")
 
@@ -614,12 +616,17 @@ async def test_harness_tool_adapter_uses_schema_evidence_flag_not_action_name() 
     payload = json.loads(output)
     assert payload["status"] == "passed"
     assert payload["fsq_action_name"] == "tapOn"
-    assert payload["artifact_refs"] == []
+    assert [ref["kind"] for ref in payload["artifact_refs"]] == ["screenshot", "ui_tree", "screenshot", "ui_tree"]
     assert harness.steps[0].action_name == "tap_on"
     assert harness.steps[0].metadata["authored_action_name"] == "tapOn"
-    assert harness.steps[0].evidence_policy.capture_before is False
-    assert harness.steps[0].evidence_policy.artifact_kinds == []
-    assert not any(call.startswith("capture:") for call in harness.calls)
+    assert harness.steps[0].evidence_policy.capture_before is True
+    assert harness.steps[0].evidence_policy.artifact_kinds == ["screenshot", "ui_tree"]
+    assert [call for call in harness.calls if call.startswith("capture:")] == [
+        "capture:screenshot:before-action:agent-tap_on-1:prepare:session-1",
+        "capture:ui_tree:before-action:agent-tap_on-1:prepare:session-1",
+        "capture:screenshot:after-action:agent-tap_on-1:finalize:session-1",
+        "capture:ui_tree:after-action:agent-tap_on-1:finalize:session-1",
+    ]
 
 
 @pytest.mark.asyncio

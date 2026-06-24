@@ -21,7 +21,7 @@ All executable behavior is declared through decorator-driven capability metadata
 
 Decorator unification is a declaration-layer concern, not an execution-layer merge. CommonTool utilities remain implemented and executed by `tools`; harness-owned and driver/platform actions remain implemented and executed by `core` harnesses and drivers. Both domains use the same declaration metadata and the same `CapabilityDefinition` contract.
 
-`StepRunner` is the common execution manager for CommonTool, harness-owned, and driver/platform capabilities. It looks up the capability registry, validates params, applies evidence and sensitivity policy, invokes the appropriate executor binding, emits structured safe events, and returns normalized runner results. Executable paths must not branch on names such as `waitMs`, `wait_ms`, `get_runtime_secret`, or Android command names.
+`StepRunner` is the common execution manager for CommonTool, harness-owned, and driver/platform capabilities. It looks up the capability registry, validates params, applies evidence and sensitivity policy, invokes the appropriate executor binding, emits structured safe events, and returns normalized runner results. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True`, a default step evidence policy resolves to the standard screenshot and UI-tree capture policy before the action, after the action, and on failure; explicit non-default `ExecutableStep.evidence_policy` values remain caller overrides. Executable paths must not branch on names such as `waitMs`, `wait_ms`, `get_runtime_secret`, or Android command names.
 
 ## Recorded Strict Case Artifacts
 
