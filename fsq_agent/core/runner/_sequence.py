@@ -1,4 +1,3 @@
-import time
 from collections.abc import Sequence
 
 from fsq_agent.core.evidence import EvidenceRecorder
@@ -18,13 +17,9 @@ class StepSequenceRunner:
         self,
         step_runner: StepRunner,
         evidence_recorder: EvidenceRecorder,
-        step_interval_seconds: float = 1.0,
     ) -> None:
-        if step_interval_seconds < 0:
-            raise ValueError("step_interval_seconds must be non-negative")
         self.step_runner = step_runner
         self.evidence_recorder = evidence_recorder
-        self.step_interval_seconds = step_interval_seconds
 
     def run_steps(
         self,
@@ -36,8 +31,6 @@ class StepSequenceRunner:
 
         def run_next(step: ExecutableStep):
             nonlocal ran_step
-            if ran_step:
-                self._sleep_between_steps()
             result = self._run_and_record(run_id, step)
             ran_step = True
             return result
@@ -53,10 +46,6 @@ class StepSequenceRunner:
             for step in teardown_steps:
                 run_next(step)
         return self.evidence_recorder.build_bundle()
-
-    def _sleep_between_steps(self) -> None:
-        if self.step_interval_seconds > 0:
-            time.sleep(self.step_interval_seconds)
 
     def _run_and_record(self, run_id: str, step: ExecutableStep):
         result = self.step_runner.run_step(run_id=run_id, step=step)

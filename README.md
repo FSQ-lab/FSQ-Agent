@@ -34,8 +34,11 @@ harness:
   platform: android
   android:
     backend: uiautomator2
-  strict_core:
-    step_interval_seconds: 1.0
+
+execution:
+  post_action_delay_seconds:
+    platform: 1.0
+    common: 0.0
 ```
 
 Set Android and Azure user values in `.env`:

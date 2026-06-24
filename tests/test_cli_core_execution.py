@@ -5,7 +5,6 @@ from typing import Any
 import pytest
 
 from fsq_agent.cli._core_execution import run_fsq_core_case, run_strict_fsq_core_case
-import fsq_agent.core.runner._sequence as sequence_module
 from fsq_agent.models import (
     EvidenceBundle,
     ExecutableStep,
@@ -13,13 +12,9 @@ from fsq_agent.models import (
     HarnessActionResult,
     HarnessArtifactRef,
     HarnessContext,
+    PostActionDelaySettings,
     StepPhase,
 )
-
-
-@pytest.fixture(autouse=True)
-def _skip_real_sequence_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sequence_module.time, "sleep", lambda seconds: None)
 
 
 FSQ_CASE = """
@@ -130,12 +125,13 @@ def test_run_fsq_core_case_writes_manifest_and_returns_bundle(tmp_path: Path) ->
     assert artifact_reasons.count("after-action") == 4
 
 
-def test_run_fsq_core_case_passes_step_interval_to_sequence_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_fsq_core_case_passes_post_action_delay_to_step_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, float] = {}
 
     class FakeSequenceRunner:
-        def __init__(self, *, step_runner, evidence_recorder, step_interval_seconds: float) -> None:
-            captured["step_interval_seconds"] = step_interval_seconds
+        def __init__(self, *, step_runner, evidence_recorder) -> None:
+            captured["platform"] = step_runner.post_action_delay_seconds.platform
+            captured["common"] = step_runner.post_action_delay_seconds.common
 
         def run_steps(self, *, run_id: str, steps, teardown_steps):
             return EvidenceBundle(bundle_id=f"{run_id}-bundle", run_id=run_id)
@@ -148,10 +144,10 @@ def test_run_fsq_core_case_passes_step_interval_to_sequence_runner(tmp_path: Pat
         output_dir=tmp_path / "runs" / "run-1",
         run_id="run-1",
         steps=[],
-        step_interval_seconds=0.25,
+        post_action_delay_seconds=PostActionDelaySettings(platform=0.25, common=0.1),
     )
 
-    assert captured["step_interval_seconds"] == 0.25
+    assert captured == {"platform": 0.25, "common": 0.1}
     assert bundle.manifest_path == tmp_path / "runs" / "run-1" / "evidence-manifest.json"
 
 

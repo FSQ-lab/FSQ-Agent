@@ -267,6 +267,7 @@ class OpenAIAgentsRuntime:
                     run_id=run_id,
                     reserved_tool_names={*self._common_tool_names, *_RUNTIME_TOOL_NAMES},
                     common_tool_providers=self._common_tool_providers(),
+                    post_action_delay_seconds=self.settings.execution.post_action_delay_seconds,
                 )
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name

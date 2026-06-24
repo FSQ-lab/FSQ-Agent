@@ -5,7 +5,7 @@ import pytest
 
 from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
 from fsq_agent.core import EvidenceRecorder, StepRunner, StepSequenceRunner
-import fsq_agent.core.runner._sequence as sequence_module
+import fsq_agent.core.runner._runner as runner_module
 from fsq_agent.models import (
     ExecutableStep,
     FailureCategory,
@@ -14,11 +14,6 @@ from fsq_agent.models import (
     HarnessContext,
     StepPhase,
 )
-
-
-@pytest.fixture(autouse=True)
-def _skip_real_sequence_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sequence_module.time, "sleep", lambda seconds: None)
 
 
 class SequenceHarness:
@@ -67,7 +62,7 @@ def _step(step_id: str, action_name: str) -> ExecutableStep:
     return ExecutableStep(step_id=step_id, kind="action", action_name=action_name)
 
 
-def _runner(harness: SequenceHarness, recorder: EvidenceRecorder, step_interval_seconds: float = 1.0) -> StepSequenceRunner:
+def _runner(harness: SequenceHarness, recorder: EvidenceRecorder) -> StepSequenceRunner:
     return StepSequenceRunner(
         step_runner=StepRunner(
             harness=harness,
@@ -75,7 +70,6 @@ def _runner(harness: SequenceHarness, recorder: EvidenceRecorder, step_interval_
             executor_bindings=build_capability_executor_bindings(),
         ),
         evidence_recorder=recorder,
-        step_interval_seconds=step_interval_seconds,
     )
 
 
@@ -154,7 +148,7 @@ def test_step_sequence_runner_runs_teardown_after_successful_normal_steps(tmp_pa
     assert [step.status for step in bundle.steps] == ["passed", "passed"]
 
 
-def test_step_sequence_runner_waits_between_executed_steps_without_evidence_steps(
+def test_step_sequence_runner_records_executed_steps_without_sequence_sleep(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -163,9 +157,8 @@ def test_step_sequence_runner_waits_between_executed_steps_without_evidence_step
 
     def fake_sleep(seconds: float) -> None:
         sleep_calls.append(seconds)
-        harness.calls.append(f"sleep:{seconds}")
 
-    monkeypatch.setattr(sequence_module.time, "sleep", fake_sleep)
+    monkeypatch.setattr(runner_module.time, "sleep", fake_sleep)
 
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
     runner = _runner(harness, recorder)
@@ -176,7 +169,7 @@ def test_step_sequence_runner_waits_between_executed_steps_without_evidence_step
         teardown_steps=[_step("teardown-1", "killApp")],
     )
 
-    assert sleep_calls == [1.0, 1.0]
+    assert sleep_calls == []
     assert [step.step_id for step in bundle.steps] == ["step-1", "step-2", "teardown-1"]
     assert [event.event_type for event in bundle.events].count("step_start") == 3
     assert harness.calls == [
@@ -184,12 +177,10 @@ def test_step_sequence_runner_waits_between_executed_steps_without_evidence_step
         "before:step-1",
         "invoke:step-1",
         "after:step-1:passed",
-        "sleep:1.0",
         "get_context",
         "before:step-2",
         "invoke:step-2",
         "after:step-2:passed",
-        "sleep:1.0",
         "get_context",
         "before:teardown-1",
         "invoke:teardown-1",
@@ -197,7 +188,7 @@ def test_step_sequence_runner_waits_between_executed_steps_without_evidence_step
     ]
 
 
-def test_step_sequence_runner_allows_zero_step_interval(
+def test_step_sequence_runner_does_not_sleep_between_steps(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -207,10 +198,10 @@ def test_step_sequence_runner_allows_zero_step_interval(
     def fake_sleep(seconds: float) -> None:
         sleep_calls.append(seconds)
 
-    monkeypatch.setattr(sequence_module.time, "sleep", fake_sleep)
+    monkeypatch.setattr(runner_module.time, "sleep", fake_sleep)
 
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
-    runner = _runner(harness, recorder, step_interval_seconds=0)
+    runner = _runner(harness, recorder)
 
     runner.run_steps(
         run_id="run-1",

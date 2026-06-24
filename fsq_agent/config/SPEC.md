@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, shared model provider selection, env-backed Azure OpenAI settings, GitHub Copilot local provider authentication, env-backed Android app/device selection, harness/driver construction, harness-owned strict-core pacing, strict-core Android readiness, strict replay secret resolution, CommonTool safety policy, agent-context knowledge and skills, prompt template paths and variables, runtime secret allowlists, case input directories, internal goal-planning page knowledge, the fsq-agent workspace, and output directories.
+Load, merge, normalize, and validate runtime configuration for the OpenAI Agents SDK runtime, shared model provider selection, env-backed Azure OpenAI settings, GitHub Copilot local provider authentication, env-backed Android app/device selection, harness/driver construction, runner-owned post-action delay defaults, strict-core Android readiness, strict replay secret resolution, CommonTool safety policy, agent-context knowledge and skills, prompt template paths and variables, runtime secret allowlists, case input directories, internal goal-planning page knowledge, the fsq-agent workspace, and output directories.
 
 ## Dependencies
 
@@ -12,21 +12,24 @@ Load, merge, normalize, and validate runtime configuration for the OpenAI Agents
 
 Target `__init__.py` exports via `__all__` after this change:
 
-- `Settings`: Runtime settings aggregate model that combines agent runtime defaults, OpenAI Agents SDK provider selection, tracing policy, resolved provider runtime values, configurable prompt template paths and scalar variables, context trimming defaults, CommonTool output artifact policy defaults, harness/driver selection, harness strict-core pacing, env-backed Android app/device settings, strict-core Android readiness inputs, runtime secret allowlists, workspace, case directory, output, and structured agent context rooted in a knowledge directory containing skill resources and optional pre-plan page knowledge.
+- `Settings`: Runtime settings aggregate model that combines agent runtime defaults, OpenAI Agents SDK provider selection, tracing policy, resolved provider runtime values, configurable prompt template paths and scalar variables, context trimming defaults, CommonTool output artifact policy defaults, harness/driver selection, runner-owned post-action delay defaults, env-backed Android app/device settings, strict-core Android readiness inputs, runtime secret allowlists, workspace, case directory, output, and structured agent context rooted in a knowledge directory containing skill resources and optional pre-plan page knowledge.
 - `load_settings(path: str | Path | None = None, workspace: str | Path | None = None) -> Settings`: Loads `.env` values without overriding existing environment variables, loads YAML configuration from the provided path or default search locations, overlays fixed environment-backed local settings, normalizes provider settings, and resolves runtime paths. The optional workspace argument overrides `workspace.root_dir`.
 - `resolve_runtime_paths(settings: Settings, base_dir: Path | None = None) -> None`: Ensures the fsq-agent workspace is initialized and marked, resolves case directories, agent context knowledge root, knowledge-root-relative skills directory, optional pre-plan knowledge directory, optional prompt template paths, and creates output directories under the workspace.
 - `validate_runtime_settings(settings: Settings) -> None`: Validates provider-specific environment/auth requirements, Azure OpenAI base URL shape when selected, resolved model name, LLM harness/driver settings, CommonTool policy, and local path constraints before a default LLM run starts.
 - `validate_strict_core_settings(settings: Settings, requires_ai_assertion: bool = False) -> None`: Validates strict-core harness/driver settings not provided by a case file. It does not require provider credentials unless the caller knows the strict run contains an authored `assertWithAI` step or otherwise requires a provider-backed AI assertion evaluator. Strict replay runtime-secret refs are validated by entry-layer code after the case is parsed because the referenced names come from the case, not from static settings.
 
-Developer-owned YAML shape for harness strict-core pacing and agent context must include this structure:
+Developer-owned YAML shape for execution post-action delay defaults and agent context must include this structure:
 
 ```yaml
 harness:
 	platform: android
 	android:
 		backend: uiautomator2
-	strict_core:
-		step_interval_seconds: 1.0
+
+execution:
+	post_action_delay_seconds:
+		platform: 1.0
+		common: 0.0
 
 agent_context:
 	knowledge:
@@ -53,7 +56,7 @@ agent_context:
 
 ## Error Handling
 
-Invalid or missing configuration raises `ConfigurationError` from `models`. Low-level YAML, path, workspace marker, environment overlay, or validation exceptions are wrapped with actionable context. Missing Azure OpenAI or Android local environment values are reported by variable name without exposing values. Obsolete `verification` configuration, including `verification.mode`, is rejected instead of ignored. Obsolete custom instruction configuration under `openai_agents.prompt.custom_instructions` or `openai_agents.prompt.custom_instructions_path` is rejected instead of ignored; users should move that guidance into `knowledge/project.md` or configured skills. Removed pre-release config keys do not require custom migration errors; they are rejected by the narrowed settings schema when present.
+Invalid or missing configuration raises `ConfigurationError` from `models`. Low-level YAML, path, workspace marker, environment overlay, or validation exceptions are wrapped with actionable context. Missing Azure OpenAI or Android local environment values are reported by variable name without exposing values. Negative post-action delay defaults are rejected. Obsolete `harness.strict_core.step_interval_seconds` configuration is rejected instead of silently preserving strict-only pacing; users should configure `execution.post_action_delay_seconds` instead. Obsolete `verification` configuration, including `verification.mode`, is rejected instead of ignored. Obsolete custom instruction configuration under `openai_agents.prompt.custom_instructions` or `openai_agents.prompt.custom_instructions_path` is rejected instead of ignored; users should move that guidance into `knowledge/project.md` or configured skills. Removed pre-release config keys do not require custom migration errors; they are rejected by the narrowed settings schema when present.
 
 ## Design Decisions
 
@@ -73,7 +76,7 @@ Invalid or missing configuration raises `ConfigurationError` from `models`. Low-
 - `openai_agents.prompt` owns prompt template customization and scalar prompt variables. `prompt.agent_template_path` and `prompt.task_template_path` may point to files resolved relative to the configuration file directory; when template paths are omitted, package default templates are used. Static prompt text, headings, loops, and task formatting live in templates. `prompt.variables` provides operator-controlled scalar model data injected into templates. `prompt.custom_instructions` and `prompt.custom_instructions_path` are not supported configuration keys; project-specific guidance belongs in `knowledge/project.md`, and reusable execution guidance belongs in configured skills.
 - `harness.platform` selects the platform harness used by goal-driven task execution. The first supported platform is `android`.
 - `harness.android.backend` selects the Android backend. The first supported backend is `uiautomator2`.
-- `harness.strict_core.step_interval_seconds` controls the interval passed from entry-layer strict execution into `StepSequenceRunner`. The default is `1.0` seconds, values must be non-negative, and this pacing is execution timing only: it must not add `waitMs` commands, mutate parsed FSQ commands, or create synthetic evidence steps.
+- `execution.post_action_delay_seconds` controls runner-owned post-action stabilization delay defaults. `platform` defaults to `1.0` seconds and applies to harness/driver capabilities when capability metadata does not override it. `common` defaults to `0.0` seconds and applies to CommonTool capabilities when capability metadata does not override it. Values must be non-negative, and this pacing is execution timing only: it must not add `waitMs` commands, mutate parsed FSQ commands, record generated strict replay waits, or create synthetic evidence steps.
 - Android app id and device serial are environment-backed local values, not YAML values. Strict-core may fall back to `appId` from parsed FSQ case metadata when `FSQ_ANDROID_APP_ID` is absent. There are no public CLI app-id overrides.
 - Strict-core execution remains deterministic except for explicitly authored `assertWithAI` assertion steps. When a strict run contains `assertWithAI`, entry-layer code may request provider validation and inject a provider-backed evaluator into the platform harness. Missing provider readiness for such a step is a configuration failure. No AI recovery, locator fallback, or testcase mutation is enabled by this setting.
 - Strict replay secret refs remain deterministic configuration inputs. After parsing a strict case, entry-layer code validates each referenced `runtimeSecret` name against `runtime_secrets.allowed_env_names` and verifies the value is present in environment or `.env` before UI actions begin. Missing allowlist entries or values are configuration failures. Secret values are substituted only in memory and must not be written to settings, generated YAML, events, manifests, or reports.

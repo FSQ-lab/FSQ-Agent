@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the shared execution-core orchestration layer for FSQ-Agent. The core module owns `StepRunner` as the single execution manager for canonical capability invocations, `StepSequenceRunner` ordering, harness and driver protocols, capability executor routing, and evidence-recording coordination points used by strict replay and dynamic execution.
+Define the shared execution-core orchestration layer for FSQ-Agent. The core module owns `StepRunner` as the single execution manager for canonical capability invocations, runner-owned post-action delay resolution/application, `StepSequenceRunner` ordering, harness and driver protocols, capability executor routing, and evidence-recording coordination points used by strict replay and dynamic execution.
 
 The module does not parse CLI arguments, parse FSQ YAML, construct provider sessions, construct OpenAI Agents SDK tools, or generate reports. Entry modules build settings, providers, registries, and concrete harnesses, then pass registry snapshots and executor bindings into core.
 
@@ -22,8 +22,8 @@ Target `__init__.py` exports via `__all__`:
 - `CapabilityRegistry`: Validated runtime registry for decorated capabilities. It resolves canonical names and aliases, rejects duplicate names and ambiguous aliases, exposes serializable snapshots, and validates that every capability has a parameter model/schema and executor binding.
 - `CapabilityExecutorBindings`: Lightweight binding object or protocol containing executor implementations for `common`, `harness`, and `driver` capability kinds.
 - `HarnessInterface`: Protocol describing platform capabilities required by StepRunner. Concrete Android, Web, iOS, and fake harnesses may satisfy the protocol structurally.
-- `StepRunner`: Executes one canonical `ExecutableStep` or capability invocation by looking up metadata in `CapabilityRegistry`, validating params with the declared model, applying evidence and sensitivity policy, routing through the appropriate executor binding, normalizing backend output, emitting structured safe events, and returning `RunnerStepResult`.
-- `StepSequenceRunner`: Executes ordered `ExecutableStep` records with `StepRunner`, records events and step results, respects strict pacing, stops normal execution on blocking failures, and always executes supplied teardown steps.
+- `StepRunner`: Executes one canonical `ExecutableStep` or capability invocation by looking up metadata in `CapabilityRegistry`, validating params with the declared model, applying evidence, post-action delay, and sensitivity policy, routing through the appropriate executor binding, normalizing backend output, emitting structured safe events, and returning `RunnerStepResult`.
+- `StepSequenceRunner`: Executes ordered `ExecutableStep` records with `StepRunner`, records events and step results, stops normal execution on blocking failures, and always executes supplied teardown steps. It does not own configured sleep or pacing behavior; post-action stabilization is handled inside `StepRunner`.
 - `EvidenceRecorder`: Event/result sink that builds an `EvidenceBundle` and writes a JSON manifest for execution facts and artifact references.
 - `ArtifactStore`: Evidence artifact path policy and writer for run-local screenshots, UI trees, harness-call JSON, logs, and raw files.
 - `AIAssertionEvaluatorProtocol`: Structural protocol for provider-backed visual assertion evaluation. It accepts serializable `AIAssertionRequest` values and returns `AIAssertionResult` values without exposing provider runtime objects to `core`.
@@ -42,7 +42,12 @@ Planned subpackage exports:
 `StepRunner` exposes a narrow API:
 
 ```python
-runner = StepRunner(registry=registry, executors=executors, harness=harness)
+runner = StepRunner(
+	registry=registry,
+	executors=executors,
+	harness=harness,
+	post_action_delay_seconds=settings.execution.post_action_delay_seconds,
+)
 result = runner.run_step(run_id="run-1", step=executable_step)
 events = runner.events
 ```
@@ -55,22 +60,24 @@ For each invocation, `StepRunner` must:
 2. Validate params with `capability.params_model`.
 3. Build safe invocation context containing run id, step id, source ref, authored action metadata, and capability metadata.
 4. Derive the effective evidence policy from capability metadata and any explicit step policy. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True` and the default `EvidencePolicy()`, the effective policy must capture `screenshot` and `ui_tree` artifacts before the action, after the action, and on failure. A non-default `ExecutableStep.evidence_policy` is explicit and must not be overwritten by capability metadata.
-5. Route by `executor_kind`: `common` to the CommonTool executor binding, `harness` to a harness-owned handler, and `driver` through the active harness to the platform driver/backend.
-6. Normalize backend output into the shared runner result contract.
-7. Apply sensitivity rules before persistence.
-8. Emit structured events containing safe capability metadata, replay payload fields, artifact refs, and status.
-9. Return `RunnerStepResult`.
+5. Resolve the effective post-action delay from `CapabilityDefinition.post_action_delay_seconds` when it is not `None`; otherwise use configured `execution.post_action_delay_seconds.common` for `common` capabilities and `execution.post_action_delay_seconds.platform` for `harness` and `driver` capabilities.
+6. Route by `executor_kind`: `common` to the CommonTool executor binding, `harness` to a harness-owned handler, and `driver` through the active harness to the platform driver/backend.
+7. Normalize backend output into the shared runner result contract.
+8. Apply a positive post-action delay after invoke completion or structured invoke failure conversion and before finalize begins. For harness/driver capabilities, this means before `after_action`, `capture_after`, and `capture_on_failure`; for CommonTool capabilities, this means before the common finalize phase. Zero delay must not call `time.sleep(0)`.
+9. Apply sensitivity rules before persistence.
+10. Emit structured events containing safe capability metadata, replay payload fields, artifact refs, post-action delay metadata, and status.
+11. Return `RunnerStepResult`.
 
 `StepRunner` must not contain action-name branches for `waitMs`, `wait_ms`, `get_runtime_secret`, Android action names, or evidence-enabled Android mutations. A pure wait is a `common` capability with no harness context requirement. Runtime secret lookup is a sensitive `common` capability.
 
 `StepSequenceRunner` exposes a narrow API:
 
 ```python
-runner = StepSequenceRunner(step_runner=runner, evidence_recorder=recorder, step_interval_seconds=1.0)
+runner = StepSequenceRunner(step_runner=runner, evidence_recorder=recorder)
 bundle = runner.run_steps(run_id="run-1", steps=steps, teardown_steps=teardown_steps)
 ```
 
-It must not import `fsq`, parse YAML, construct platform drivers, resolve strict replay refs, generate reports, or add synthetic `waitMs` steps for pacing.
+It must not import `fsq`, parse YAML, construct platform drivers, resolve strict replay refs, generate reports, sleep between steps for configured pacing, or add synthetic `waitMs` steps for pacing.
 
 `HarnessInterface` provides runner-facing behavior for context, artifact capture, and harness/driver capability execution. Platform harnesses are FSQ-controlled adapters; drivers execute backend mechanics and return raw platform observations. Harnesses and drivers do not decide runner ordering, retry policy, event emission, evidence manifest structure, artifact directory policy, case aggregation, or report generation.
 
@@ -125,15 +132,17 @@ Sensitive capabilities must return values in the standard normalized shape `outp
 
 ## Testing Contract
 
-- Unit tests: registry validation, alias resolution, duplicate/ambiguous failures, StepRunner routing by executor kind, capability-derived evidence policy application, explicit evidence policy preservation, sensitivity redaction, structured event payloads, sequence teardown behavior, and Android harness dispatch.
+- Unit tests: registry validation, alias resolution, duplicate/ambiguous failures, StepRunner routing by executor kind, capability-derived evidence policy application, explicit evidence policy preservation, post-action delay resolution and ordering, sensitivity redaction, structured event payloads, sequence teardown behavior, and Android harness dispatch.
 - Integration-style tests with fakes: strict `waitMs` alias resolves to canonical `wait_ms`; dynamic and strict `wait_ms` reach the same decorated implementation; Android aliases resolve to canonical driver capabilities; registry bootstrap does not connect to real Android devices.
-- Regression tests: no `waitMs` action-name special branch in StepRunner, no static Android action registry dependency in FSQ parsing, no name-based CommonTool replay/sensitivity branches, and no dynamic/strict drift for `capture_evidence=True` harness or driver capabilities.
+- Regression tests: no `waitMs` action-name special branch in StepRunner, no static Android action registry dependency in FSQ parsing, no name-based CommonTool replay/sensitivity/delay branches, no synthetic `waitMs` or evidence steps from post-action delay, no StepSequenceRunner configured inter-step sleep, and no dynamic/strict drift for `capture_evidence=True` harness or driver capabilities.
 - Verification commands: `./.venv/Scripts/python.exe -m pytest tests/test_core_contracts.py tests/test_step_runner.py tests/test_android_harness.py` plus broader tests when implementation touches CLI/agent/report paths.
 
 ## Design Decisions
 
 - Decorator metadata produced through the shared `capabilities` declaration layer is the source of truth for executable capabilities. Android action catalog entries validate declarations and prevent platform drift, but static Android action tables, separate harness schemas, and separate CommonTool definitions are not runtime authorities in the target architecture.
 - `StepRunner` owns execution control, metadata-driven routing, evidence policy application, result normalization, sensitivity handling, and structured event emission.
+- `StepRunner` owns post-action stabilization delay. It applies `time.sleep` only through a runner-local private helper after invoke and before finalize when the effective delay is positive. Entry layers pass loaded delay settings into `StepRunner`; `core` must not import `config`.
+- Post-action delay is metadata/config-driven timing only. Capability metadata can override the configured executor-kind default, including explicit zero to disable delay. The delay must not become a `waitMs` command, replay entry, evidence step, or action result.
 - CommonTools are execution capabilities routed by `executor_kind="common"`; they are not a separate dynamic-only tool path.
 - `wait_ms` is a decorated CommonTool capability with replay alias `waitMs`, not a core-owned special command.
 - `get_runtime_secret` is a decorated sensitive CommonTool capability with dependency replay alias `runtimeSecret`, not a report/recorder special case.

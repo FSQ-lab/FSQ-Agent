@@ -33,6 +33,7 @@ def test_common_capability_discovery_returns_serializable_definition() -> None:
             aliases=["exampleTool"],
             replay=ReplayPolicy(kind="fsq_command", alias="exampleTool"),
             capture_evidence=True,
+            post_action_delay_seconds=0.5,
             metadata={"origin": "test"},
         )
         async def _example_tool(self, arguments: dict[str, object]) -> object:
@@ -47,6 +48,7 @@ def test_common_capability_discovery_returns_serializable_definition() -> None:
     assert definition.executor_kind == "common"
     assert definition.owner == "tools"
     assert definition.capture_evidence is True
+    assert definition.post_action_delay_seconds == 0.5
     assert definition.params_model is ExampleParams
     assert definition.replay == ReplayPolicy(kind="fsq_command", alias="exampleTool")
     assert definition.safe_metadata()["origin"] == "test"
@@ -75,6 +77,7 @@ def test_platform_driver_capability_validates_catalog_method_name() -> None:
                 owner="driver",
                 params_model=ExampleParams,
                 method_name="tap_on",
+                post_action_delay_seconds=0.75,
                 replay=ReplayPolicy(kind="fsq_command", alias="tapOn"),
             )
         },
@@ -84,6 +87,62 @@ def test_platform_driver_capability_validates_catalog_method_name() -> None:
         class BadDriver:
             @driver_action("tapOn", description="Tap.")
             def wrong_name(self, params: ExampleParams) -> dict[str, object]:
+                return {}
+
+
+def test_platform_driver_capability_inherits_and_overrides_catalog_delay() -> None:
+    driver_action = platform_driver_capability(
+        platform="android",
+        backend="fake",
+        catalog={
+            "tapOn": CapabilityActionDefinition(
+                action_name="tapOn",
+                canonical_name="tap_on",
+                executor_kind="driver",
+                owner="driver",
+                params_model=ExampleParams,
+                method_name="tap_on",
+                post_action_delay_seconds=0.75,
+                replay=ReplayPolicy(kind="fsq_command", alias="tapOn"),
+            ),
+            "inputText": CapabilityActionDefinition(
+                action_name="inputText",
+                canonical_name="input_text",
+                executor_kind="driver",
+                owner="driver",
+                params_model=ExampleParams,
+                method_name="input_text",
+                post_action_delay_seconds=0.5,
+                replay=ReplayPolicy(kind="fsq_command", alias="inputText"),
+            ),
+        },
+    )
+
+    class Driver:
+        @driver_action("tapOn", description="Tap.")
+        def tap_on(self, params: ExampleParams) -> dict[str, object]:
+            return {}
+
+        @driver_action("inputText", description="Input.", post_action_delay_seconds=0)
+        def input_text(self, params: ExampleParams) -> dict[str, object]:
+            return {}
+
+    definitions = {definition.name: definition for definition in discover_capability_definitions(Driver)}
+
+    assert definitions["tap_on"].post_action_delay_seconds == 0.75
+    assert definitions["input_text"].post_action_delay_seconds == 0
+
+
+def test_capability_rejects_negative_post_action_delay() -> None:
+    with pytest.raises(ConfigurationError, match="post_action_delay_seconds"):
+        class BadProvider:
+            @common_capability(
+                name="bad_delay",
+                description="Bad.",
+                params_model=ExampleParams,
+                post_action_delay_seconds=-0.1,
+            )
+            async def bad_delay(self, arguments: dict[str, object]) -> object:
                 return {}
 
 

@@ -31,6 +31,7 @@ class CapabilityDeclaration:
     backend: str | None = None
     step_kind: ExecutableStepKind = "action"
     capture_evidence: bool = False
+    post_action_delay_seconds: float | None = None
     sensitivity: bool = False
     replay: ReplayPolicy | None = None
     strict: bool = True
@@ -51,6 +52,7 @@ def capability(
     backend: str | None = None,
     step_kind: ExecutableStepKind = "action",
     capture_evidence: bool | None = None,
+    post_action_delay_seconds: float | None = None,
     sensitivity: bool = False,
     replay: ReplayPolicy | None = None,
     strict: bool | None = None,
@@ -69,6 +71,7 @@ def capability(
         backend=backend,
         step_kind=step_kind,
         capture_evidence=capture_evidence,
+        post_action_delay_seconds=post_action_delay_seconds,
         sensitivity=sensitivity,
         replay=replay,
         strict=strict,
@@ -96,6 +99,7 @@ def common_capability(
     sensitivity: bool = False,
     strict: bool = True,
     capture_evidence: bool = False,
+    post_action_delay_seconds: float | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Callable[[F], F]:
     return capability(
@@ -110,6 +114,7 @@ def common_capability(
         sensitivity=sensitivity,
         strict=strict,
         capture_evidence=capture_evidence,
+        post_action_delay_seconds=post_action_delay_seconds,
         metadata=metadata,
     )
 
@@ -126,6 +131,7 @@ def driver_capability(
     replay: ReplayPolicy | None = None,
     strict: bool = True,
     capture_evidence: bool = False,
+    post_action_delay_seconds: float | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Callable[[F], F]:
     return capability(
@@ -141,6 +147,7 @@ def driver_capability(
         replay=replay,
         strict=strict,
         capture_evidence=capture_evidence,
+        post_action_delay_seconds=post_action_delay_seconds,
         metadata=metadata,
     )
 
@@ -158,6 +165,7 @@ def harness_capability(
     replay: ReplayPolicy | None = None,
     strict: bool = True,
     capture_evidence: bool = False,
+    post_action_delay_seconds: float | None = None,
     sensitivity: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> Callable[[F], F]:
@@ -174,6 +182,7 @@ def harness_capability(
         replay=replay,
         strict=strict,
         capture_evidence=capture_evidence,
+        post_action_delay_seconds=post_action_delay_seconds,
         sensitivity=sensitivity,
         metadata=metadata,
     )
@@ -191,6 +200,7 @@ def platform_driver_capability(
         description: str,
         strict: bool | None = None,
         capture_evidence: bool | None = None,
+        post_action_delay_seconds: float | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Callable[[F], F]:
         action_definition = _action_definition(catalog, action_name)
@@ -202,6 +212,7 @@ def platform_driver_capability(
             backend=backend,
             strict=action_definition.strict if strict is None else strict,
             capture_evidence=action_definition.capture_evidence if capture_evidence is None else capture_evidence,
+            post_action_delay_seconds=post_action_delay_seconds,
             metadata=metadata,
             action_catalog=catalog,
             action_name=action_name,
@@ -233,6 +244,7 @@ def _declaration_from_args(
     backend: str | None,
     step_kind: ExecutableStepKind,
     capture_evidence: bool | None,
+    post_action_delay_seconds: float | None,
     sensitivity: bool,
     replay: ReplayPolicy | None,
     strict: bool | None,
@@ -245,11 +257,14 @@ def _declaration_from_args(
     resolved_capture_evidence = False if capture_evidence is None else capture_evidence
     safe_metadata = dict(metadata or {})
     _validate_safe_metadata(safe_metadata)
+    _validate_post_action_delay(post_action_delay_seconds)
     resolved_aliases = list(aliases or [])
     required_method_name: str | None = None
+    resolved_post_action_delay_seconds = post_action_delay_seconds
 
     if action_catalog is not None:
         action_definition = _action_definition(action_catalog, action_name)
+        _validate_post_action_delay(action_definition.post_action_delay_seconds)
         _validate_action_definition(action_definition, executor_kind, owner, params_model, step_kind, replay)
         name = name or action_definition.canonical_name
         owner = owner or action_definition.owner
@@ -259,6 +274,11 @@ def _declaration_from_args(
         replay = replay or action_definition.replay
         resolved_strict = action_definition.strict if strict is None else strict
         resolved_capture_evidence = action_definition.capture_evidence if capture_evidence is None else capture_evidence
+        resolved_post_action_delay_seconds = (
+            action_definition.post_action_delay_seconds
+            if post_action_delay_seconds is None
+            else post_action_delay_seconds
+        )
         required_method_name = action_definition.method_name
         safe_metadata = {**action_definition.metadata, **safe_metadata}
         _validate_safe_metadata(safe_metadata)
@@ -276,6 +296,7 @@ def _declaration_from_args(
         backend=backend,
         step_kind=step_kind,
         capture_evidence=resolved_capture_evidence,
+        post_action_delay_seconds=resolved_post_action_delay_seconds,
         sensitivity=sensitivity,
         replay=replay,
         strict=resolved_strict,
@@ -298,6 +319,11 @@ def _validate_basic_combination(
         raise ConfigurationError("Capability action_name requires an action_catalog.", context={"action_name": action_name})
     if action_catalog is not None and action_name is None:
         raise ConfigurationError("Capability action_catalog requires an action_name.")
+
+
+def _validate_post_action_delay(value: float | None) -> None:
+    if value is not None and value < 0:
+        raise ConfigurationError("Capability post_action_delay_seconds must be non-negative.", context={"post_action_delay_seconds": value})
 
 
 def _action_definition(catalog: CapabilityActionCatalog, action_name: str | None) -> CapabilityActionDefinition:

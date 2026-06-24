@@ -46,7 +46,7 @@ Initial HTTP API:
 | `GET /replay-video-file/{request_or_run_id}` | Return the generated replay video bytes for browser playback. |
 | `GET /reports/{run_id}` | Resolve a stored Markdown or JSON report for one run id and return safe metadata or content. |
 
-`POST /execute` accepts exactly one of `goal`, `caseYamlPath`, or `strictCaseYamlPath`. `goal` constructs a dynamic `Task` equivalent to CLI `--goal`. `caseYamlPath` resolves against `settings.cases.dir` first, then the current working directory, reads the complete UTF-8 file as raw text, and constructs a dynamic raw-case reference task equivalent to CLI non-strict `--case-yaml`; it must not parse YAML into strict executable steps. `strictCaseYamlPath` resolves the same way but parses the YAML, resolves strict replay references, executes steps through the deterministic core runner, and writes `core-report.md/json` plus `evidence-manifest.json` with capability-derived evidence artifacts from `StepRunner`. Playground dynamic execution should attempt post-run recording with `allow_failure=True`, matching CLI `--record --record-on-failure`; strict YAML execution does not record again.
+`POST /execute` accepts exactly one of `goal`, `caseYamlPath`, or `strictCaseYamlPath`. `goal` constructs a dynamic `Task` equivalent to CLI `--goal`. `caseYamlPath` resolves against `settings.cases.dir` first, then the current working directory, reads the complete UTF-8 file as raw text, and constructs a dynamic raw-case reference task equivalent to CLI non-strict `--case-yaml`; it must not parse YAML into strict executable steps. `strictCaseYamlPath` resolves the same way but parses the YAML, resolves strict replay references, executes steps through the deterministic core runner using `settings.execution.post_action_delay_seconds`, and writes `core-report.md/json` plus `evidence-manifest.json` with capability-derived evidence artifacts and post-action stabilization from `StepRunner`. Playground dynamic execution should attempt post-run recording with `allow_failure=True`, matching CLI `--record --record-on-failure`; strict YAML execution does not record again.
 
 ## Internal Structure
 
@@ -55,7 +55,7 @@ Initial HTTP API:
 - `_state.py`: In-memory session/task state, one-task lock, progress event buffering with optional sequence-window projection, final result summaries, and request id generation.
 - `_android.py`: ADB discovery, setup schema generation, Android session metadata, and screenshot helper boundaries.
 - `_recording.py`: Playground-owned dynamic post-run recording adapter around the existing strict case recorder, including recording failure normalization.
-- `_execution.py`: Dynamic goal/raw-case execution adapter around `FsqAgent.run`, strict YAML execution adapter around core runner contracts, event capture, result/report shaping, recording, and error normalization.
+- `_execution.py`: Dynamic goal/raw-case execution adapter around `FsqAgent.run`, strict YAML execution adapter around core runner contracts and configured post-action delay settings, event capture, result/report shaping, recording, and error normalization.
 - `static/`: Package-owned browser assets.
 - `SPEC.md`: Module design.
 
@@ -67,7 +67,7 @@ The playground returns JSON errors for API failures and does not expose tracebac
 
 - Goal execution follows CLI `run --goal` task construction semantics.
 - YAML execution follows CLI non-strict `run --case-yaml` semantics: raw UTF-8 reference material, no strict YAML parsing for execution.
-- Strict YAML execution follows strict-core semantics: parse authored YAML, execute deterministic steps through the configured Android harness, and generate core evidence reports.
+- Strict YAML execution follows strict-core semantics: parse authored YAML, execute deterministic steps through the configured Android harness and `StepRunner` post-action delay policy, and generate core evidence reports.
 - Capability declaration is a bootstrap concern outside playground routes. Playground strict and dynamic execution consume validated registry metadata and normalized runner results rather than decorated methods or platform action catalogs.
 - Playground records completed dynamic runs using the post-run recorder with `allow_failure=True`.
 - Browser progress polling is incremental: the server may project only events after the caller's last rendered sequence, and the static UI appends those events to the existing progress list instead of clearing and rebuilding the entire history on every tick.

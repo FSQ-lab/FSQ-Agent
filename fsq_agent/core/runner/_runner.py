@@ -13,6 +13,7 @@ from fsq_agent.models import (
     FailureCategory,
     HarnessActionResult,
     HarnessArtifactRef,
+    PostActionDelaySettings,
     RunnerEvent,
     RunnerEventType,
     RunnerStatus,
@@ -38,10 +39,12 @@ class StepRunner:
         *,
         capability_registry: CapabilityRegistry | None = None,
         executor_bindings: CapabilityExecutorBindings | None = None,
+        post_action_delay_seconds: PostActionDelaySettings | None = None,
     ) -> None:
         self.harness = harness
         self.capability_registry = capability_registry or CapabilityRegistry()
         self.executor_bindings = executor_bindings or CapabilityExecutorBindings()
+        self.post_action_delay_seconds = post_action_delay_seconds or PostActionDelaySettings(platform=0.0, common=0.0)
         self._events: list[RunnerEvent] = []
         self._last_capability_execution_result: CapabilityExecutionResult | None = None
 
@@ -62,7 +65,7 @@ class StepRunner:
         if capability is not None and capability.executor_kind == "common":
             return self._run_common_step(run_id, step, capability, state)
 
-        return self._run_harness_step(run_id, step, state)
+        return self._run_harness_step(run_id, step, capability, state)
 
     def _resolve_capability_step(self, step: ExecutableStep) -> tuple[CapabilityDefinition | None, ExecutableStep]:
         capability = self.capability_registry.resolve(step.action_name)
@@ -97,9 +100,17 @@ class StepRunner:
         self._emit(run_id=run_id, event_type="step_start", step=step)
         return state
 
-    def _run_harness_step(self, run_id: str, step: ExecutableStep, state: _StepExecutionState) -> RunnerStepResult:
+    def _run_harness_step(
+        self,
+        run_id: str,
+        step: ExecutableStep,
+        capability: CapabilityDefinition | None,
+        state: _StepExecutionState,
+    ) -> RunnerStepResult:
+        delay_seconds = self._effective_post_action_delay_seconds(capability)
         context = self._run_harness_prepare_phase(run_id, step, state)
-        action_result = self._run_harness_invoke_phase(run_id, step, state, context)
+        action_result = self._run_harness_invoke_phase(run_id, step, state, context, delay_seconds)
+        self._apply_post_action_delay(delay_seconds)
         self._run_harness_finalize_phase(run_id, step, state, context, action_result)
         status = self._result_status(action_result, state.failure_category, state.artifact_error_message)
         return self._finish_step(
@@ -143,12 +154,15 @@ class StepRunner:
         step: ExecutableStep,
         state: _StepExecutionState,
         context: object,
+        delay_seconds: float,
     ) -> HarnessActionResult | None:
         self._emit(run_id=run_id, event_type="phase_start", step=step, phase="invoke")
         self._emit(run_id=run_id, event_type="harness_call_start", step=step, phase="invoke")
         action_result: HarnessActionResult | None = None
+        phase_status: RunnerStatus = "failed"
         try:
             action_result = self.harness.invoke_action(step, context)
+            phase_status = action_result.status
             self._emit(run_id=run_id, event_type="harness_call_finish", step=step, phase="invoke")
             if action_result.status in {"failed", "cancelled", "skipped"}:
                 state.failure_category = action_result.failure_category
@@ -160,7 +174,7 @@ class StepRunner:
                 phase="invoke",
                 status=action_result.status,
                 artifact_refs=self._action_result_artifacts(run_id, step, action_result, "invoke"),
-                metadata=self._action_result_metadata(action_result),
+                metadata=self._with_post_action_delay_metadata(self._action_result_metadata(action_result), delay_seconds),
             )
         except Exception as exc:  # noqa: BLE001 - runner converts phase exceptions into structured results.
             state.failure_category = self.harness.classify_error(exc, "invoke", step)
@@ -174,8 +188,15 @@ class StepRunner:
                 status="failed",
                 failure_category=state.failure_category,
                 error_message=state.error_message,
+                metadata=self._post_action_delay_metadata(delay_seconds),
             )
-        self._emit(run_id=run_id, event_type="phase_finish", step=step, phase="invoke")
+        self._emit(
+            run_id=run_id,
+            event_type="phase_finish",
+            step=step,
+            phase="invoke",
+            payload={"status": phase_status, "post_action_delay_seconds": delay_seconds},
+        )
         return action_result
 
     def _run_harness_finalize_phase(
@@ -236,7 +257,9 @@ class StepRunner:
         state: _StepExecutionState,
     ) -> RunnerStepResult:
         self._record_passed_empty_phase(run_id, step, state, "prepare")
-        status = self._run_common_invoke_phase(run_id, step, capability, state)
+        delay_seconds = self._effective_post_action_delay_seconds(capability)
+        status = self._run_common_invoke_phase(run_id, step, capability, state, delay_seconds)
+        self._apply_post_action_delay(delay_seconds)
         self._record_passed_empty_phase(run_id, step, state, "finalize")
         return self._finish_step(
             run_id,
@@ -253,6 +276,7 @@ class StepRunner:
         step: ExecutableStep,
         capability: CapabilityDefinition,
         state: _StepExecutionState,
+        delay_seconds: float,
     ) -> RunnerStatus:
         self._emit(run_id=run_id, event_type="phase_start", step=step, phase="invoke")
         metadata: dict[str, object] = {}
@@ -268,6 +292,7 @@ class StepRunner:
             status = "failed"
             state.failure_category = "configuration_error"
             state.error_message = str(exc) or exc.__class__.__name__
+        metadata = self._with_post_action_delay_metadata(metadata, delay_seconds)
         if status in {"failed", "cancelled", "skipped"} or state.failure_category:
             self._emit(run_id=run_id, event_type="step_error", step=step, phase="invoke")
         self._append_phase_report(
@@ -280,7 +305,13 @@ class StepRunner:
             error_message=state.error_message,
             metadata=metadata,
         )
-        self._emit(run_id=run_id, event_type="phase_finish", step=step, phase="invoke")
+        self._emit(
+            run_id=run_id,
+            event_type="phase_finish",
+            step=step,
+            phase="invoke",
+            payload={"status": status, "post_action_delay_seconds": delay_seconds},
+        )
         return status
 
     def _record_passed_empty_phase(
@@ -371,6 +402,26 @@ class StepRunner:
         if result.sensitivity:
             metadata["common_output_redacted"] = True
         metadata.setdefault("duration_ms", result.duration_ms)
+        return metadata
+
+    def _effective_post_action_delay_seconds(self, capability: CapabilityDefinition | None) -> float:
+        if capability is None:
+            return 0.0
+        if capability.post_action_delay_seconds is not None:
+            return capability.post_action_delay_seconds
+        if capability.executor_kind == "common":
+            return self.post_action_delay_seconds.common
+        return self.post_action_delay_seconds.platform
+
+    def _apply_post_action_delay(self, seconds: float) -> None:
+        if seconds > 0:
+            time.sleep(seconds)
+
+    def _post_action_delay_metadata(self, seconds: float) -> dict[str, object]:
+        return {"post_action_delay_seconds": seconds}
+
+    def _with_post_action_delay_metadata(self, metadata: dict[str, object], seconds: float) -> dict[str, object]:
+        metadata["post_action_delay_seconds"] = seconds
         return metadata
 
     def _emit(

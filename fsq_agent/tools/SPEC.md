@@ -17,7 +17,7 @@ The tools module must not depend on `agent`, `providers`, `core`, `cli`, `config
 
 Target `__init__.py` exports via `__all__` after this change:
 
-- `common_capability`: CommonTool-specific helper decorator from `capabilities` used by CommonTool implementations to declare canonical name, aliases, parameter model, step kind, replay policy, sensitivity, evidence policy, owner, and provenance metadata with `executor_kind="common"`.
+- `common_capability`: CommonTool-specific helper decorator from `capabilities` used by CommonTool implementations to declare canonical name, aliases, parameter model, step kind, replay policy, sensitivity, evidence policy, optional post-action delay override, owner, and provenance metadata with `executor_kind="common"`.
 - `capability`: Backward-compatible CommonTool decorator alias that resolves to the same shared declaration implementation as `common_capability`. It exists only for CommonTool author convenience and must not be a separate decorator implementation.
 - `CommonToolProvider`: Protocol for a provider of SDK-neutral common capabilities. It exposes decorated `CapabilityDefinition` records and invokes one capability by canonical name with JSON-like arguments.
 - `CommonToolRegistry`: Maintains the active decorated CommonTool capability set for the common executor binding and rejects duplicate canonical names. It is not the global capability registry.
@@ -77,7 +77,8 @@ Secret values must be redacted from `RunEvent` payloads, tool artifacts, histori
 ## Design Decisions
 
 - CommonTool is SDK-neutral so the same capability core can be adapted to OpenAI Agents SDK now and another agent SDK later without rewriting file, artifact, wait, or secret safety policy.
-- Shared capability declaration metadata is the source of truth for CommonTool schema, replay, sensitivity, and evidence behavior. The decorator and discovery implementation lives in `capabilities`; the adapter and recorder must not add replay or sensitivity behavior by checking names such as `get_runtime_secret` or `wait_ms`.
+- Shared capability declaration metadata is the source of truth for CommonTool schema, replay, sensitivity, evidence behavior, and any CommonTool-specific post-action delay override. The decorator and discovery implementation lives in `capabilities`; the adapter and recorder must not add replay, sensitivity, or delay behavior by checking names such as `get_runtime_secret` or `wait_ms`.
+- CommonTools inherit the configured `execution.post_action_delay_seconds.common` default, which is `0.0`, unless a CommonTool capability declaration explicitly overrides `post_action_delay_seconds`. The tools module does not call `sleep`; `StepRunner` owns delay application.
 - The CommonTool core is intentionally small. Cross-platform tools are limited to file read/write, runtime secret lookup, artifact search/slice, and pure wait. More tools require a SPEC change.
 - Local CLI and shell execution are removed from the first-cycle public tool surface. If command execution returns in the future, it must be redesigned as an explicitly scoped capability with its own SPEC update.
 - `publish_progress` is not a CommonTool. Runtime progress is emitted directly by `agent` as `RunEvent` values so user-visible status does not consume a model tool call or become confused with external capabilities.

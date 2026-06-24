@@ -5,7 +5,7 @@ from typing import Any
 
 from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
 from fsq_agent.core import HarnessInterface, StepRunner
-from fsq_agent.models import CapabilityDefinition, ConfigurationError, ExecutableStep, HarnessFunctionSchema, RunnerStepResult
+from fsq_agent.models import CapabilityDefinition, ConfigurationError, ExecutableStep, HarnessFunctionSchema, PostActionDelaySettings, RunnerStepResult
 
 
 class HarnessToolAdapter:
@@ -16,6 +16,7 @@ class HarnessToolAdapter:
         run_id: str,
         reserved_tool_names: set[str] | None = None,
         common_tool_providers: list[Any] | None = None,
+        post_action_delay_seconds: PostActionDelaySettings | None = None,
     ) -> None:
         self.harness = harness
         self.run_id = run_id
@@ -24,6 +25,7 @@ class HarnessToolAdapter:
             harness=harness,
             capability_registry=self._capability_registry,
             executor_bindings=build_capability_executor_bindings(common_tool_providers=common_tool_providers),
+            post_action_delay_seconds=post_action_delay_seconds,
         )
         self.reserved_tool_names = reserved_tool_names or set()
         self._counter = itertools.count(1)

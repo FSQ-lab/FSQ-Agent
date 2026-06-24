@@ -18,6 +18,7 @@ class CapabilityActionDefinition:
     method_name: str | None = None
     replay: ReplayPolicy | None = None
     capture_evidence: bool = False
+    post_action_delay_seconds: float | None = None
     strict: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 

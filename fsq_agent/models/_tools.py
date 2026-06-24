@@ -33,6 +33,7 @@ class CapabilityDefinition(BaseModel):
     backend: str | None = None
     owner: str | None = None
     capture_evidence: bool = False
+    post_action_delay_seconds: float | None = Field(default=None, ge=0)
     sensitivity: bool = False
     replay: ReplayPolicy | None = None
     strict: bool = True
@@ -52,6 +53,7 @@ class CapabilityDefinition(BaseModel):
             "backend": self.backend,
             "owner": self.owner,
             "capture_evidence": self.capture_evidence,
+            "post_action_delay_seconds": self.post_action_delay_seconds,
             "sensitivity": self.sensitivity,
             "replay": self.replay.model_dump(mode="json") if self.replay else None,
         }

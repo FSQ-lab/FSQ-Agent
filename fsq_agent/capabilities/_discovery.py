@@ -46,6 +46,7 @@ def _definition_from_declaration(
         backend=declaration.backend or _metadata_str(capability_metadata, "backend"),
         owner=declaration.owner,
         capture_evidence=declaration.capture_evidence,
+        post_action_delay_seconds=declaration.post_action_delay_seconds,
         sensitivity=declaration.sensitivity,
         replay=declaration.replay,
         strict=declaration.strict,

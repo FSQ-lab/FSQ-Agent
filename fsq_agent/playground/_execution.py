@@ -15,7 +15,7 @@ from fsq_agent.agent import FsqAgent
 from fsq_agent.config import Settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, StepRunner, StepSequenceRunner, UiAutomator2AndroidDriver
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import CapabilityRegistrySnapshot, ExecutableStep, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
+from fsq_agent.models import CapabilityRegistrySnapshot, ExecutableStep, PostActionDelaySettings, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
 from fsq_agent.playground._recording import record_dynamic_result
 from fsq_agent.playground._state import PlaygroundState
 from fsq_agent.providers import build_ai_assertion_evaluator
@@ -185,7 +185,7 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		steps=steps,
 		registry=registry,
 		executors=executors,
-		step_interval_seconds=settings.harness.strict_core.step_interval_seconds,
+		post_action_delay_seconds=settings.execution.post_action_delay_seconds,
 		state=state,
 		request_id=request_id,
 	)
@@ -228,16 +228,20 @@ def _run_strict_core_steps(
 	steps: list[ExecutableStep],
 	registry,
 	executors,
-	step_interval_seconds: float,
+	post_action_delay_seconds: PostActionDelaySettings,
 	state: PlaygroundState,
 	request_id: str,
 ) -> ReportArtifact:
 	normal_steps, teardown_steps = _split_trailing_teardown_steps(steps)
 	recorder = _PlaygroundEvidenceRecorder(run_id=run_id, output_dir=output_dir, state=state, request_id=request_id)
 	StepSequenceRunner(
-		step_runner=StepRunner(harness=harness, capability_registry=registry, executor_bindings=executors),
+		step_runner=StepRunner(
+			harness=harness,
+			capability_registry=registry,
+			executor_bindings=executors,
+			post_action_delay_seconds=post_action_delay_seconds,
+		),
 		evidence_recorder=recorder,
-		step_interval_seconds=step_interval_seconds,
 	).run_steps(run_id=run_id, steps=normal_steps, teardown_steps=teardown_steps)
 	manifest_path = recorder.write_manifest()
 	return CoreEvidenceReportGenerator().generate_from_manifest(manifest_path)

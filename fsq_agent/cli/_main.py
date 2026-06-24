@@ -284,7 +284,7 @@ def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id:
         registry=registry,
         executors=executors,
         steps=steps,
-        step_interval_seconds=settings.harness.strict_core.step_interval_seconds,
+        post_action_delay_seconds=settings.execution.post_action_delay_seconds,
     )
 
 
