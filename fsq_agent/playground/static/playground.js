@@ -13,7 +13,7 @@ const state = {
 
 const REPLAY_FAST_SAME_EVENT_DELAY_MS = 180;
 const REPLAY_FAST_ACTION_DELAY_MS = 900;
-const REPLAY_FAST_MAX_DELAY_MS = 1600;
+const REPLAY_FAST_MAX_DELAY_MS = 1500;
 const REPLAY_FAST_FALLBACK_DELAY_MS = 500;
 const REPLAY_FAST_FINAL_FRAME_HOLD_MS = 700;
 const REPLAY_FAST_TIME_SCALE = 10;
@@ -631,6 +631,7 @@ function hasMeaningfulPayload(payload) {
 async function ensureReplayVideoGenerated(requestId, frames = null) {
   if (!requestId) return { error: 'missing replay request id' };
   if (state.replayVideoInFlight) return { error: 'replay video generation is already running' };
+  const totalStartedAt = performance.now();
   state.replayVideoInFlight = true;
   try {
     const existing = await loadReplayVideo(requestId);
@@ -640,6 +641,7 @@ async function ensureReplayVideoGenerated(requestId, frames = null) {
     const videoBlob = await generateReplayVideo(replayFrames);
     if (!videoBlob || videoBlob.size === 0) return { error: 'MediaRecorder produced an empty video' };
     const uploaded = await uploadReplayVideo(requestId, videoBlob);
+    replayVideoDurationLog('total', totalStartedAt, { frameCount: replayFrames.length, size: videoBlob.size });
     return { videoUrl: uploaded.videoUrl, blob: videoBlob };
   } catch (error) {
     console.warn('Unable to generate replay video', error);
@@ -647,6 +649,14 @@ async function ensureReplayVideoGenerated(requestId, frames = null) {
   } finally {
     state.replayVideoInFlight = false;
   }
+}
+
+function replayVideoDurationLog(stage, startedAt, metadata = {}) {
+  console.info('[replay-video] duration', {
+    stage,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    ...metadata,
+  });
 }
 
 function appendReplayVideoGeneratingProgress() {
@@ -739,6 +749,7 @@ async function generateReplayVideo(frames) {
   canvas.width = firstImage.naturalWidth || firstImage.width;
   canvas.height = firstImage.naturalHeight || firstImage.height;
   context.drawImage(firstImage, 0, 0, canvas.width, canvas.height);
+  console.info('[replay-video] draw screenshot', replayFrameDrawLogEntry(frames[0], 1, replayFrameDisplayDuration(frames, 0)));
   const chunks = [];
   const stream = canvas.captureStream(30);
   const videoTrack = stream.getVideoTracks()[0];
@@ -752,21 +763,39 @@ async function generateReplayVideo(frames) {
     if (event.data.size > 0) chunks.push(event.data);
   };
   recorder.start(1000);
+  const renderStartedAt = performance.now();
   requestCanvasFrame();
   for (let index = 1; index < frames.length; index += 1) {
     await waitMs(replayFrameDelay(frames[index - 1], frames[index]));
     const image = await loadImageElement(frames[index].src);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    console.info('[replay-video] draw screenshot', replayFrameDrawLogEntry(frames[index], index + 1, replayFrameDisplayDuration(frames, index)));
     requestCanvasFrame();
   }
   await waitMs(REPLAY_FAST_FINAL_FRAME_HOLD_MS);
   requestCanvasFrame();
   await new Promise((resolve) => {
-    recorder.onstop = resolve;
+    recorder.onstop = () => {
+      replayVideoDurationLog('render and record timeline', renderStartedAt, { chunkCount: chunks.length, frameCount: frames.length });
+      resolve();
+    };
     recorder.stop();
   });
   stream.getTracks().forEach((track) => track.stop());
   return new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+}
+
+function replayFrameDisplayDuration(frames, index) {
+  const nextFrame = frames[index + 1] || null;
+  return nextFrame ? replayFrameDelay(frames[index], nextFrame) : REPLAY_FAST_FINAL_FRAME_HOLD_MS;
+}
+
+function replayFrameDrawLogEntry(frame, fallbackIndex, durationMs) {
+  return {
+    index: frame?.index ?? fallbackIndex,
+    path: frame?.path || '',
+    durationMs,
+  };
 }
 
 function replayVideoMimeType() {
@@ -786,6 +815,12 @@ async function showReplayVideoPreview(videoUrl) {
     // Some browsers reject seeking before metadata is available.
   }
   await waitForReplayVideoReady();
+  await normalizeReplayVideoDuration();
+  try {
+    els.replayVideo.currentTime = 0;
+  } catch {
+    // Some browsers reject seeking before metadata is available.
+  }
   els.screenshot.style.display = 'none';
   els.previewEmpty.style.display = 'none';
   els.replayVideo.hidden = false;
@@ -819,29 +854,43 @@ function cancelPendingReplayVideoReadyWait() {
 }
 
 function normalizeReplayVideoDuration() {
-  if (!els.replayVideo.src || state.replayDurationFixing) return;
-  if (Number.isFinite(els.replayVideo.duration) && els.replayVideo.duration > 0) return;
+  if (!els.replayVideo.src || state.replayDurationFixing) return Promise.resolve();
+  if (Number.isFinite(els.replayVideo.duration) && els.replayVideo.duration > 0) return Promise.resolve();
   state.replayDurationFixing = true;
   const wasPaused = els.replayVideo.paused;
-  const originalTime = Number.isFinite(els.replayVideo.currentTime) ? els.replayVideo.currentTime : 0;
-  const finishDurationFix = () => {
-    els.replayVideo.removeEventListener('timeupdate', finishDurationFix);
+  return new Promise((resolve) => {
+    const finishDurationFix = () => {
+      cleanup();
+      try {
+        els.replayVideo.currentTime = 0;
+        if (wasPaused) els.replayVideo.pause();
+      } catch {
+        // Some browsers reject seeking before enough metadata is available.
+      } finally {
+        state.replayDurationFixing = false;
+        resolve();
+      }
+    };
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      els.replayVideo.removeEventListener('durationchange', finishDurationFix);
+      els.replayVideo.removeEventListener('seeked', finishDurationFix);
+      els.replayVideo.removeEventListener('timeupdate', finishDurationFix);
+      els.replayVideo.removeEventListener('error', finishDurationFix);
+    };
+    const timeout = window.setTimeout(finishDurationFix, 1500);
+    els.replayVideo.addEventListener('durationchange', finishDurationFix, { once: true });
+    els.replayVideo.addEventListener('seeked', finishDurationFix, { once: true });
+    els.replayVideo.addEventListener('timeupdate', finishDurationFix, { once: true });
+    els.replayVideo.addEventListener('error', finishDurationFix, { once: true });
     try {
-      els.replayVideo.currentTime = originalTime;
-      if (wasPaused) els.replayVideo.pause();
+      els.replayVideo.currentTime = 1e101;
     } catch {
-      // Some browsers reject seeking before enough metadata is available.
-    } finally {
+      cleanup();
       state.replayDurationFixing = false;
+      resolve();
     }
-  };
-  els.replayVideo.addEventListener('timeupdate', finishDurationFix);
-  try {
-    els.replayVideo.currentTime = 1e101;
-  } catch {
-    state.replayDurationFixing = false;
-    els.replayVideo.removeEventListener('timeupdate', finishDurationFix);
-  }
+  });
 }
 
 function showReplayFrame(frame) {
@@ -901,8 +950,6 @@ for (const input of els.runModeInputs) {
 }
 els.previewTab.addEventListener('click', () => showRightTab('preview'));
 els.reportTab.addEventListener('click', () => showRightTab('report'));
-els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration);
-
 updateRunMode();
 showRightTab('preview');
 refreshAll();

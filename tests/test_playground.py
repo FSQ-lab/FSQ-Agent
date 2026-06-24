@@ -955,7 +955,10 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "MediaRecorder.isTypeSupported" in script
     assert "uploadReplayVideo" in script
     assert "blobToBase64" in script
-    assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" in script
+    assert "await normalizeReplayVideoDuration()" in script
+    assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" not in script
+    assert "els.replayVideo.addEventListener('durationchange', finishDurationFix" in script
+    assert "els.replayVideo.addEventListener('seeked', finishDurationFix" in script
     assert "els.replayVideo.currentTime = 1e101" in script
     assert "await showReplayVideoPreview(replayVideo.videoUrl)" in script
     assert "showRightTab('preview')" in script
@@ -964,6 +967,9 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "recorder.start(1000)" in script
     assert "replayVideo.videoUrl" in script
     assert "replayFrameDelay" in script
+    assert "[replay-video] draw screenshot" in script
+    assert "replayFrameDisplayDuration" in script
+    assert "durationMs" in script
     assert "api(`/replay/${encodeURIComponent(requestId)}`)" in script
     assert "next.timestamp - current.timestamp" in script
     assert "window.setTimeout" in script
