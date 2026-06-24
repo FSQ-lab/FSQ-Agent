@@ -3,10 +3,104 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from fsq_agent.models._core import ExecutableStepKind, FailureCategory, HarnessArtifactRef, HarnessPlatform, RunnerStatus
+
 
 CommonToolStatus = Literal["success", "failed", "skipped"]
+CapabilityExecutorKind = Literal["common", "harness", "driver"]
+ReplayKind = Literal["fsq_command", "dependency"]
 ToolKind = Literal["common", "cli", "file", "harness", "shell"]
 ToolStatus = Literal["success", "failed", "skipped"]
+
+
+class ReplayPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: ReplayKind
+    alias: str
+
+
+class CapabilityDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    executor_kind: CapabilityExecutorKind
+    params_model: type[BaseModel]
+    step_kind: ExecutableStepKind = "action"
+    description: str = ""
+    platform: HarnessPlatform | None = None
+    backend: str | None = None
+    owner: str | None = None
+    capture_evidence: bool = False
+    sensitivity: bool = False
+    replay: ReplayPolicy | None = None
+    strict: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def params_json_schema(self) -> dict[str, Any]:
+        return self.params_model.model_json_schema()
+
+    def safe_metadata(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "capability_name": self.name,
+            "aliases": list(self.aliases),
+            "executor_kind": self.executor_kind,
+            "step_kind": self.step_kind,
+            "platform": self.platform,
+            "backend": self.backend,
+            "owner": self.owner,
+            "capture_evidence": self.capture_evidence,
+            "sensitivity": self.sensitivity,
+            "replay": self.replay.model_dump(mode="json") if self.replay else None,
+        }
+        payload.update(self.metadata)
+        return payload
+
+
+class CapabilityRegistrySnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    capabilities: list[CapabilityDefinition] = Field(default_factory=list)
+
+    def by_name(self) -> dict[str, CapabilityDefinition]:
+        return {capability.name: capability for capability in self.capabilities}
+
+    def resolve(self, name_or_alias: str) -> CapabilityDefinition | None:
+        for capability in self.capabilities:
+            if capability.name == name_or_alias or name_or_alias in capability.aliases:
+                return capability
+        return None
+
+
+class CapabilityInvocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capability_name: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    run_id: str | None = None
+    step_id: str | None = None
+    source_ref: dict[str, Any] | None = None
+    authored_action_name: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CapabilityExecutionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capability_name: str
+    executor_kind: CapabilityExecutorKind
+    status: RunnerStatus
+    output: Any = None
+    artifact_refs: list[HarnessArtifactRef] = Field(default_factory=list)
+    error_message: str | None = None
+    failure_category: FailureCategory | None = None
+    duration_ms: int = Field(default=0, ge=0)
+    replay: ReplayPolicy | None = None
+    sensitivity: bool = False
+    safe_replay_params: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CommonToolDefinition(BaseModel):

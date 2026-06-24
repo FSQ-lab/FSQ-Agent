@@ -13,8 +13,7 @@ from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, UiAu
 from fsq_agent.agent._harness_tools import HarnessToolAdapter
 from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, KnowledgeBundle, PlanningError, RunEvent, RunEventSink, SkillBundle, StepResult, Task
 from fsq_agent.providers import build_ai_assertion_evaluator, build_model_provider_session
-from fsq_agent.tools import AgentsCommonToolAdapter
-from fsq_agent.tools._tool_artifacts import ToolArtifactStore
+from fsq_agent.tools import AgentsCommonToolAdapter, ToolArtifactStore
 
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._pre_plan import (
@@ -28,15 +27,6 @@ from fsq_agent.agent._pre_plan import (
 from fsq_agent.agent._structured_output import coerce_agent_final_output, coerce_string_list, serialize_agent_final_output
 from fsq_agent.agent._verification_task import VERIFICATION_AGENT_INSTRUCTIONS, VerificationEvidenceBuilder
 
-
-_COMMON_TOOL_NAMES = {
-    "read_file",
-    "write_file",
-    "search_artifact",
-    "read_artifact_slice",
-    "get_runtime_secret",
-    "wait_ms",
-}
 
 _RUNTIME_TOOL_NAMES = {
     "read_knowledge_index",
@@ -162,8 +152,25 @@ class OpenAIAgentsRuntime:
         self.settings = settings
         self.tool_factory = tool_factory
         self.harness_factory = harness_factory
+        self._common_tool_names = self._discover_common_tool_names(tool_factory)
         self._harness_tool_names: set[str] = set()
         self._harness_tool_schemas: dict[str, Any] = {}
+
+    def _discover_common_tool_names(self, tool_factory: AgentsCommonToolAdapter) -> set[str]:
+        registry = getattr(tool_factory, "registry", None)
+        list_tools = getattr(registry, "list_tools", None)
+        if callable(list_tools):
+            return {definition.name for definition in list_tools()}
+        from fsq_agent._capability_bootstrap import common_capability_definitions
+
+        return {definition.name for definition in common_capability_definitions()}
+
+    def _common_tool_providers(self) -> list[Any] | None:
+        registry = getattr(self.tool_factory, "registry", None)
+        list_providers = getattr(registry, "list_providers", None)
+        if callable(list_providers):
+            return list(list_providers())
+        return None
 
     async def run_task(
         self,
@@ -255,10 +262,21 @@ class OpenAIAgentsRuntime:
                         message="Building CommonTool and platform harness tools for the SDK agent.",
                     ),
                 )
-                harness_adapter = HarnessToolAdapter(harness, run_id=run_id, reserved_tool_names={*_COMMON_TOOL_NAMES, *_RUNTIME_TOOL_NAMES})
+                harness_adapter = HarnessToolAdapter(
+                    harness,
+                    run_id=run_id,
+                    reserved_tool_names={*self._common_tool_names, *_RUNTIME_TOOL_NAMES},
+                    common_tool_providers=self._common_tool_providers(),
+                )
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name
-                common_tools = self.tool_factory.build_tools(FunctionTool, run_id=run_id, task_id=task.id, event_sink=event_sink)
+                common_tools = self.tool_factory.build_tools(
+                    FunctionTool,
+                    run_id=run_id,
+                    task_id=task.id,
+                    event_sink=event_sink,
+                    runner_invoker=harness_adapter.run_step_with_capability_result,
+                )
                 harness_tools = harness_adapter.build_tools(FunctionTool)
                 await self._emit(
                     event_sink,
@@ -981,7 +999,7 @@ class OpenAIAgentsRuntime:
     def _tool_origin(self, tool_name: str | None) -> str:
         if not tool_name:
             return "unknown"
-        if tool_name in _COMMON_TOOL_NAMES:
+        if tool_name in self._common_tool_names:
             return "common"
         if tool_name in _RUNTIME_TOOL_NAMES:
             return "runtime"

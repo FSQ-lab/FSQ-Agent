@@ -45,7 +45,7 @@ def _isolate_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_only_public_commands_are_registered() -> None:
-    assert set(main.commands) == {"init", "run", "report"}
+    assert set(main.commands) == {"init", "run", "report", "playground"}
 
 
 def test_run_rejects_missing_or_conflicting_sources(tmp_path: Path) -> None:

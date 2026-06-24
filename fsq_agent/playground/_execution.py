@@ -10,11 +10,12 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
 from fsq_agent.agent import FsqAgent
 from fsq_agent.config import Settings, validate_runtime_settings, validate_strict_core_settings
-from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, StepSequenceRunner, UiAutomator2AndroidDriver
+from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, StepRunner, StepSequenceRunner, UiAutomator2AndroidDriver
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
-from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ExecutableStep, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
+from fsq_agent.models import CapabilityRegistrySnapshot, ExecutableStep, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
 from fsq_agent.playground._recording import record_dynamic_result
 from fsq_agent.playground._state import PlaygroundState
 from fsq_agent.providers import build_ai_assertion_evaluator
@@ -152,7 +153,10 @@ def _run_agent_task(settings: Settings, state: PlaygroundState, request_id: str,
 def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id: str, path_text: str) -> TaskResult:
 	case_path = _resolve_case_yaml_path(path_text, settings)
 	case = FsqCaseLoader().load_case(case_path)
-	requires_ai_assertion = _case_requires_ai_assertion(case)
+	registry = build_capability_registry()
+	executors = build_capability_executor_bindings()
+	registry_snapshot = registry.snapshot()
+	requires_ai_assertion = _case_requires_ai_assertion(case, registry_snapshot)
 	validate_strict_core_settings(settings, requires_ai_assertion=requires_ai_assertion)
 	app_id = settings.harness.android.app_id or case.config.app_id or ""
 	if not app_id:
@@ -164,8 +168,9 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		RunEvent(run_id=run_id, task_id=case.id, type="run_started", title="Strict YAML started", message=str(case_path)),
 	)
 	steps = _resolve_strict_replay_steps(
-		FsqExecutableStepAdapter().to_executable_steps(case),
+		FsqExecutableStepAdapter(registry_snapshot=registry_snapshot).to_executable_steps(case),
 		settings,
+		registry_snapshot,
 	)
 	harness = AndroidHarness(
 		driver=UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial),
@@ -178,6 +183,8 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		output_dir=run_dir,
 		run_id=run_id,
 		steps=steps,
+		registry=registry,
+		executors=executors,
 		step_interval_seconds=settings.harness.strict_core.step_interval_seconds,
 		state=state,
 		request_id=request_id,
@@ -219,6 +226,8 @@ def _run_strict_core_steps(
 	output_dir: Path,
 	run_id: str,
 	steps: list[ExecutableStep],
+	registry,
+	executors,
 	step_interval_seconds: float,
 	state: PlaygroundState,
 	request_id: str,
@@ -226,7 +235,7 @@ def _run_strict_core_steps(
 	normal_steps, teardown_steps = _split_trailing_teardown_steps(steps)
 	recorder = _PlaygroundEvidenceRecorder(run_id=run_id, output_dir=output_dir, state=state, request_id=request_id)
 	StepSequenceRunner(
-		harness=harness,
+		step_runner=StepRunner(harness=harness, capability_registry=registry, executor_bindings=executors),
 		evidence_recorder=recorder,
 		step_interval_seconds=step_interval_seconds,
 	).run_steps(run_id=run_id, steps=normal_steps, teardown_steps=teardown_steps)
@@ -277,16 +286,22 @@ def _strict_report_status(artifact: ReportArtifact) -> tuple[str, str]:
 		return "failed", "Strict YAML run completed but report status could not be read."
 
 
-def _case_requires_ai_assertion(case) -> bool:
-	return any(step.action_name == "assertWithAI" for step in FsqExecutableStepAdapter().to_executable_steps(case))
+def _case_requires_ai_assertion(case, registry_snapshot: CapabilityRegistrySnapshot | None = None) -> bool:
+	snapshot = registry_snapshot or build_capability_registry().snapshot()
+	return any(step.action_name == "assert_with_ai" for step in FsqExecutableStepAdapter(registry_snapshot=snapshot).to_executable_steps(case))
 
 
-def _resolve_strict_replay_steps(steps: list[ExecutableStep], settings: Settings) -> list[ExecutableStep]:
+def _resolve_strict_replay_steps(
+	steps: list[ExecutableStep],
+	settings: Settings,
+	registry_snapshot: CapabilityRegistrySnapshot | None = None,
+) -> list[ExecutableStep]:
 	allowed_names = set(settings.runtime_secrets.allowed_env_names)
+	snapshot = registry_snapshot or build_capability_registry().snapshot()
 	resolved_steps = []
 	for step in steps:
 		resolved_params = _resolve_replay_value(step.params, allowed_names, step.step_id)
-		_validate_resolved_params(step, resolved_params)
+		_validate_resolved_params(step, resolved_params, snapshot)
 		resolved_steps.append(step.model_copy(update={"params": resolved_params}))
 	return resolved_steps
 
@@ -318,12 +333,12 @@ def _as_runtime_secret_ref(value: Any) -> RuntimeSecretRef | None:
 	return None
 
 
-def _validate_resolved_params(step: ExecutableStep, params: dict[str, Any]) -> None:
-	action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(step.action_name)
-	if action_definition is None:
+def _validate_resolved_params(step: ExecutableStep, params: dict[str, Any], registry_snapshot: CapabilityRegistrySnapshot) -> None:
+	capability = registry_snapshot.resolve(step.action_name)
+	if capability is None:
 		return
 	try:
-		action_definition.params_model.model_validate(params)
+		capability.params_model.model_validate(params)
 	except ValidationError as exc:
 		raise ValueError(f"Invalid strict replay command after runtime secret resolution: {step.step_id}") from exc
 

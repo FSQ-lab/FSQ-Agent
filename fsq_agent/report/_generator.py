@@ -164,13 +164,9 @@ class ReportGenerator:
     def _tool_origin(self, tool_name: str, explicit_origin: Any) -> str:
         if explicit_origin in {"harness", "common", "runtime", "unknown"}:
             return str(explicit_origin)
-        if tool_name in {"read_file", "write_file", "get_runtime_secret", "search_artifact", "read_artifact_slice", "wait_ms"}:
-            return "common"
-        if tool_name in {"read_knowledge_index", "read_knowledge_page"}:
-            return "runtime"
         if tool_name == "unknown":
             return "unknown"
-        return "harness"
+        return "unknown"
 
     def _write_minimal_fallback(
         self,

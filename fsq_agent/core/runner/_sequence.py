@@ -2,7 +2,6 @@ import time
 from collections.abc import Sequence
 
 from fsq_agent.core.evidence import EvidenceRecorder
-from fsq_agent.core.harness import HarnessInterface
 from fsq_agent.core.runner._runner import StepRunner
 from fsq_agent.models import EvidenceBundle, ExecutableStep
 
@@ -17,13 +16,13 @@ class _StepSequenceFailure(Exception):
 class StepSequenceRunner:
     def __init__(
         self,
-        harness: HarnessInterface,
+        step_runner: StepRunner,
         evidence_recorder: EvidenceRecorder,
         step_interval_seconds: float = 1.0,
     ) -> None:
         if step_interval_seconds < 0:
             raise ValueError("step_interval_seconds must be non-negative")
-        self.harness = harness
+        self.step_runner = step_runner
         self.evidence_recorder = evidence_recorder
         self.step_interval_seconds = step_interval_seconds
 
@@ -60,9 +59,8 @@ class StepSequenceRunner:
             time.sleep(self.step_interval_seconds)
 
     def _run_and_record(self, run_id: str, step: ExecutableStep):
-        step_runner = StepRunner(harness=self.harness)
-        result = step_runner.run_step(run_id=run_id, step=step)
-        for event in step_runner.events:
+        result = self.step_runner.run_step(run_id=run_id, step=step)
+        for event in self.step_runner.events:
             self.evidence_recorder.record_event(event)
         self.evidence_recorder.record_step_result(result)
         return result

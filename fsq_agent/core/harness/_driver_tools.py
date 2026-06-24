@@ -1,30 +1,41 @@
-import inspect
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any, TypeVar, get_type_hints
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from fsq_agent.capabilities import CapabilityActionDefinition, driver_capability, discover_capability_definitions, platform_driver_capability
 from fsq_agent.models import (
-    ANDROID_ACTION_DEFINITIONS_BY_NAME,
-    ConfigurationError,
+    ANDROID_ACTION_DEFINITIONS,
+    CapabilityDefinition,
     HarnessFunctionSchema,
     HarnessPlatform,
+    ReplayPolicy,
 )
 
 
-_F = TypeVar("_F", bound=Callable[..., Any])
-_DRIVER_TOOL_METADATA_ATTR = "__fsq_driver_tool__"
+F = TypeVar("F", bound=Callable[..., Any])
 
 
-@dataclass(frozen=True)
-class _DriverToolMetadata:
-    description: str
-    params_model: type[BaseModel] | None = None
-    fsq_action_name: str | None = None
-    strict: bool = True
-    capture_evidence: bool = False
-    metadata: dict[str, object] = field(default_factory=dict)
+ANDROID_DRIVER_ACTION_CATALOG = {
+    definition.fsq_action_name: CapabilityActionDefinition(
+        action_name=definition.fsq_action_name,
+        canonical_name=definition.driver_method,
+        executor_kind="driver",
+        owner=definition.owner,
+        params_model=definition.params_model,
+        step_kind=definition.step_kind,
+        method_name=definition.driver_method,
+        replay=ReplayPolicy(kind="fsq_command", alias=definition.fsq_action_name),
+        strict=definition.strict,
+    )
+    for definition in ANDROID_ACTION_DEFINITIONS
+    if definition.owner == "driver"
+}
+_android_driver_capability = platform_driver_capability(
+    platform="android",
+    backend=None,
+    catalog=ANDROID_DRIVER_ACTION_CATALOG,
+)
 
 
 def driver_tool(
@@ -35,21 +46,23 @@ def driver_tool(
     strict: bool = True,
     capture_evidence: bool = False,
     metadata: dict[str, object] | None = None,
-) -> Callable[[_F], _F]:
-    def decorate(method: _F) -> _F:
-        setattr(
-            method,
-            _DRIVER_TOOL_METADATA_ATTR,
-            _DriverToolMetadata(
-                description=description,
-                params_model=params_model,
-                fsq_action_name=fsq_action_name,
-                strict=strict,
-                capture_evidence=capture_evidence,
-                metadata=dict(metadata or {}),
-            ),
-        )
-        return method
+) -> Callable[[F], F]:
+    def decorate(method: F) -> F:
+        method_name = getattr(method, "__name__", None)
+        aliases = [fsq_action_name] if fsq_action_name and fsq_action_name != method_name else []
+        declaration_metadata = dict(metadata or {})
+        if fsq_action_name is not None:
+            declaration_metadata["fsq_action_name"] = fsq_action_name
+        return driver_capability(
+            name=method_name,
+            description=description,
+            params_model=params_model,
+            aliases=aliases,
+            replay=ReplayPolicy(kind="fsq_command", alias=fsq_action_name) if fsq_action_name else None,
+            strict=strict,
+            capture_evidence=capture_evidence,
+            metadata=declaration_metadata,
+        )(method)
 
     return decorate
 
@@ -58,61 +71,17 @@ def _android_driver_tool(
     fsq_action_name: str,
     *,
     description: str,
-    strict: bool = True,
+    strict: bool | None = None,
     capture_evidence: bool = False,
     metadata: dict[str, object] | None = None,
-) -> Callable[[_F], _F]:
-    action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(fsq_action_name)
-    if action_definition is None:
-        raise ConfigurationError(
-            "Unknown Android driver tool action.",
-            context={"fsq_action_name": fsq_action_name},
-        )
-    if action_definition.owner != "driver":
-        raise ConfigurationError(
-            "Android action is not driver-owned.",
-            context={"fsq_action_name": fsq_action_name, "owner": action_definition.owner},
-        )
-
-    def decorate(method: _F) -> _F:
-        method_name = getattr(method, "__name__", "")
-        if method_name != action_definition.driver_method:
-            raise ConfigurationError(
-                "Android driver tool method does not match the action registry.",
-                context={
-                    "fsq_action_name": fsq_action_name,
-                    "expected_method": action_definition.driver_method,
-                    "actual_method": method_name,
-                },
-            )
-        try:
-            hints = get_type_hints(method)
-        except Exception as exc:
-            raise ConfigurationError(
-                "Android driver tool parameter model could not be resolved.",
-                context={"method": method_name, "reason": str(exc)},
-            ) from exc
-        annotated_model = hints.get("params")
-        if annotated_model is not action_definition.params_model:
-            raise ConfigurationError(
-                "Android driver tool parameter model does not match the action registry.",
-                context={
-                    "fsq_action_name": fsq_action_name,
-                    "method": method_name,
-                    "expected_model": action_definition.params_model.__name__,
-                    "actual_model": getattr(annotated_model, "__name__", str(annotated_model)),
-                },
-            )
-        return driver_tool(
-            description=description,
-            params_model=action_definition.params_model,
-            fsq_action_name=action_definition.fsq_action_name,
-            strict=strict,
-            capture_evidence=capture_evidence,
-            metadata=metadata,
-        )(method)
-
-    return decorate
+) -> Callable[[F], F]:
+    return _android_driver_capability(
+        fsq_action_name,
+        description=description,
+        strict=strict,
+        capture_evidence=capture_evidence,
+        metadata=metadata,
+    )
 
 
 def _discover_driver_function_schemas(
@@ -122,42 +91,58 @@ def _discover_driver_function_schemas(
     metadata: dict[str, object] | None = None,
 ) -> list[HarnessFunctionSchema]:
     schemas: list[HarnessFunctionSchema] = []
-    for method_name, method in inspect.getmembers(type(driver), predicate=callable):
-        tool_metadata = getattr(method, _DRIVER_TOOL_METADATA_ATTR, None)
-        if not isinstance(tool_metadata, _DriverToolMetadata):
-            continue
-        params_model = tool_metadata.params_model or _infer_params_model(method_name, method)
-        schema_metadata = dict(metadata or {})
-        schema_metadata.update(tool_metadata.metadata)
+    for definition in _discover_driver_capability_definitions(driver, platform=platform, metadata=metadata):
+        driver_method = _metadata_str(definition.metadata, "driver_method") or definition.name
+        fsq_action_name = _metadata_str(definition.metadata, "fsq_action_name")
+        schema_metadata = dict(definition.metadata)
+        schema_metadata.update(
+            {
+                "capability_name": definition.name,
+                "executor_kind": definition.executor_kind,
+                "driver_method": driver_method,
+                "step_kind": definition.step_kind,
+                "replay": definition.replay.model_dump(mode="json") if definition.replay else None,
+            }
+        )
+        if fsq_action_name is not None:
+            schema_metadata["fsq_action_name"] = fsq_action_name
         schemas.append(
             HarnessFunctionSchema(
-                name=method_name,
-                description=tool_metadata.description,
-                params_json_schema=params_model.model_json_schema(),
-                strict=tool_metadata.strict,
-                platform=platform,
-                driver_method=method_name,
-                fsq_action_name=tool_metadata.fsq_action_name,
-                capture_evidence=tool_metadata.capture_evidence,
+                name=definition.name,
+                description=definition.description,
+                params_json_schema=definition.params_json_schema,
+                strict=definition.strict,
+                platform=definition.platform or platform,
+                driver_method=driver_method,
+                fsq_action_name=fsq_action_name,
+                capture_evidence=definition.capture_evidence,
                 metadata=schema_metadata,
             )
         )
     return schemas
 
 
-def _infer_params_model(method_name: str, method: Callable[..., Any]) -> type[BaseModel]:
-    try:
-        hints = get_type_hints(method)
-    except Exception as exc:
-        raise ConfigurationError(
-            "Driver tool parameter model could not be resolved.",
-            context={"method": method_name, "reason": str(exc)},
-        ) from exc
+def _discover_driver_capability_definitions(
+    driver: object,
+    *,
+    platform: HarnessPlatform,
+    metadata: dict[str, object] | None = None,
+) -> list[CapabilityDefinition]:
+    definitions: list[CapabilityDefinition] = []
+    for definition in discover_capability_definitions(driver, metadata=metadata):
+        if definition.executor_kind != "driver":
+            continue
+        updates: dict[str, object] = {}
+        if definition.platform is None:
+            updates["platform"] = platform
+        if definition.backend is None:
+            backend = _metadata_str(definition.metadata, "backend")
+            if backend is not None:
+                updates["backend"] = backend
+        definitions.append(definition.model_copy(update=updates) if updates else definition)
+    return definitions
 
-    model = hints.get("params")
-    if isinstance(model, type) and issubclass(model, BaseModel):
-        return model
-    raise ConfigurationError(
-        "Driver tool requires a Pydantic params model annotation or explicit params_model.",
-        context={"method": method_name},
-    )
+
+def _metadata_str(metadata: dict[str, object], key: str) -> str | None:
+    value = metadata.get(key)
+    return value if isinstance(value, str) else None

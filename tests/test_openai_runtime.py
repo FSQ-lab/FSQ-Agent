@@ -42,6 +42,7 @@ class _FakeFunctionTool:
         self.name = kwargs["name"]
         self.description = kwargs["description"]
         self.params_json_schema = kwargs["params_json_schema"]
+        self.strict_json_schema = kwargs.get("strict_json_schema", True)
         self.on_invoke_tool = kwargs["on_invoke_tool"]
 
 
@@ -53,11 +54,13 @@ class _FakeHarness:
         driver_method: str = "tap_on",
         fsq_action_name: str = "tapOn",
         capture_evidence: bool = True,
+        strict: bool = True,
     ) -> None:
         self.tool_name = tool_name
         self.driver_method = driver_method
         self.fsq_action_name = fsq_action_name
         self.capture_evidence = capture_evidence
+        self.strict = strict
         self.steps: list[Any] = []
         self.calls: list[str] = []
 
@@ -71,6 +74,7 @@ class _FakeHarness:
                 driver_method=self.driver_method,
                 fsq_action_name=self.fsq_action_name,
                 capture_evidence=self.capture_evidence,
+                strict=self.strict,
             )
         ]
 
@@ -488,7 +492,7 @@ async def test_harness_tool_adapter_delegates_to_step_runner(monkeypatch: pytest
     runner_calls: list[tuple[Any, str, Any]] = []
 
     class _FakeStepRunner:
-        def __init__(self, harness: Any) -> None:
+        def __init__(self, harness: Any, **_: Any) -> None:
             self.harness = harness
 
         def run_step(self, run_id: str, step: Any) -> RunnerStepResult:
@@ -525,7 +529,8 @@ async def test_harness_tool_adapter_delegates_to_step_runner(monkeypatch: pytest
     assert payload["result"]["output"] == {"params": {"target": "Downloads"}}
     assert runner_calls[0][0] is harness
     assert runner_calls[0][1] == "run-1"
-    assert runner_calls[0][2].action_name == "tapOn"
+    assert runner_calls[0][2].action_name == "tap_on"
+    assert runner_calls[0][2].metadata["authored_action_name"] == "tapOn"
     assert harness.steps == []
 
 
@@ -548,7 +553,8 @@ async def test_harness_tool_adapter_applies_evidence_policy_to_mutating_action()
     assert payload["result"]["artifact_refs"] == payload["artifact_refs"]
     assert payload["runner_result"]["phase_reports"][0]["phase"] == "prepare"
     assert payload["runner_result"]["phase_reports"][2]["phase"] == "finalize"
-    assert harness.steps[0].action_name == "tapOn"
+    assert harness.steps[0].action_name == "tap_on"
+    assert harness.steps[0].metadata["authored_action_name"] == "tapOn"
     assert harness.steps[0].kind == "action"
     assert harness.steps[0].evidence_policy.capture_before is True
     assert harness.steps[0].evidence_policy.capture_after is True
@@ -560,6 +566,16 @@ async def test_harness_tool_adapter_applies_evidence_policy_to_mutating_action()
         "capture:screenshot:after-action:agent-tap_on-1:finalize:session-1",
         "capture:ui_tree:after-action:agent-tap_on-1:finalize:session-1",
     ]
+
+
+def test_harness_tool_adapter_passes_schema_strictness() -> None:
+    harness = _FakeHarness(tool_name="perform_actions", driver_method="perform_actions", fsq_action_name="performActions", strict=False)
+    adapter = HarnessToolAdapter(harness, run_id="run-1")
+
+    tools = adapter.build_tools(_FakeFunctionTool)
+
+    assert tools[0].name == "perform_actions"
+    assert tools[0].strict_json_schema is False
 
 
 @pytest.mark.asyncio
@@ -579,7 +595,8 @@ async def test_harness_tool_adapter_keeps_default_evidence_policy_for_assertion_
     assert payload["status"] == "passed"
     assert payload["artifact_refs"] == []
     assert payload["result"]["artifact_refs"] == []
-    assert harness.steps[0].action_name == "assertVisible"
+    assert harness.steps[0].action_name == "assert_visible"
+    assert harness.steps[0].metadata["authored_action_name"] == "assertVisible"
     assert harness.steps[0].kind == "assertion"
     assert harness.steps[0].evidence_policy.capture_before is False
     assert harness.steps[0].evidence_policy.artifact_kinds == []
@@ -598,7 +615,8 @@ async def test_harness_tool_adapter_uses_schema_evidence_flag_not_action_name() 
     assert payload["status"] == "passed"
     assert payload["fsq_action_name"] == "tapOn"
     assert payload["artifact_refs"] == []
-    assert harness.steps[0].action_name == "tapOn"
+    assert harness.steps[0].action_name == "tap_on"
+    assert harness.steps[0].metadata["authored_action_name"] == "tapOn"
     assert harness.steps[0].evidence_policy.capture_before is False
     assert harness.steps[0].evidence_policy.artifact_kinds == []
     assert not any(call.startswith("capture:") for call in harness.calls)

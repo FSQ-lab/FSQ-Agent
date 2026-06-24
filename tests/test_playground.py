@@ -632,7 +632,8 @@ appId: com.microsoft.emmx
     assert progress is not None
     assert progress["result"]["status"] == "success"
     assert captured["driver"] == {"app_id": "com.microsoft.emmx", "serial": "device-1"}
-    assert captured["steps"][0].action_name == "launchApp"
+    assert captured["steps"][0].action_name == "launch_app"
+    assert captured["steps"][0].metadata["authored_action_name"] == "launchApp"
 
 
 def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:

@@ -16,6 +16,8 @@ The playground is an entry-layer convenience surface. It reuses existing FSQ-Age
 - `report`: Resolves generated report paths for completed runs.
 The module must not be imported by `models`, `config`, `providers`, `tools`, `observation`, `knowledge`, `skills`, `fsq`, `core`, `agent`, or `report`. `cli` may import `playground` to expose the public command.
 
+The playground module must not import `capabilities` or decorator internals. It consumes public execution APIs, registry-backed strict adapters, and normalized run events in the same way as CLI entry paths.
+
 ## Public Interface
 
 Target `__init__.py` exports via `__all__`:
@@ -66,6 +68,7 @@ The playground returns JSON errors for API failures and does not expose tracebac
 - Goal execution follows CLI `run --goal` task construction semantics.
 - YAML execution follows CLI non-strict `run --case-yaml` semantics: raw UTF-8 reference material, no strict YAML parsing for execution.
 - Strict YAML execution follows strict-core semantics: parse authored YAML, execute deterministic steps through the configured Android harness, and generate core evidence reports.
+- Capability declaration is a bootstrap concern outside playground routes. Playground strict and dynamic execution consume validated registry metadata and normalized runner results rather than decorated methods or platform action catalogs.
 - Playground records completed dynamic runs using the post-run recorder with `allow_failure=True`.
 - Browser progress polling is incremental: the server may project only events after the caller's last rendered sequence, and the static UI appends those events to the existing progress list instead of clearing and rebuilding the entire history on every tick.
 - After execution completes and a replay video is available or generated, the Preview pane displays that video directly.

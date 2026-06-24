@@ -3,16 +3,23 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from fsq_agent.cli._capability_bootstrap import build_capability_registry
 from fsq_agent.config import Settings
-from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ConfigurationError, ExecutableStep, RuntimeSecretRef
+from fsq_agent.models import CapabilityRegistrySnapshot, ConfigurationError, ExecutableStep, RuntimeSecretRef
 
 
-def resolve_strict_replay_steps(steps: list[ExecutableStep], settings: Settings) -> list[ExecutableStep]:
+def resolve_strict_replay_steps(
+    steps: list[ExecutableStep],
+    settings: Settings,
+    *,
+    registry_snapshot: CapabilityRegistrySnapshot | None = None,
+) -> list[ExecutableStep]:
     allowed_names = set(settings.runtime_secrets.allowed_env_names)
+    snapshot = registry_snapshot or build_capability_registry().snapshot()
     resolved_steps: list[ExecutableStep] = []
     for step in steps:
         resolved_params = _resolve_value(step.params, allowed_names, step.step_id)
-        _validate_resolved_params(step, resolved_params)
+        _validate_resolved_params(step, resolved_params, snapshot)
         resolved_steps.append(step.model_copy(update={"params": resolved_params}))
     return resolved_steps
 
@@ -73,18 +80,19 @@ def _as_runtime_secret_ref(value: Any) -> RuntimeSecretRef | None:
     return None
 
 
-def _validate_resolved_params(step: ExecutableStep, params: dict[str, Any]) -> None:
-    action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(step.action_name)
-    if action_definition is None:
+def _validate_resolved_params(step: ExecutableStep, params: dict[str, Any], registry_snapshot: CapabilityRegistrySnapshot) -> None:
+    capability = registry_snapshot.resolve(step.action_name)
+    if capability is None:
         return
     try:
-        action_definition.params_model.model_validate(params)
+        capability.params_model.model_validate(params)
     except ValidationError as exc:
         raise ConfigurationError(
             "Invalid strict replay command after runtime secret resolution.",
             context={
                 "step_id": step.step_id,
                 "action_name": step.action_name,
+                "authored_action_name": step.metadata.get("authored_action_name"),
                 "validation_errors": _validation_errors(exc),
             },
         ) from exc

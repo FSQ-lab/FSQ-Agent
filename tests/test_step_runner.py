@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 
+from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
 from fsq_agent.core import StepRunner
 from fsq_agent.models import (
     EvidencePolicy,
@@ -151,9 +152,17 @@ def _tap_step() -> ExecutableStep:
     )
 
 
+def _runner(harness: Any) -> StepRunner:
+    return StepRunner(
+        harness=harness,
+        capability_registry=build_capability_registry(),
+        executor_bindings=build_capability_executor_bindings(),
+    )
+
+
 def test_step_runner_runs_successful_step_through_three_phases() -> None:
     harness = SuccessfulHarness()
-    runner = StepRunner(harness=harness)
+    runner = _runner(harness)
 
     result = runner.run_step(run_id="run-1", step=_tap_step())
 
@@ -183,7 +192,7 @@ def test_step_runner_runs_successful_step_through_three_phases() -> None:
 
 def test_step_runner_executes_wait_ms_without_harness_calls() -> None:
     harness = SuccessfulHarness()
-    runner = StepRunner(harness=harness)
+    runner = _runner(harness)
     step = ExecutableStep(step_id="wait-1", kind="action", action_name="waitMs", params={"duration_ms": 1, "reason": "settle"})
 
     result = runner.run_step(run_id="run-1", step=step)
@@ -191,7 +200,13 @@ def test_step_runner_executes_wait_ms_without_harness_calls() -> None:
     assert result.status == "passed"
     assert harness.calls == []
     assert [phase.phase for phase in result.phase_reports] == ["prepare", "invoke", "finalize"]
-    assert result.phase_reports[1].metadata == {"duration_ms": 1, "reason": "settle"}
+    metadata = result.phase_reports[1].metadata
+    assert metadata["capability_name"] == "wait_ms"
+    assert metadata["executor_kind"] == "common"
+    assert metadata["duration_ms"] == 1
+    assert metadata["reason"] == "settle"
+    assert metadata["replay"] == {"kind": "fsq_command", "alias": "waitMs"}
+    assert metadata["common_output"]["type"] == "wait_completed"
     assert "harness_call_start" not in [event.event_type for event in runner.events]
 
 

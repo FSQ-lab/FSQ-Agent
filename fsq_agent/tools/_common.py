@@ -7,16 +7,31 @@ from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
+from fsq_agent.capabilities import common_capability, discover_capability_definitions
 from fsq_agent.models import (
+    CapabilityDefinition,
     CommonToolCall,
     CommonToolDefinition,
     CommonToolResult,
     LocalToolOutputSettings,
+    ReplayPolicy,
     RuntimeSecretSettings,
     ToolExecutionError,
+    WaitMsParams,
 )
 from fsq_agent.tools._file_ops import FileOps
 from fsq_agent.tools._tool_artifacts import ToolArtifactStore
+
+
+capability = common_capability
+_COMMON_TOOL_ORDER = (
+    "read_file",
+    "write_file",
+    "get_runtime_secret",
+    "search_artifact",
+    "read_artifact_slice",
+    "wait_ms",
+)
 
 
 class _ReadFileArgs(BaseModel):
@@ -26,11 +41,6 @@ class _ReadFileArgs(BaseModel):
 class _WriteFileArgs(BaseModel):
     path: str = Field(description="Workspace-relative path to write.")
     content: str = Field(description="Text content to write.")
-
-
-class _WaitArgs(BaseModel):
-    duration_ms: int = Field(ge=1, le=60000, description="Pure wait duration in milliseconds.")
-    reason: str | None = Field(default=None, description="Optional short reason for the wait.")
 
 
 class _RuntimeSecretArgs(BaseModel):
@@ -58,11 +68,10 @@ class CommonToolProvider(Protocol):
 
     async def invoke(self, call: CommonToolCall) -> CommonToolResult:
         ...
-
-
 class CommonToolRegistry:
     def __init__(self) -> None:
         self._definitions: dict[str, CommonToolDefinition] = {}
+        self._capabilities: dict[str, CapabilityDefinition] = {}
         self._providers: dict[str, CommonToolProvider] = {}
 
     @classmethod
@@ -73,10 +82,14 @@ class CommonToolRegistry:
         return registry
 
     def register_provider(self, provider: CommonToolProvider) -> None:
+        provider_capabilities = self._provider_capabilities(provider)
         for definition in provider.list_capabilities():
             if definition.name in self._definitions:
                 raise ToolExecutionError("Duplicate CommonTool name.", context={"tool_name": definition.name})
+            capability_definition = provider_capabilities.get(definition.name)
             self._definitions[definition.name] = definition
+            if capability_definition is not None:
+                self._capabilities[definition.name] = capability_definition
             self._providers[definition.name] = provider
 
     def list_tools(self) -> list[CommonToolDefinition]:
@@ -87,6 +100,29 @@ class CommonToolRegistry:
 
     def provider_for(self, name: str) -> CommonToolProvider | None:
         return self._providers.get(name)
+
+    def list_providers(self) -> list[CommonToolProvider]:
+        providers: list[CommonToolProvider] = []
+        seen: set[int] = set()
+        for provider in self._providers.values():
+            marker = id(provider)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            providers.append(provider)
+        return providers
+
+    def capability_for(self, name: str) -> CapabilityDefinition | None:
+        return self._capabilities.get(name)
+
+    def list_capability_definitions(self) -> list[CapabilityDefinition]:
+        return list(self._capabilities.values())
+
+    def _provider_capabilities(self, provider: CommonToolProvider) -> dict[str, CapabilityDefinition]:
+        list_capability_definitions = getattr(provider, "list_capability_definitions", None)
+        if not callable(list_capability_definitions):
+            return {}
+        return {definition.name: definition for definition in list_capability_definitions()}
 
 
 class CommonToolExecutor:
@@ -122,70 +158,43 @@ class DefaultCommonToolProvider:
         self.artifact_store = self._build_artifact_store()
 
     def list_capabilities(self) -> list[CommonToolDefinition]:
-        return [
-            CommonToolDefinition(
-                name="read_file",
-                description="Read a scoped workspace file.",
-                params_json_schema=_ReadFileArgs.model_json_schema(),
-            ),
-            CommonToolDefinition(
-                name="write_file",
-                description="Write a scoped output file.",
-                params_json_schema=_WriteFileArgs.model_json_schema(),
-            ),
-            CommonToolDefinition(
-                name="get_runtime_secret",
-                description=(
-                    "Retrieve one configured runtime secret from environment or .env-loaded values. "
-                    "Never echo secret values in progress, evidence, or final output. "
-                    f"Allowed names: {', '.join(self.runtime_secret_settings.allowed_env_names) or 'none'}."
-                ),
-                params_json_schema=_RuntimeSecretArgs.model_json_schema(),
-            ),
-            CommonToolDefinition(
-                name="search_artifact",
-                description="Search a large tool-output artifact by text and return offsets with local context.",
-                params_json_schema=_SearchArtifactArgs.model_json_schema(),
-            ),
-            CommonToolDefinition(
-                name="read_artifact_slice",
-                description="Read a bounded character slice from a large tool-output artifact by offset and length.",
-                params_json_schema=_ReadArtifactSliceArgs.model_json_schema(),
-            ),
-            CommonToolDefinition(
-                name="wait_ms",
-                description="Wait without touching or changing platform state.",
-                params_json_schema=_WaitArgs.model_json_schema(),
-            ),
-        ]
+        return [self._common_tool_definition(definition) for definition in self.list_capability_definitions()]
+
+    def list_capability_definitions(self) -> list[CapabilityDefinition]:
+        return type(self).capability_definitions()
+
+    @classmethod
+    def capability_definitions(cls) -> list[CapabilityDefinition]:
+        capabilities = {definition.name: definition for definition in discover_capability_definitions(cls)}
+        return [capabilities[name] for name in _COMMON_TOOL_ORDER if name in capabilities]
 
     async def invoke(self, call: CommonToolCall) -> CommonToolResult:
-        if call.tool_name == "read_file":
-            return await self._read_file(call.arguments)
-        if call.tool_name == "write_file":
-            return await self._write_file(call.arguments)
-        if call.tool_name == "get_runtime_secret":
-            return await self._get_runtime_secret(call.arguments)
-        if call.tool_name == "search_artifact":
-            return await self._search_artifact(call.arguments)
-        if call.tool_name == "read_artifact_slice":
-            return await self._read_artifact_slice(call.arguments)
-        if call.tool_name == "wait_ms":
-            return await self._wait_ms(call.arguments)
+        handler = self._capability_handlers().get(call.tool_name)
+        if handler is not None:
+            return await handler[1](call.arguments)
         raise ToolExecutionError("Unknown CommonTool.", context={"tool_name": call.tool_name})
 
+    @capability(name="read_file", description="Read a scoped workspace file.", params_model=_ReadFileArgs)
     async def _read_file(self, arguments: dict[str, Any]) -> CommonToolResult:
         parsed = _ReadFileArgs.model_validate(arguments)
         started = time.perf_counter()
         result = await self.file_ops.read_text({"path": parsed.path})
         return self._from_file_result("read_file", result, started, {"path": parsed.path})
 
+    @capability(name="write_file", description="Write a scoped output file.", params_model=_WriteFileArgs)
     async def _write_file(self, arguments: dict[str, Any]) -> CommonToolResult:
         parsed = _WriteFileArgs.model_validate(arguments)
         started = time.perf_counter()
         result = await self.file_ops.write_text({"path": parsed.path, "content": parsed.content})
         return self._from_file_result("write_file", result, started, {"path": parsed.path})
 
+    @capability(
+        name="get_runtime_secret",
+        description="Retrieve one configured runtime secret from environment or .env-loaded values.",
+        params_model=_RuntimeSecretArgs,
+        replay=ReplayPolicy(kind="dependency", alias="runtimeSecret"),
+        sensitivity=True,
+    )
     async def _get_runtime_secret(self, arguments: dict[str, Any]) -> CommonToolResult:
         parsed = _RuntimeSecretArgs.model_validate(arguments)
         started = time.perf_counter()
@@ -201,9 +210,18 @@ class DefaultCommonToolProvider:
             output={"type": "runtime_secret", "name": parsed.name, "value": value, "sensitive": True},
             sensitive=True,
             duration_ms=int((time.perf_counter() - started) * 1000),
-            metadata={"name": parsed.name, "recordable": True, "replay_kind": "runtimeSecret"},
+            metadata={
+                "name": parsed.name,
+                "runtime_secret_name": parsed.name,
+                "replay": {"kind": "dependency", "alias": "runtimeSecret"},
+            },
         )
 
+    @capability(
+        name="search_artifact",
+        description="Search a large tool-output artifact by text and return offsets with local context.",
+        params_model=_SearchArtifactArgs,
+    )
     async def _search_artifact(self, arguments: dict[str, Any]) -> CommonToolResult:
         parsed = _SearchArtifactArgs.model_validate(arguments)
         started = time.perf_counter()
@@ -223,6 +241,11 @@ class DefaultCommonToolProvider:
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
 
+    @capability(
+        name="read_artifact_slice",
+        description="Read a bounded character slice from a large tool-output artifact by offset and length.",
+        params_model=_ReadArtifactSliceArgs,
+    )
     async def _read_artifact_slice(self, arguments: dict[str, Any]) -> CommonToolResult:
         parsed = _ReadArtifactSliceArgs.model_validate(arguments)
         started = time.perf_counter()
@@ -236,8 +259,15 @@ class DefaultCommonToolProvider:
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
 
+    @capability(
+        name="wait_ms",
+        description="Wait without touching or changing platform state.",
+        params_model=WaitMsParams,
+        aliases=["waitMs"],
+        replay=ReplayPolicy(kind="fsq_command", alias="waitMs"),
+    )
     async def _wait_ms(self, arguments: dict[str, Any]) -> CommonToolResult:
-        parsed = _WaitArgs.model_validate(arguments)
+        parsed = WaitMsParams.model_validate(arguments)
         started = time.perf_counter()
         await asyncio.sleep(parsed.duration_ms / 1000)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -251,8 +281,35 @@ class DefaultCommonToolProvider:
                 "reason": parsed.reason,
             },
             duration_ms=elapsed_ms,
-            metadata={"duration_ms": parsed.duration_ms, "reason": parsed.reason, "recordable": True, "replay_kind": "waitMs"},
+            metadata={
+                "duration_ms": parsed.duration_ms,
+                "reason": parsed.reason,
+                "replay": {"kind": "fsq_command", "alias": "waitMs"},
+            },
         )
+
+    def _common_tool_definition(self, definition: CapabilityDefinition) -> CommonToolDefinition:
+        description = definition.description
+        if definition.name == "get_runtime_secret":
+            description = (
+                f"{description} Never echo secret values in progress, evidence, or final output. "
+                f"Allowed names: {', '.join(self.runtime_secret_settings.allowed_env_names) or 'none'}."
+            )
+        return CommonToolDefinition(
+            name=definition.name,
+            description=description,
+            params_json_schema=definition.params_json_schema,
+            strict=definition.strict,
+            metadata=definition.safe_metadata(),
+        )
+
+    def _capability_handlers(self) -> dict[str, tuple[CapabilityDefinition, Any]]:
+        handlers: dict[str, tuple[CapabilityDefinition, Any]] = {}
+        for definition in self.list_capability_definitions():
+            method = getattr(self, f"_{definition.name}", None)
+            if callable(method):
+                handlers[definition.name] = (definition, method)
+        return handlers
 
     def _from_file_result(self, tool_name: str, result: CommonToolResult, started: float, metadata: dict[str, Any]) -> CommonToolResult:
         payload = result.model_dump(mode="json")

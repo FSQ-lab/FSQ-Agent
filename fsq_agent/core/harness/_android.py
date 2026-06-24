@@ -2,17 +2,19 @@ from pydantic import BaseModel, ValidationError
 
 from fsq_agent.core.evidence import ArtifactStore
 from fsq_agent.core.harness._android_driver import AndroidDriverInterface
-from fsq_agent.core.harness._driver_tools import _discover_driver_function_schemas
+from fsq_agent.core.harness._driver_tools import _discover_driver_capability_definitions, _discover_driver_function_schemas
 from fsq_agent.core.harness._interface import AIAssertionEvaluatorProtocol
 from fsq_agent.models import (
-    ANDROID_ACTION_DEFINITIONS_BY_NAME,
     AIAssertionRequest,
+    AndroidAssertWithAIParams,
+    CapabilityDefinition,
     ExecutableStep,
     FailureCategory,
     HarnessActionResult,
     HarnessArtifactRef,
     HarnessContext,
     HarnessFunctionSchema,
+    ReplayPolicy,
     StepPhase,
     AndroidUiTreeParams,
 )
@@ -73,28 +75,29 @@ class AndroidHarness:
         return None
 
     def invoke_action(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
-        if step.action_name == "assertWithAI":
-            return self._assert_with_ai(step, context)
-        action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(step.action_name)
-        if action_definition is not None:
-            if action_definition.owner != "driver":
-                return HarnessActionResult(
-                    status="failed",
-                    action_name=step.action_name,
-                    failure_category="configuration_error",
-                    error_message=f"Unsupported Android harness-owned action: {step.action_name}",
-                )
-            params = self._validate_params(step, action_definition.params_model)
+        capability = self._capability_for(step.action_name)
+        if capability is None:
+            return HarnessActionResult(
+                status="failed",
+                action_name=step.action_name,
+                failure_category="configuration_error",
+                error_message=f"Unsupported Android action: {step.action_name}",
+            )
+        if capability.executor_kind == "harness":
+            return self._assert_with_ai(step, context, capability)
+        if capability.executor_kind == "driver":
+            params = self._validate_params(step, capability.params_model)
             if isinstance(params, HarnessActionResult):
                 return params
-            driver_method = getattr(self.driver, action_definition.driver_method)
+            driver_method_name = str(capability.metadata.get("driver_method") or capability.name)
+            driver_method = getattr(self.driver, driver_method_name)
             output = driver_method(params)
             return self._result_from_driver_output(step.action_name, output)
         return HarnessActionResult(
             status="failed",
             action_name=step.action_name,
             failure_category="configuration_error",
-            error_message=f"Unsupported Android action: {step.action_name}",
+            error_message=f"Unsupported Android capability executor: {capability.executor_kind}",
         )
 
     def after_action(
@@ -146,9 +149,8 @@ class AndroidHarness:
             metadata=dict(data.get("metadata") or {}),
         )
 
-    def _assert_with_ai(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
-        action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"]
-        params = self._validate_params(step, action_definition.params_model)
+    def _assert_with_ai(self, step: ExecutableStep, context: HarnessContext, capability: CapabilityDefinition) -> HarnessActionResult:
+        params = self._validate_params(step, capability.params_model)
         if isinstance(params, HarnessActionResult):
             return params
         if self.ai_assertion_evaluator is None:
@@ -215,18 +217,54 @@ class AndroidHarness:
         return unique
 
     def _assert_with_ai_schema(self, metadata: dict[str, object]) -> HarnessFunctionSchema:
-        action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"]
         schema_metadata = dict(metadata)
         schema_metadata["owner"] = "harness"
+        schema_metadata["capability_name"] = "assert_with_ai"
         return HarnessFunctionSchema(
-            name=action_definition.driver_method,
+            name="assert_with_ai",
             description="Evaluate an explicit Android visual assertion with a fresh screenshot and the configured AI evaluator.",
-            params_json_schema=action_definition.params_model.model_json_schema(),
+            params_json_schema=AndroidAssertWithAIParams.model_json_schema(),
             strict=True,
             platform="android",
-            driver_method=action_definition.driver_method,
-            fsq_action_name=action_definition.fsq_action_name,
+            driver_method="assert_with_ai",
+            fsq_action_name="assertWithAI",
             metadata=schema_metadata,
+        )
+
+    def _capability_for(self, name_or_alias: str) -> CapabilityDefinition | None:
+        for capability in self._capability_definitions():
+            if capability.name == name_or_alias or name_or_alias in capability.aliases:
+                return capability
+        return None
+
+    def _capability_definitions(self) -> list[CapabilityDefinition]:
+        metadata: dict[str, object] = {"driver_class": type(self.driver).__name__}
+        backend = getattr(self.driver, "backend", None)
+        if isinstance(backend, str):
+            metadata["backend"] = backend
+        definitions = _discover_driver_capability_definitions(self.driver, platform="android", metadata=metadata)
+        if not definitions:
+            from fsq_agent.core._default_capabilities import android_capability_definitions
+
+            definitions = android_capability_definitions(include_ai_assertion=False)
+        definitions.append(self._assert_with_ai_capability(metadata))
+        return definitions
+
+    def _assert_with_ai_capability(self, metadata: dict[str, object]) -> CapabilityDefinition:
+        capability_metadata = dict(metadata)
+        capability_metadata.update({"owner": "harness", "driver_method": "assert_with_ai", "fsq_action_name": "assertWithAI"})
+        return CapabilityDefinition(
+            name="assert_with_ai",
+            aliases=["assertWithAI"],
+            executor_kind="harness",
+            params_model=AndroidAssertWithAIParams,
+            step_kind="assertion",
+            description="Evaluate an explicit Android visual assertion with a fresh screenshot and the configured AI evaluator.",
+            platform="android",
+            backend=str(metadata.get("backend")) if metadata.get("backend") else None,
+            owner="harness",
+            replay=ReplayPolicy(kind="fsq_command", alias="assertWithAI"),
+            metadata=capability_metadata,
         )
 
     def classify_error(self, error: BaseException, phase: StepPhase, step: ExecutableStep) -> FailureCategory:

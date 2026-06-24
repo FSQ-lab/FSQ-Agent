@@ -3,7 +3,8 @@ from typing import Any
 
 import pytest
 
-from fsq_agent.core import EvidenceRecorder, StepSequenceRunner
+from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent.core import EvidenceRecorder, StepRunner, StepSequenceRunner
 import fsq_agent.core.runner._sequence as sequence_module
 from fsq_agent.models import (
     ExecutableStep,
@@ -66,10 +67,22 @@ def _step(step_id: str, action_name: str) -> ExecutableStep:
     return ExecutableStep(step_id=step_id, kind="action", action_name=action_name)
 
 
+def _runner(harness: SequenceHarness, recorder: EvidenceRecorder, step_interval_seconds: float = 1.0) -> StepSequenceRunner:
+    return StepSequenceRunner(
+        step_runner=StepRunner(
+            harness=harness,
+            capability_registry=build_capability_registry(),
+            executor_bindings=build_capability_executor_bindings(),
+        ),
+        evidence_recorder=recorder,
+        step_interval_seconds=step_interval_seconds,
+    )
+
+
 def test_step_sequence_runner_runs_steps_in_order_and_records_evidence(tmp_path: Path) -> None:
     harness = SequenceHarness()
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
-    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+    runner = _runner(harness, recorder)
 
     bundle = runner.run_steps(run_id="run-1", steps=[_step("step-1", "tapOn"), _step("step-2", "inputText")])
 
@@ -89,9 +102,9 @@ def test_step_sequence_runner_runs_steps_in_order_and_records_evidence(tmp_path:
 
 
 def test_step_sequence_runner_stops_after_first_failed_step(tmp_path: Path) -> None:
-    harness = SequenceHarness(fail_action="tapOn")
+    harness = SequenceHarness(fail_action="tap_on")
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
-    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+    runner = _runner(harness, recorder)
 
     bundle = runner.run_steps(run_id="run-1", steps=[_step("step-1", "tapOn"), _step("step-2", "inputText")])
 
@@ -101,9 +114,9 @@ def test_step_sequence_runner_stops_after_first_failed_step(tmp_path: Path) -> N
 
 
 def test_step_sequence_runner_runs_teardown_after_failed_normal_step(tmp_path: Path) -> None:
-    harness = SequenceHarness(fail_action="tapOn")
+    harness = SequenceHarness(fail_action="tap_on")
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
-    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+    runner = _runner(harness, recorder)
 
     bundle = runner.run_steps(
         run_id="run-1",
@@ -129,7 +142,7 @@ def test_step_sequence_runner_runs_teardown_after_failed_normal_step(tmp_path: P
 def test_step_sequence_runner_runs_teardown_after_successful_normal_steps(tmp_path: Path) -> None:
     harness = SequenceHarness()
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
-    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+    runner = _runner(harness, recorder)
 
     bundle = runner.run_steps(
         run_id="run-1",
@@ -155,7 +168,7 @@ def test_step_sequence_runner_waits_between_executed_steps_without_evidence_step
     monkeypatch.setattr(sequence_module.time, "sleep", fake_sleep)
 
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
-    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder)
+    runner = _runner(harness, recorder)
 
     bundle = runner.run_steps(
         run_id="run-1",
@@ -197,7 +210,7 @@ def test_step_sequence_runner_allows_zero_step_interval(
     monkeypatch.setattr(sequence_module.time, "sleep", fake_sleep)
 
     recorder = EvidenceRecorder(run_id="run-1", output_dir=tmp_path)
-    runner = StepSequenceRunner(harness=harness, evidence_recorder=recorder, step_interval_seconds=0)
+    runner = _runner(harness, recorder, step_interval_seconds=0)
 
     runner.run_steps(
         run_id="run-1",

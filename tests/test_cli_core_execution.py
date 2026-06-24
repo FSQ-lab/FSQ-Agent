@@ -115,7 +115,7 @@ def test_run_fsq_core_case_writes_manifest_and_returns_bundle(tmp_path: Path) ->
     assert bundle.run_id == "run-1"
     assert bundle.manifest_path == tmp_path / "runs" / "run-1" / "evidence-manifest.json"
     assert bundle.manifest_path.exists()
-    assert harness.actions == ["launchApp", "tapOn"]
+    assert harness.actions == ["launch_app", "tap_on"]
     assert [step.step_id for step in bundle.steps] == ["core_cli-step-001", "core_cli-step-002"]
 
     manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
@@ -130,7 +130,7 @@ def test_run_fsq_core_case_passes_step_interval_to_sequence_runner(tmp_path: Pat
     captured: dict[str, float] = {}
 
     class FakeSequenceRunner:
-        def __init__(self, *, harness, evidence_recorder, step_interval_seconds: float) -> None:
+        def __init__(self, *, step_runner, evidence_recorder, step_interval_seconds: float) -> None:
             captured["step_interval_seconds"] = step_interval_seconds
 
         def run_steps(self, *, run_id: str, steps, teardown_steps):
@@ -154,7 +154,7 @@ def test_run_fsq_core_case_passes_step_interval_to_sequence_runner(tmp_path: Pat
 def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) -> None:
     case_path = tmp_path / "core_cli_teardown.codex.yaml"
     case_path.write_text(FSQ_CASE_WITH_TEARDOWN, encoding="utf-8")
-    harness = CliCoreHarness(fail_action="tapOn")
+    harness = CliCoreHarness(fail_action="tap_on")
 
     bundle = run_fsq_core_case(
         case_path=case_path,
@@ -163,7 +163,7 @@ def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) 
         run_id="run-1",
     )
 
-    assert harness.actions == ["launchApp", "tapOn", "killApp"]
+    assert harness.actions == ["launch_app", "tap_on", "kill_app"]
     assert [step.step_id for step in bundle.steps] == [
         "core_cli_teardown-step-001",
         "core_cli_teardown-step-002",

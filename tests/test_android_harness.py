@@ -130,15 +130,17 @@ def test_android_harness_accepts_structured_press_key_params() -> None:
     assert driver.calls[-1] == ("press_key", {"key": "Back"})
 
 
-def test_android_harness_accepts_structured_perform_actions_params() -> None:
+def test_android_harness_does_not_expose_unimplemented_perform_actions() -> None:
     driver = FakeAndroidDriver()
     harness = AndroidHarness(driver=driver)
     actions = [{"type": "none", "id": "wait", "actions": [{"type": "pause", "duration": 1}]}]
 
     result = harness.invoke_action(_step("performActions", {"actions": actions}), harness.get_context())
 
-    assert result.status == "passed"
-    assert driver.calls[-1] == ("perform_actions", {"actions": actions})
+    assert result.status == "failed"
+    assert result.failure_category == "configuration_error"
+    assert result.error_message == "Unsupported Android action: performActions"
+    assert driver.calls == [("context", None)]
 
 
 def test_android_harness_rejects_legacy_value_wrapped_known_params() -> None:
@@ -169,10 +171,11 @@ def test_android_harness_action_space_returns_decorated_driver_method_schemas() 
     assert schemas["tap_on"].platform == "android"
     assert schemas["tap_on"].strict is True
     assert schemas["tap_on"].capture_evidence is True
-    assert schemas["tap_on"].metadata == {
-        "driver_class": "UiAutomator2AndroidDriver",
-        "backend": "uiautomator2",
-    }
+    assert schemas["tap_on"].metadata["driver_class"] == "UiAutomator2AndroidDriver"
+    assert schemas["tap_on"].metadata["backend"] == "uiautomator2"
+    assert schemas["tap_on"].metadata["capability_name"] == "tap_on"
+    assert schemas["tap_on"].metadata["executor_kind"] == "driver"
+    assert schemas["tap_on"].metadata["replay"] == {"kind": "fsq_command", "alias": "tapOn"}
     assert "target" in schemas["tap_on"].params_json_schema["properties"]
     assert schemas["ui_tree"].driver_method == "ui_tree"
     assert schemas["ui_tree"].fsq_action_name == "uiTree"

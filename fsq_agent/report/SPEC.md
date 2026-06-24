@@ -2,18 +2,20 @@
 
 ## Purpose
 
-Generate human-readable and machine-readable reports under the fsq-agent output directory from dynamic LLM task results and strict-core evidence manifests, including the checked dynamic `verification_goal`, CommonTool/harness tool provenance, and provider-backed AI assertion verdict metadata. Provide one lookup path so CLI can print a stored LLM or strict-core report by run id.
+Generate human-readable and machine-readable reports under the fsq-agent output directory from dynamic LLM task results and strict-core evidence manifests, including the checked dynamic `verification_goal`, structured capability provenance, CommonTool/harness/driver execution metadata, replay metadata, sensitivity-safe previews, and provider-backed AI assertion verdict metadata. Provide one lookup path so CLI can print a stored LLM or strict-core report by run id.
 
 ## Dependencies
 
 - `models`: Uses `Task`, `AgentFinalOutput`, `ToolCallRecord`, `StepResult`, `VerificationResult`, `ReportArtifact`, `EvidenceBundle`, `AIAssertionResult`, and `ReportGenerationError`.
+
+The report module consumes persisted event, result, and evidence data. It must not import `capabilities`, inspect decorators, or rebuild platform action catalogs.
 
 ## Public Interface
 
 Current `__init__.py` exports via `__all__`:
 
 - `ReportGenerator`: Generates reports for completed task runs under the configured output runs directory.
-- `EvidenceBundler`: Creates a manifest for evidence references supplied by execution steps, including paths or snapshots produced by harnesses or CommonTool utilities.
+- `EvidenceBundler`: Creates a manifest for evidence references supplied by execution steps, including paths or snapshots produced by capability execution.
 - `FailureAnalyzer`: Classifies failures as success, tool usage error, semantic action unmet, execution issue, planning issue, verification issue, or a combined label when multiple rule-assisted signals are present.
 - `CoreEvidenceReportGenerator`: Generates Markdown and JSON reports from one deterministic core `evidence-manifest.json` path.
 - `resolve_report_path(runs_dir: Path, run_id: str, report_format: Literal["markdown", "json"] = "markdown") -> Path`: Resolves a stored LLM report (`report.md/json`) or strict-core report (`core-report.md/json`) for the requested run id. It returns exactly one matching path or raises `ReportGenerationError` when the report is missing or ambiguous.
@@ -37,7 +39,7 @@ Planned strict-regression and recovery report support:
 ## Internal Structure
 
 - `__init__.py`: Public exports only.
-- `_generator.py`: Markdown and JSON report generation with minimal JSON fallback, typed agent output rendering, execution/verification report shaping, and `ToolCallRecord` reconstruction from `events.jsonl`.
+- `_generator.py`: Markdown and JSON report generation with minimal JSON fallback, typed agent output rendering, execution/verification report shaping, and `ToolCallRecord` reconstruction from structured capability events in `events.jsonl`.
 - `_evidence.py`: Evidence manifest and bundle creation.
 - `_core_evidence_report.py`: Markdown and JSON report generation from `EvidenceBundle` or a core `evidence-manifest.json` path.
 - `_resolver.py`: Stored report lookup for LLM `report.*` and strict-core `core-report.*` files.
@@ -45,6 +47,16 @@ Planned strict-regression and recovery report support:
 - `_failure_analysis.py`: Failure classification helpers.
 - `templates/`: Optional report templates.
 - `SPEC.md`: Module design.
+
+## Python Architecture
+
+- Architecture level: 2 Simple Package.
+- Public API: `ReportGenerator`, `EvidenceBundler`, `FailureAnalyzer`, `CoreEvidenceReportGenerator`, and `resolve_report_path` exported from `__init__.py`.
+- Internal modules: all `_*.py` files are private report implementation modules.
+- Domain boundaries: report owns rendering, stored report lookup, evidence manifest report generation, and failure classification from persisted facts. It does not execute capabilities, read live device state, call providers, parse FSQ YAML for execution, or decide recording eligibility.
+- Boundary models: task/result/final-output/evidence/report models and normalized tool call records come from `models`.
+- Dependency direction: imports `models` only. It consumes persisted JSON/JSONL files and paths supplied by callers.
+- Rationale: report generation is focused transformation from persisted data into Markdown/JSON output, so Level 2 is sufficient.
 
 ## Error Handling
 
@@ -55,8 +67,10 @@ Stored report lookup raises `ReportGenerationError` when no report exists for th
 ## Design Decisions
 
 - Markdown and JSON reports are part of the design because they are easy to inspect in CI and IDEs.
-- JSON reports are structured by lifecycle concern: `task`, `agent_output`, `execution`, `verification`, and `failure_classification`. The `task` and `verification` sections should make the single checked dynamic `verification_goal` visible for LLM runs. The `agent_output` section contains the typed `AgentFinalOutput` when available. The `execution.tool_calls` collection contains normalized `ToolCallRecord` values for real harness and CommonTool calls reconstructed from run events; tool origins are `harness`, `common`, `runtime`, or `unknown`. Runtime-only records such as progress events, pre-plan reconstruction, provider setup, and SDK runner summaries are not represented as real tool calls. Step records use `source` for runtime/provenance labels rather than overloading it as a tool name. Failure classification may use both verification output and normalized real tool-call output previews so tool usage failures can be distinguished from planning failures.
-- Reports must preserve AI assertion evidence emitted by harness actions. For Android `assertWithAI`, reports should include the prompt summary, verdict status, explanation, provider/model metadata safe for display, latency/token diagnostics when safe, screenshot artifact references, and any evaluator error. Reports must not re-inspect screenshot pixels or include hidden model reasoning.
+- JSON reports are structured by lifecycle concern: `task`, `agent_output`, `execution`, `verification`, and `failure_classification`. The `task` and `verification` sections should make the single checked dynamic `verification_goal` visible for LLM runs. The `agent_output` section contains the typed `AgentFinalOutput` when available. The `execution.tool_calls` collection contains normalized `ToolCallRecord` values for real capability invocations reconstructed from run events. Tool origin is derived first from structured capability metadata (`executor_kind`, capability name, platform/backend/owner, and compatibility `tool_origin` when present), not hard-coded tool-name sets. Runtime-only records such as progress events, pre-plan reconstruction, provider setup, and SDK runner summaries are not represented as real tool calls. Step records use `source` for runtime/provenance labels rather than overloading it as a tool name. Failure classification may use both verification output and normalized real tool-call output previews so tool usage failures can be distinguished from planning failures.
+- Reports treat capability metadata as persisted execution evidence, not as live decorator state. Report generation must not depend on the module that originally declared a capability.
+- Reports must preserve AI assertion evidence emitted by harness capabilities. For Android `assert_with_ai`/`assertWithAI`, reports should include the prompt summary, verdict status, explanation, provider/model metadata safe for display, latency/token diagnostics when safe, screenshot artifact references, and any evaluator error. Reports must not re-inspect screenshot pixels or include hidden model reasoning.
+- Sensitive capability results must be redacted in reports. Reports may show safe dependency metadata such as requested environment variable name, allowlist/presence status, capability name, and replay alias, but never raw secret values from `output.value`.
 - Report artifacts are stored below `output.runs_dir/<run-id>` so installed CLI usage does not create report files in the caller's current directory.
 - LLM and strict-core reports intentionally keep separate internal shapes. CLI unifies only lookup and printing through `resolve_report_path`.
 - HTML report generation is intentionally out of scope.

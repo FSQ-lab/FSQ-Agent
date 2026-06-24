@@ -327,6 +327,7 @@ class AndroidActionDefinition:
     params_model: type[BaseModel]
     step_kind: ExecutableStepKind
     owner: Literal["driver", "harness"] = "driver"
+    strict: bool = True
 
 
 ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
@@ -334,7 +335,7 @@ ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
     AndroidActionDefinition("killApp", "kill_app", AndroidKillAppParams, "teardown"),
     AndroidActionDefinition("tapOn", "tap_on", AndroidTapOnParams, "action"),
     AndroidActionDefinition("assertVisible", "assert_visible", AndroidAssertVisibleParams, "assertion"),
-    AndroidActionDefinition("performActions", "perform_actions", AndroidPerformActionsParams, "action"),
+    AndroidActionDefinition("performActions", "perform_actions", AndroidPerformActionsParams, "action", strict=False),
     AndroidActionDefinition("assert", "assert_state", AndroidAssertStateParams, "assertion"),
     AndroidActionDefinition("pressKey", "press_key", AndroidPressKeyParams, "action"),
     AndroidActionDefinition("inputText", "input_text", AndroidInputTextParams, "action"),

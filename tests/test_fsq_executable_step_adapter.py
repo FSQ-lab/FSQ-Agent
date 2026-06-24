@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from fsq_agent._capability_bootstrap import build_capability_registry
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import ConfigurationError
 
@@ -32,8 +33,6 @@ tags:
     timeout: 10000
 - pressKey:
     key: Enter
-- performActions:
-    actions: [{"type": "none", "id": "wait-page-load", "actions": [{"type": "pause", "duration": 3000}]}]
 - assert:
     element:
       resourceId: com.microsoft.emmx:id/url_bar
@@ -53,18 +52,31 @@ def _load_case(tmp_path: Path):
     return FsqCaseLoader().load_case(case_path)
 
 
-def test_fsq_executable_step_adapter_preserves_order_and_action_names(tmp_path: Path) -> None:
+def _adapter() -> FsqExecutableStepAdapter:
+    return FsqExecutableStepAdapter(registry_snapshot=build_capability_registry().snapshot())
+
+
+def test_fsq_executable_step_adapter_preserves_order_and_canonical_action_names(tmp_path: Path) -> None:
     case = _load_case(tmp_path)
 
-    steps = FsqExecutableStepAdapter().to_executable_steps(case)
+    steps = _adapter().to_executable_steps(case)
 
     assert [step.action_name for step in steps] == [
+        "launch_app",
+        "assert_visible",
+        "tap_on",
+        "input_text",
+        "press_key",
+        "assert_state",
+        "assert_with_ai",
+        "kill_app",
+    ]
+    assert [step.metadata["authored_action_name"] for step in steps] == [
         "launchApp",
         "assertVisible",
         "tapOn",
         "inputText",
         "pressKey",
-        "performActions",
         "assert",
         "assertWithAI",
         "killApp",
@@ -75,19 +87,18 @@ def test_fsq_executable_step_adapter_preserves_order_and_action_names(tmp_path: 
         "action",
         "action",
         "action",
-        "action",
         "assertion",
         "assertion",
         "teardown",
     ]
     assert steps[0].step_id == "fundamental_test_bing_com_website-step-001"
-    assert steps[-1].step_id == "fundamental_test_bing_com_website-step-009"
+    assert steps[-1].step_id == "fundamental_test_bing_com_website-step-008"
 
 
 def test_fsq_executable_step_adapter_normalizes_params_and_source_refs(tmp_path: Path) -> None:
     case = _load_case(tmp_path)
 
-    steps = FsqExecutableStepAdapter().to_executable_steps(case)
+    steps = _adapter().to_executable_steps(case)
 
     assert steps[0].params == {}
     assert steps[2].params == {"target": "Search box in NTP page"}
@@ -98,9 +109,6 @@ def test_fsq_executable_step_adapter_normalizes_params_and_source_refs(tmp_path:
     }
     assert steps[3].timeout_ms == 10000
     assert steps[4].params == {"key": "Enter"}
-    assert steps[5].params == {
-        "actions": [{"type": "none", "id": "wait-page-load", "actions": [{"type": "pause", "duration": 3000}]}]
-    }
 
     assert steps[1].source_ref is not None
     assert steps[1].source_ref.source_type == "fsq"
@@ -134,10 +142,11 @@ platform: android
     )
     case = FsqCaseLoader().load_case(case_path)
 
-    steps = FsqExecutableStepAdapter().to_executable_steps(case)
+    steps = _adapter().to_executable_steps(case)
 
     assert steps[0].params == {"text": {"runtimeSecret": "TEST_ACCOUNT_PASSWORD"}, "target": "Password field"}
-    assert steps[1].action_name == "waitMs"
+    assert steps[1].action_name == "wait_ms"
+    assert steps[1].metadata["authored_action_name"] == "waitMs"
     assert steps[1].params == {"duration_ms": 1, "reason": "settle"}
     assert steps[1].kind == "action"
 
@@ -158,7 +167,7 @@ platform: android
     case = FsqCaseLoader().load_case(case_path)
 
     with pytest.raises(ConfigurationError) as exc_info:
-        FsqExecutableStepAdapter().to_executable_steps(case)
+        _adapter().to_executable_steps(case)
 
     assert exc_info.value.context["path"] == str(case_path)
     assert exc_info.value.context["step_index"] == 0
@@ -181,7 +190,7 @@ platform: android
     case = FsqCaseLoader().load_case(case_path)
 
     with pytest.raises(ConfigurationError) as exc_info:
-        FsqExecutableStepAdapter().to_executable_steps(case)
+        _adapter().to_executable_steps(case)
 
     assert exc_info.value.context["path"] == str(case_path)
     assert exc_info.value.context["step_index"] == 0
@@ -204,7 +213,7 @@ platform: android
     case = FsqCaseLoader().load_case(case_path)
 
     with pytest.raises(ConfigurationError) as exc_info:
-        FsqExecutableStepAdapter().to_executable_steps(case)
+        _adapter().to_executable_steps(case)
 
     assert exc_info.value.context["path"] == str(case_path)
     assert exc_info.value.context["step_index"] == 0
@@ -224,4 +233,4 @@ platform: android
     )
     case = FsqCaseLoader().load_case(case_path)
 
-    assert FsqExecutableStepAdapter().to_executable_steps(case) == []
+    assert _adapter().to_executable_steps(case) == []

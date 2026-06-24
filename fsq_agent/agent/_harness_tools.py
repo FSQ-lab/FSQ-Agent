@@ -3,8 +3,9 @@ import json
 import time
 from typing import Any
 
+from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
 from fsq_agent.core import HarnessInterface, StepRunner
-from fsq_agent.models import ANDROID_ACTION_DEFINITIONS_BY_NAME, ConfigurationError, EvidencePolicy, ExecutableStep, HarnessFunctionSchema, RunnerStepResult
+from fsq_agent.models import CapabilityDefinition, ConfigurationError, EvidencePolicy, ExecutableStep, HarnessFunctionSchema, RunnerStepResult
 
 
 class HarnessToolAdapter:
@@ -14,12 +15,19 @@ class HarnessToolAdapter:
         *,
         run_id: str,
         reserved_tool_names: set[str] | None = None,
+        common_tool_providers: list[Any] | None = None,
     ) -> None:
         self.harness = harness
         self.run_id = run_id
-        self.runner = StepRunner(harness=harness)
+        self._capability_registry = build_capability_registry()
+        self.runner = StepRunner(
+            harness=harness,
+            capability_registry=self._capability_registry,
+            executor_bindings=build_capability_executor_bindings(common_tool_providers=common_tool_providers),
+        )
         self.reserved_tool_names = reserved_tool_names or set()
         self._counter = itertools.count(1)
+        self._capability_snapshot = self._capability_registry.snapshot()
         self.schemas = self._discover_schemas()
         self.schemas_by_name = {schema.name: schema for schema in self.schemas}
 
@@ -33,10 +41,15 @@ class HarnessToolAdapter:
                 name=schema.name,
                 description=schema.description or f"Run platform action {schema.name} through the active harness.",
                 params_json_schema=schema.params_json_schema,
+                strict_json_schema=schema.strict,
                 on_invoke_tool=self._handler_for(schema),
             )
             for schema in self.schemas
         ]
+
+    def run_step_with_capability_result(self, run_id: str, step: ExecutableStep):
+        result = self.runner.run_step(run_id=run_id, step=step)
+        return result, self.runner.last_capability_execution_result
 
     def _discover_schemas(self) -> list[HarnessFunctionSchema]:
         try:
@@ -57,10 +70,10 @@ class HarnessToolAdapter:
             started = time.perf_counter()
             try:
                 params = self._parse_args(args)
-                action_name = schema.fsq_action_name or schema.driver_method
+                action_name = self._capability_name(schema)
                 step = ExecutableStep(
                     step_id=f"agent-{schema.name}-{next(self._counter)}",
-                    kind=self._step_kind(action_name),
+                    kind=self._step_kind(schema),
                     action_name=action_name,
                     params=params,
                     evidence_policy=self._evidence_policy(schema),
@@ -68,9 +81,13 @@ class HarnessToolAdapter:
                         "run_id": self.run_id,
                         "tool_origin": "harness",
                         "tool_name": schema.name,
+                        "capability_name": action_name,
+                        "executor_kind": schema.metadata.get("executor_kind"),
+                        "replay": schema.metadata.get("replay"),
                         "platform": schema.platform,
                         "driver_method": schema.driver_method,
                         "fsq_action_name": schema.fsq_action_name,
+                        "authored_action_name": schema.fsq_action_name,
                         "schema_metadata": schema.metadata,
                     },
                 )
@@ -89,11 +106,24 @@ class HarnessToolAdapter:
             raise ValueError("Harness tool arguments must be a JSON object.")
         return payload
 
-    def _step_kind(self, action_name: str):
-        action_definition = ANDROID_ACTION_DEFINITIONS_BY_NAME.get(action_name)
-        if action_definition is not None:
-            return action_definition.step_kind
+    def _capability_name(self, schema: HarnessFunctionSchema) -> str:
+        value = schema.metadata.get("capability_name")
+        if isinstance(value, str) and value:
+            return value
+        capability = self._capability_for_schema(schema)
+        return capability.name if capability is not None else schema.driver_method
+
+    def _step_kind(self, schema: HarnessFunctionSchema):
+        value = schema.metadata.get("step_kind")
+        if value in {"action", "assertion", "observation", "diagnostic", "setup", "teardown"}:
+            return value
+        capability = self._capability_for_schema(schema)
+        if capability is not None:
+            return capability.step_kind
         return "action"
+
+    def _capability_for_schema(self, schema: HarnessFunctionSchema) -> CapabilityDefinition | None:
+        return self._capability_snapshot.resolve(schema.fsq_action_name or schema.driver_method)
 
     def _evidence_policy(self, schema: HarnessFunctionSchema) -> EvidencePolicy:
         if schema.capture_evidence:
@@ -117,6 +147,9 @@ class HarnessToolAdapter:
         payload = {
             "tool_name": schema.name,
             "tool_origin": "harness",
+            "capability_name": self._capability_name(schema),
+            "executor_kind": schema.metadata.get("executor_kind"),
+            "replay": schema.metadata.get("replay"),
             "platform": schema.platform,
             "driver_method": schema.driver_method,
             "fsq_action_name": schema.fsq_action_name,
@@ -143,6 +176,9 @@ class HarnessToolAdapter:
         metadata: dict[str, Any] = {
             "tool_origin": "harness",
             "tool_name": schema.name,
+            "capability_name": self._capability_name(schema),
+            "executor_kind": schema.metadata.get("executor_kind"),
+            "replay": schema.metadata.get("replay"),
             "platform": schema.platform,
             "driver_method": schema.driver_method,
             "fsq_action_name": schema.fsq_action_name,
@@ -176,11 +212,14 @@ class HarnessToolAdapter:
 
     def _format_failure(self, schema: HarnessFunctionSchema, error: Exception, duration_ms: int) -> str:
         error_message = str(error) or error.__class__.__name__
-        action_name = schema.fsq_action_name or schema.driver_method
+        action_name = self._capability_name(schema)
         return json.dumps(
             {
                 "tool_name": schema.name,
                 "tool_origin": "harness",
+            "capability_name": action_name,
+            "executor_kind": schema.metadata.get("executor_kind"),
+            "replay": schema.metadata.get("replay"),
                 "platform": schema.platform,
                 "driver_method": schema.driver_method,
                 "fsq_action_name": schema.fsq_action_name,
@@ -197,6 +236,9 @@ class HarnessToolAdapter:
                     "metadata": {
                         "tool_origin": "harness",
                         "tool_name": schema.name,
+                        "capability_name": action_name,
+                        "executor_kind": schema.metadata.get("executor_kind"),
+                        "replay": schema.metadata.get("replay"),
                         "platform": schema.platform,
                         "driver_method": schema.driver_method,
                         "fsq_action_name": schema.fsq_action_name,

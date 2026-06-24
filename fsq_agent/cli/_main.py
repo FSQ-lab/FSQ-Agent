@@ -8,6 +8,7 @@ import time
 import click
 
 from fsq_agent.agent import FsqAgent
+from fsq_agent.cli._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
 from fsq_agent.cli._core_execution import run_strict_fsq_core_case
 from fsq_agent.cli._formatting import log_result, log_run_event
 from fsq_agent.cli._logging import configure_cli_logging
@@ -266,13 +267,22 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
 
 def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id: str):
     run_dir = Path(settings.output.runs_dir) / run_id
-    steps = resolve_strict_replay_steps(FsqExecutableStepAdapter().to_executable_steps(case), settings)
+    registry = build_capability_registry()
+    executors = build_capability_executor_bindings()
+    registry_snapshot = registry.snapshot()
+    steps = resolve_strict_replay_steps(
+        FsqExecutableStepAdapter(registry_snapshot=registry_snapshot).to_executable_steps(case),
+        settings,
+        registry_snapshot=registry_snapshot,
+    )
     harness = _build_strict_android_harness(settings, _strict_case_app_id(settings, case), run_dir, _case_requires_ai_assertion(case))
     return run_strict_fsq_core_case(
         case_path=case_path,
         harness=harness,
         output_dir=run_dir,
         run_id=run_id,
+        registry=registry,
+        executors=executors,
         steps=steps,
         step_interval_seconds=settings.harness.strict_core.step_interval_seconds,
     )
@@ -374,7 +384,11 @@ def _build_strict_android_harness(settings: Settings, app_id: str, run_dir: Path
 
 
 def _case_requires_ai_assertion(case: FsqCase) -> bool:
-    return any(step.action_name == "assertWithAI" for step in FsqExecutableStepAdapter().to_executable_steps(case))
+    registry_snapshot = build_capability_registry().snapshot()
+    return any(
+        step.action_name == "assert_with_ai"
+        for step in FsqExecutableStepAdapter(registry_snapshot=registry_snapshot).to_executable_steps(case)
+    )
 
 
 def _strict_case_app_id(settings: Settings, case: FsqCase) -> str:

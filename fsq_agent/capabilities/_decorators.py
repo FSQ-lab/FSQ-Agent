@@ -1,0 +1,413 @@
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, TypeVar, get_type_hints
+
+from pydantic import BaseModel
+
+from fsq_agent.capabilities._catalog import CapabilityActionCatalog, CapabilityActionDefinition
+from fsq_agent.models import (
+    CapabilityExecutorKind,
+    ConfigurationError,
+    ExecutableStepKind,
+    HarnessPlatform,
+    ReplayPolicy,
+)
+
+
+F = TypeVar("F", bound=Callable[..., Any])
+CAPABILITY_DECLARATION_ATTR = "__fsq_capability_declaration__"
+_SAFE_METADATA_SCALARS = (str, int, float, bool, type(None))
+
+
+@dataclass(frozen=True)
+class CapabilityDeclaration:
+    name: str | None
+    aliases: tuple[str, ...]
+    executor_kind: CapabilityExecutorKind
+    owner: str | None = None
+    params_model: type[BaseModel] | None = None
+    description: str = ""
+    platform: HarnessPlatform | None = None
+    backend: str | None = None
+    step_kind: ExecutableStepKind = "action"
+    capture_evidence: bool = False
+    sensitivity: bool = False
+    replay: ReplayPolicy | None = None
+    strict: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+    action_name: str | None = None
+    required_method_name: str | None = None
+
+
+def capability(
+    *,
+    executor_kind: CapabilityExecutorKind,
+    name: str | None = None,
+    aliases: list[str] | None = None,
+    owner: str | None = None,
+    params_model: type[BaseModel] | None = None,
+    description: str = "",
+    platform: HarnessPlatform | None = None,
+    backend: str | None = None,
+    step_kind: ExecutableStepKind = "action",
+    capture_evidence: bool | None = None,
+    sensitivity: bool = False,
+    replay: ReplayPolicy | None = None,
+    strict: bool | None = None,
+    metadata: dict[str, Any] | None = None,
+    action_catalog: CapabilityActionCatalog | None = None,
+    action_name: str | None = None,
+) -> Callable[[F], F]:
+    declaration = _declaration_from_args(
+        name=name,
+        aliases=aliases,
+        executor_kind=executor_kind,
+        owner=owner,
+        params_model=params_model,
+        description=description,
+        platform=platform,
+        backend=backend,
+        step_kind=step_kind,
+        capture_evidence=capture_evidence,
+        sensitivity=sensitivity,
+        replay=replay,
+        strict=strict,
+        metadata=metadata,
+        action_catalog=action_catalog,
+        action_name=action_name,
+    )
+
+    def decorate(method: F) -> F:
+        _validate_method(declaration, method)
+        setattr(method, CAPABILITY_DECLARATION_ATTR, declaration)
+        return method
+
+    return decorate
+
+
+def common_capability(
+    *,
+    name: str,
+    description: str,
+    params_model: type[BaseModel],
+    aliases: list[str] | None = None,
+    step_kind: ExecutableStepKind = "action",
+    replay: ReplayPolicy | None = None,
+    sensitivity: bool = False,
+    strict: bool = True,
+    capture_evidence: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> Callable[[F], F]:
+    return capability(
+        name=name,
+        aliases=aliases,
+        executor_kind="common",
+        owner="tools",
+        params_model=params_model,
+        description=description,
+        step_kind=step_kind,
+        replay=replay,
+        sensitivity=sensitivity,
+        strict=strict,
+        capture_evidence=capture_evidence,
+        metadata=metadata,
+    )
+
+
+def driver_capability(
+    *,
+    name: str | None = None,
+    description: str,
+    params_model: type[BaseModel] | None = None,
+    aliases: list[str] | None = None,
+    platform: HarnessPlatform | None = None,
+    backend: str | None = None,
+    step_kind: ExecutableStepKind = "action",
+    replay: ReplayPolicy | None = None,
+    strict: bool = True,
+    capture_evidence: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> Callable[[F], F]:
+    return capability(
+        name=name,
+        aliases=aliases,
+        executor_kind="driver",
+        owner="driver",
+        params_model=params_model,
+        description=description,
+        platform=platform,
+        backend=backend,
+        step_kind=step_kind,
+        replay=replay,
+        strict=strict,
+        capture_evidence=capture_evidence,
+        metadata=metadata,
+    )
+
+
+def harness_capability(
+    *,
+    name: str,
+    description: str,
+    params_model: type[BaseModel],
+    aliases: list[str] | None = None,
+    platform: HarnessPlatform | None = None,
+    backend: str | None = None,
+    owner: str = "harness",
+    step_kind: ExecutableStepKind = "action",
+    replay: ReplayPolicy | None = None,
+    strict: bool = True,
+    capture_evidence: bool = False,
+    sensitivity: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> Callable[[F], F]:
+    return capability(
+        name=name,
+        aliases=aliases,
+        executor_kind="harness",
+        owner=owner,
+        params_model=params_model,
+        description=description,
+        platform=platform,
+        backend=backend,
+        step_kind=step_kind,
+        replay=replay,
+        strict=strict,
+        capture_evidence=capture_evidence,
+        sensitivity=sensitivity,
+        metadata=metadata,
+    )
+
+
+def platform_driver_capability(
+    *,
+    platform: HarnessPlatform,
+    catalog: CapabilityActionCatalog,
+    backend: str | None = None,
+) -> Callable[..., Callable[[F], F]]:
+    def declare(
+        action_name: str,
+        *,
+        description: str,
+        strict: bool | None = None,
+        capture_evidence: bool | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Callable[[F], F]:
+        action_definition = _action_definition(catalog, action_name)
+        return capability(
+            executor_kind="driver",
+            owner="driver",
+            description=description,
+            platform=platform,
+            backend=backend,
+            strict=action_definition.strict if strict is None else strict,
+            capture_evidence=action_definition.capture_evidence if capture_evidence is None else capture_evidence,
+            metadata=metadata,
+            action_catalog=catalog,
+            action_name=action_name,
+        )
+
+    return declare
+
+
+def get_capability_declaration(candidate: object) -> CapabilityDeclaration | None:
+    declaration = getattr(candidate, CAPABILITY_DECLARATION_ATTR, None)
+    if isinstance(declaration, CapabilityDeclaration):
+        return declaration
+    underlying = getattr(candidate, "__func__", None)
+    declaration = getattr(underlying, CAPABILITY_DECLARATION_ATTR, None)
+    if isinstance(declaration, CapabilityDeclaration):
+        return declaration
+    return None
+
+
+def _declaration_from_args(
+    *,
+    name: str | None,
+    aliases: list[str] | None,
+    executor_kind: CapabilityExecutorKind,
+    owner: str | None,
+    params_model: type[BaseModel] | None,
+    description: str,
+    platform: HarnessPlatform | None,
+    backend: str | None,
+    step_kind: ExecutableStepKind,
+    capture_evidence: bool | None,
+    sensitivity: bool,
+    replay: ReplayPolicy | None,
+    strict: bool | None,
+    metadata: dict[str, Any] | None,
+    action_catalog: CapabilityActionCatalog | None,
+    action_name: str | None,
+) -> CapabilityDeclaration:
+    _validate_basic_combination(executor_kind, action_catalog, action_name)
+    resolved_strict = True if strict is None else strict
+    resolved_capture_evidence = False if capture_evidence is None else capture_evidence
+    safe_metadata = dict(metadata or {})
+    _validate_safe_metadata(safe_metadata)
+    resolved_aliases = list(aliases or [])
+    required_method_name: str | None = None
+
+    if action_catalog is not None:
+        action_definition = _action_definition(action_catalog, action_name)
+        _validate_action_definition(action_definition, executor_kind, owner, params_model, step_kind, replay)
+        name = name or action_definition.canonical_name
+        owner = owner or action_definition.owner
+        params_model = params_model or action_definition.params_model
+        if step_kind == "action":
+            step_kind = action_definition.step_kind
+        replay = replay or action_definition.replay
+        resolved_strict = action_definition.strict if strict is None else strict
+        resolved_capture_evidence = action_definition.capture_evidence if capture_evidence is None else capture_evidence
+        required_method_name = action_definition.method_name
+        safe_metadata = {**action_definition.metadata, **safe_metadata}
+        _validate_safe_metadata(safe_metadata)
+        if action_definition.action_name != name and action_definition.action_name not in resolved_aliases:
+            resolved_aliases.append(action_definition.action_name)
+
+    return CapabilityDeclaration(
+        name=name,
+        aliases=tuple(_unique_aliases(name, resolved_aliases)),
+        executor_kind=executor_kind,
+        owner=owner,
+        params_model=params_model,
+        description=description,
+        platform=platform,
+        backend=backend,
+        step_kind=step_kind,
+        capture_evidence=resolved_capture_evidence,
+        sensitivity=sensitivity,
+        replay=replay,
+        strict=resolved_strict,
+        metadata=safe_metadata,
+        action_name=action_name,
+        required_method_name=required_method_name,
+    )
+
+
+def _validate_basic_combination(
+    executor_kind: CapabilityExecutorKind,
+    action_catalog: CapabilityActionCatalog | None,
+    action_name: str | None,
+) -> None:
+    if executor_kind not in {"common", "harness", "driver"}:
+        raise ConfigurationError("Invalid capability executor kind.", context={"executor_kind": executor_kind})
+    if executor_kind == "common" and action_catalog is not None:
+        raise ConfigurationError("Common capabilities must not use a platform action catalog.")
+    if action_catalog is None and action_name is not None:
+        raise ConfigurationError("Capability action_name requires an action_catalog.", context={"action_name": action_name})
+    if action_catalog is not None and action_name is None:
+        raise ConfigurationError("Capability action_catalog requires an action_name.")
+
+
+def _action_definition(catalog: CapabilityActionCatalog, action_name: str | None) -> CapabilityActionDefinition:
+    if action_name is None:
+        raise ConfigurationError("Capability action_catalog requires an action_name.")
+    action_definition = catalog.get(action_name)
+    if action_definition is None:
+        raise ConfigurationError("Unknown platform capability action.", context={"action_name": action_name})
+    return action_definition
+
+
+def _validate_action_definition(
+    action_definition: CapabilityActionDefinition,
+    executor_kind: CapabilityExecutorKind,
+    owner: str | None,
+    params_model: type[BaseModel] | None,
+    step_kind: ExecutableStepKind,
+    replay: ReplayPolicy | None,
+) -> None:
+    if action_definition.executor_kind != executor_kind:
+        raise ConfigurationError(
+            "Platform action executor kind does not match the decorator.",
+            context={
+                "action_name": action_definition.action_name,
+                "expected": action_definition.executor_kind,
+                "actual": executor_kind,
+            },
+        )
+    if owner is not None and owner != action_definition.owner:
+        raise ConfigurationError(
+            "Platform action owner does not match the decorator.",
+            context={"action_name": action_definition.action_name, "expected": action_definition.owner, "actual": owner},
+        )
+    if params_model is not None and params_model is not action_definition.params_model:
+        raise ConfigurationError(
+            "Platform action parameter model does not match the catalog.",
+            context={
+                "action_name": action_definition.action_name,
+                "expected_model": action_definition.params_model.__name__,
+                "actual_model": getattr(params_model, "__name__", str(params_model)),
+            },
+        )
+    if step_kind != "action" and step_kind != action_definition.step_kind:
+        raise ConfigurationError(
+            "Platform action step kind does not match the catalog.",
+            context={"action_name": action_definition.action_name, "expected": action_definition.step_kind, "actual": step_kind},
+        )
+    if replay is not None and action_definition.replay is not None and replay != action_definition.replay:
+        raise ConfigurationError("Platform action replay policy does not match the catalog.", context={"action_name": action_definition.action_name})
+
+
+def _validate_method(declaration: CapabilityDeclaration, method: Callable[..., Any]) -> None:
+    method_name = getattr(method, "__name__", "")
+    if declaration.required_method_name is not None and method_name != declaration.required_method_name:
+        raise ConfigurationError(
+            "Capability method does not match the action catalog.",
+            context={
+                "action_name": declaration.action_name,
+                "expected_method": declaration.required_method_name,
+                "actual_method": method_name,
+            },
+        )
+    needs_params_check = declaration.required_method_name is not None or "params" in getattr(method, "__annotations__", {})
+    if not needs_params_check:
+        return
+    try:
+        hints = get_type_hints(method)
+    except Exception as exc:
+        raise ConfigurationError(
+            "Capability parameter model could not be resolved.",
+            context={"method": method_name, "reason": str(exc)},
+        ) from exc
+    annotated_model = hints.get("params")
+    if annotated_model is None and declaration.required_method_name is None:
+        return
+    if annotated_model is not declaration.params_model:
+        raise ConfigurationError(
+            "Capability parameter model does not match the action catalog.",
+            context={
+                "action_name": declaration.action_name,
+                "method": method_name,
+                "expected_model": getattr(declaration.params_model, "__name__", str(declaration.params_model)),
+                "actual_model": getattr(annotated_model, "__name__", str(annotated_model)),
+            },
+        )
+
+
+def _unique_aliases(name: str | None, aliases: list[str]) -> list[str]:
+    unique: list[str] = []
+    for alias in aliases:
+        if alias == name or alias in unique:
+            continue
+        unique.append(alias)
+    return unique
+
+
+def _validate_safe_metadata(value: Any, *, path: str = "metadata") -> None:
+    if isinstance(value, _SAFE_METADATA_SCALARS):
+        return
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _validate_safe_metadata(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ConfigurationError("Capability metadata keys must be strings.", context={"path": path, "key": repr(key)})
+            _validate_safe_metadata(item, path=f"{path}.{key}")
+        return
+    raise ConfigurationError(
+        "Capability metadata must contain only serializable scalar, list, and dict values.",
+        context={"path": path, "type": type(value).__name__},
+    )
