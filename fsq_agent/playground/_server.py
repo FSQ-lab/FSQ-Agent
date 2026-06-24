@@ -17,7 +17,7 @@ import webbrowser
 from fsq_agent.config import Settings
 from fsq_agent.fsq import FsqCaseLoader
 from fsq_agent.playground._android import build_android_setup_schema, capture_android_screenshot, resolve_auto_session
-from fsq_agent.playground._execution import start_dynamic_goal_execution
+from fsq_agent.playground._execution import PlaygroundExecutionHandle, start_dynamic_goal_execution
 from fsq_agent.playground._state import BusyError, PlaygroundState
 from fsq_agent.report import resolve_report_path
 
@@ -39,6 +39,7 @@ class PlaygroundServer:
         self.state = PlaygroundState()
         self._httpd: _PlaygroundHTTPServer | None = None
         self._thread: Thread | None = None
+        self._execution_handles: dict[str, PlaygroundExecutionHandle] = {}
         self._static_root = (self.options.static_path or Path(__file__).parent / "static").resolve()
 
     @property
@@ -194,7 +195,7 @@ class PlaygroundServer:
                 return 409, {"error": str(exc)}
             if has_strict_case_yaml:
                 self._reset_replay_for_known_run(request_id, self._strict_case_run_id(strict_case_yaml_path.strip()))
-            start_dynamic_goal_execution(
+            handle = start_dynamic_goal_execution(
                 settings=self.settings,
                 state=self.state,
                 request_id=request_id,
@@ -205,10 +206,20 @@ class PlaygroundServer:
                 record=self.options.record,
                 record_on_failure=self.options.record_on_failure,
             )
+            self._execution_handles[request_id] = handle
             return 202, {"requestId": request_id}
         if path.startswith("/replay-video/"):
             replay_id = unquote(path.removeprefix("/replay-video/")).strip()
             return self._store_replay_video(replay_id, body)
+        if path.startswith("/cancel/"):
+            request_id = unquote(path.removeprefix("/cancel/")).strip()
+            cancelled = self.state.request_cancel(request_id)
+            if cancelled is None:
+                return 404, {"error": "Task progress not found."}
+            handle = self._execution_handles.pop(request_id, None)
+            if handle is not None:
+                handle.cancel()
+            return 200, cancelled
         return 404, {"error": "Not found."}
 
     def handle_delete(self, path: str) -> tuple[int, object]:
@@ -292,13 +303,15 @@ class PlaygroundServer:
             return self._evidence_replay_response(replay_id, run_id)
         manifest = self._read_replay_manifest(manifest_path, replay_id, run_id)
         frames = []
-        for frame in manifest["frames"]:
+        for index, frame in enumerate(manifest["frames"], start=1):
             frame_path = (manifest_path.parent / str(frame.get("path") or "")).resolve()
             if not _is_relative_to(frame_path, manifest_path.parent) or not frame_path.is_file():
                 continue
             frames.append(
                 {
+                    "index": index,
                     "timestamp": frame.get("timestamp"),
+                    "path": str(frame.get("path") or ""),
                     "screenshot": base64.b64encode(frame_path.read_bytes()).decode("ascii"),
                 }
             )
@@ -318,9 +331,14 @@ class PlaygroundServer:
         if not frames:
             frames.extend(self._event_replay_frames(run_dir))
         frames.sort(key=lambda frame: frame.get("timestamp") or 0)
+        self._assign_frame_indexes(frames)
         if not frames:
             return 404, {"error": "Replay frames not found."}
         return 200, {"requestId": replay_id, "runId": run_id, "frames": frames}
+
+    def _assign_frame_indexes(self, frames: list[dict[str, object]]) -> None:
+        for index, frame in enumerate(frames, start=1):
+            frame["index"] = index
 
     def _frames_from_artifact_refs(
         self,
@@ -346,6 +364,7 @@ class PlaygroundServer:
             frames.append(
                 {
                     "timestamp": timestamps.get(relative_path) or self._artifact_timestamp(artifact),
+                    "path": relative_path,
                     "screenshot": base64.b64encode(frame_path.read_bytes()).decode("ascii"),
                 }
             )

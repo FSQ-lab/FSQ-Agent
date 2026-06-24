@@ -9,7 +9,7 @@ from uuid import uuid4
 from fsq_agent.models import RunEvent, TaskResult
 
 
-TaskProgressStatus = Literal["running", "success", "failed", "inconclusive", "error"]
+TaskProgressStatus = Literal["running", "success", "failed", "inconclusive", "error", "cancelled"]
 
 
 def _utc_now() -> str:
@@ -44,6 +44,7 @@ class TaskProgress:
 	preview: dict[str, object] | None = None
 	replay: dict[str, object] | None = None
 	replay_reset: bool = False
+	cancel_requested: bool = False
 	result: dict[str, object] | None = None
 	error: str | None = None
 
@@ -58,6 +59,7 @@ class TaskProgress:
 			"events": self.events,
 			"preview": self.preview,
 			"replay": self.replay,
+			"cancelRequested": self.cancel_requested,
 			"result": self.result,
 			"error": self.error,
 		}
@@ -153,9 +155,31 @@ class PlaygroundState:
 			task.replay_reset = True
 			return True
 
+	def request_cancel(self, request_id: str) -> dict[str, object] | None:
+		with self._lock:
+			task = self.tasks.get(request_id)
+			if task is None:
+				return None
+			if task.status != "running":
+				return task.to_json()
+			task.cancel_requested = True
+			task.status = "cancelled"
+			task.completed_at = _utc_now()
+			task.error = "Cancelled by user."
+			if self.current_request_id == request_id:
+				self.current_request_id = None
+			return task.to_json()
+
+	def is_cancel_requested(self, request_id: str) -> bool:
+		with self._lock:
+			task = self.tasks.get(request_id)
+			return bool(task and task.cancel_requested)
+
 	def finish_task(self, request_id: str, result: TaskResult, recording: dict[str, object] | None = None) -> None:
 		with self._lock:
 			task = self.tasks[request_id]
+			if task.cancel_requested:
+				return
 			task.run_id = result.report.run_id
 			task.status = result.status
 			task.completed_at = _utc_now()
@@ -177,6 +201,8 @@ class PlaygroundState:
 		with self._lock:
 			task = self.tasks.get(request_id)
 			if task is not None:
+				if task.cancel_requested:
+					return
 				task.status = "error"
 				task.completed_at = _utc_now()
 				task.error = str(error) or error.__class__.__name__ if isinstance(error, BaseException) else str(error)

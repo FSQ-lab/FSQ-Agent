@@ -36,6 +36,22 @@ button.primary {
   border-color: #0f6cbd;
 }
 
+button.cancel {
+  background: #ffffff;
+  color: #374151;
+  border-color: #94a3b8;
+}
+
+button.cancel:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #1f2937;
+  border-color: #64748b;
+}
+
+#run-selected {
+  min-width: 80px;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;

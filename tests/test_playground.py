@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import json
 from pathlib import Path
 from urllib.request import urlopen
@@ -6,7 +7,7 @@ from urllib.request import urlopen
 from fsq_agent.config import Settings
 from fsq_agent.models import ReportArtifact, RunEvent, TaskResult, VerificationResult
 from fsq_agent.playground._android import AndroidTarget, parse_adb_devices, resolve_auto_session
-from fsq_agent.playground._execution import _run_dynamic_task, task_from_case_yaml, task_from_goal
+from fsq_agent.playground._execution import _event_sink, _run_dynamic_task, task_from_case_yaml, task_from_goal
 from fsq_agent.playground._server import PlaygroundServer, PlaygroundServerOptions
 from fsq_agent.playground._state import BusyError, PlaygroundState
 
@@ -243,6 +244,57 @@ def test_playground_state_assigns_sequence_for_unsequenced_events() -> None:
     assert [event["sequence"] for event in incremental_progress["events"]] == [2]
 
 
+def test_playground_state_cancel_request_marks_task_cancelled() -> None:
+    state = PlaygroundState()
+    request_id = state.start_task("Cancelable")
+
+    payload = state.request_cancel(request_id)
+
+    assert payload is not None
+    assert payload["status"] == "cancelled"
+    assert payload["cancelRequested"] is True
+    assert state.is_cancel_requested(request_id) is True
+    assert state.current_request_id is None
+
+
+def test_playground_server_cancel_endpoint_cancels_current_task(tmp_path: Path) -> None:
+    server = PlaygroundServer(Settings(), PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Cancelable")
+
+    class FakeHandle:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    handle = FakeHandle()
+    server._execution_handles[request_id] = handle  # type: ignore[assignment]
+
+    status, payload = server.handle_post(f"/cancel/{request_id}", {})
+
+    assert status == 200
+    assert payload["status"] == "cancelled"
+    assert payload["cancelRequested"] is True
+    assert handle.cancelled is True
+    assert server.state.current_request_id is None
+
+
+def test_playground_event_sink_ignores_events_after_cancel() -> None:
+    state = PlaygroundState()
+    request_id = state.start_task("Cancelable")
+    sink = _event_sink(state, request_id)
+
+    sink(RunEvent(run_id="run-1", task_id="task", type="run_started", title="Started"))
+    state.request_cancel(request_id)
+    sink(RunEvent(run_id="run-1", task_id="task", type="planning_update", title="Late event"))
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["status"] == "cancelled"
+    assert [event["title"] for event in progress["events"]] == ["Started"]
+
+
 def test_playground_server_persists_replay_frames(tmp_path: Path) -> None:
     settings = Settings()
     settings.output.runs_dir = tmp_path / "runs"
@@ -264,6 +316,8 @@ def test_playground_server_persists_replay_frames(tmp_path: Path) -> None:
 
     assert status == 200
     assert [frame["timestamp"] for frame in payload["frames"]] == [1000, 1800]
+    assert [frame["index"] for frame in payload["frames"]] == [1, 2]
+    assert [frame["path"] for frame in payload["frames"]] == ["frame-0001-1000.png", "frame-0002-1800.png"]
     assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"frame-1"
     assert (settings.output.runs_dir / "run-1" / "playground-replay" / "replay-manifest.json").exists()
     assert progress is not None
@@ -304,6 +358,8 @@ def test_playground_server_replay_uses_evidence_screenshots(tmp_path: Path) -> N
     assert status == 200
     assert payload["runId"] == "run-1"
     assert isinstance(payload["frames"][0]["timestamp"], int)
+    assert payload["frames"][0]["index"] == 1
+    assert payload["frames"][0]["path"] == "artifacts/screenshots/step-1.png"
     assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"evidence-frame"
 
 
@@ -336,7 +392,36 @@ def test_playground_server_replay_falls_back_to_event_screenshots(tmp_path: Path
     assert status == 200
     assert payload["runId"] == "run-1"
     assert isinstance(payload["frames"][0]["timestamp"], int)
+    assert payload["frames"][0]["index"] == 1
+    assert payload["frames"][0]["path"] == "artifacts/screenshots/step-1.png"
     assert base64.b64decode(payload["frames"][0]["screenshot"]) == b"event-frame"
+
+
+def test_playground_static_progress_summarizes_replay_frames() -> None:
+    static_dir = Path(__file__).parents[1] / "fsq_agent" / "playground" / "static"
+    script = (static_dir / "playground.js").read_text(encoding="utf-8")
+    styles = (static_dir / "playground.css").read_text(encoding="utf-8")
+
+    assert "appendReplayFramesProgress" in script
+    assert "replayFrameSummaries" in script
+    assert "renderReplayFrameGallery" not in script
+    assert "progress-frame-gallery" not in styles
+    assert "src: `data:image/png;base64,${frame.screenshot}`" in script
+    assert "path: frame.path || ''" in script
+
+
+def test_playground_static_run_button_can_cancel() -> None:
+    static_dir = Path(__file__).parents[1] / "fsq_agent" / "playground" / "static"
+    script = (static_dir / "playground.js").read_text(encoding="utf-8")
+    styles = (static_dir / "playground.css").read_text(encoding="utf-8")
+
+    assert "cancelExecution" in script
+    assert "setRunButtonCancel" in script
+    assert "setRunButtonIdle" in script
+    assert "Cancel" in script
+    assert "button.cancel" in styles
+    assert "#run-selected" in styles
+    assert "min-width: 80px" in styles
 
 
 def test_playground_server_preview_endpoint_returns_latest_screenshot(tmp_path: Path) -> None:
@@ -546,6 +631,47 @@ def test_playground_dynamic_goal_records_with_failure_drafts(tmp_path: Path, mon
     assert progress["result"]["recording"]["draft"] is True
 
 
+def test_playground_dynamic_goal_does_not_overwrite_cancelled_task(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings()
+    settings.output.runs_dir = tmp_path / "runs"
+    state = PlaygroundState()
+    request_id = state.start_task("Do it")
+
+    class FakeAgent:
+        async def run(self, task, event_sink=None):
+            state.request_cancel(request_id)
+            if event_sink is not None:
+                event_sink(RunEvent(run_id="run-1", task_id=task.id, type="planning_update", title="Late event"))
+            return TaskResult(
+                task_id=task.id,
+                status="success",
+                steps=[],
+                verification=VerificationResult(status="success", summary="done"),
+                report=ReportArtifact(run_id="run-1", path=tmp_path / "report.md"),
+            )
+
+    monkeypatch.setattr("fsq_agent.playground._execution.validate_runtime_settings", lambda _settings: None)
+    monkeypatch.setattr("fsq_agent.playground._execution.FsqAgent.from_settings", lambda _settings: FakeAgent())
+
+    _run_dynamic_task(
+        settings=settings,
+        state=state,
+        request_id=request_id,
+        goal="Do it",
+        case_yaml_path=None,
+        strict_case_yaml_path=None,
+        device_id=None,
+        record=True,
+        record_on_failure=True,
+    )
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["status"] == "cancelled"
+    assert progress["result"] is None
+    assert progress["events"] == []
+
+
 def test_playground_execute_clears_strict_replay_dir_at_start(tmp_path: Path, monkeypatch) -> None:
     settings = Settings()
     settings.cases.dir = tmp_path / "cases"
@@ -559,6 +685,9 @@ name: Strict Case
 platform: android
 ---
 - launchApp
+- waitMs:
+    duration_ms: 1
+    reason: settle
 """,
         encoding="utf-8",
     )
@@ -590,6 +719,9 @@ platform: android
 appId: com.microsoft.emmx
 ---
 - launchApp
+- waitMs:
+    duration_ms: 1
+    reason: settle
 """,
         encoding="utf-8",
     )
@@ -634,6 +766,48 @@ appId: com.microsoft.emmx
     assert captured["driver"] == {"app_id": "com.microsoft.emmx", "serial": "device-1"}
     assert captured["steps"][0].action_name == "launch_app"
     assert captured["steps"][0].metadata["authored_action_name"] == "launchApp"
+
+
+def test_playground_strict_yaml_runs_outside_async_event_loop(monkeypatch) -> None:
+    settings = Settings()
+    state = PlaygroundState()
+    request_id = state.start_task("Strict")
+    captured = {}
+
+    def fake_run_strict_case_yaml(_settings, _state, _request_id, path_text):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            captured["running_loop"] = False
+        else:
+            captured["running_loop"] = True
+        captured["path_text"] = path_text
+        return TaskResult(
+            task_id="strict",
+            status="success",
+            steps=[],
+            verification=VerificationResult(status="success", summary="ok"),
+            report=ReportArtifact(run_id="run-1", path=Path("core-report.md")),
+        )
+
+    monkeypatch.setattr("fsq_agent.playground._execution._run_strict_case_yaml", fake_run_strict_case_yaml)
+
+    _run_dynamic_task(
+        settings=settings,
+        state=state,
+        request_id=request_id,
+        goal=None,
+        case_yaml_path=None,
+        strict_case_yaml_path="strict_case.codex.yaml",
+        device_id=None,
+        record=True,
+        record_on_failure=True,
+    )
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["status"] == "success"
+    assert captured == {"running_loop": False, "path_text": "strict_case.codex.yaml"}
 
 
 def test_playground_auto_session_route_creates_single_device_session(monkeypatch) -> None:
@@ -712,6 +886,8 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "progress-run-id" in html
     assert "progressSequence" in script
     assert "lastProgressSequence" in script
+    assert "const PROGRESS_POLL_INTERVAL_MS = 500;" in script
+    assert "window.setInterval(refreshProgress, PROGRESS_POLL_INTERVAL_MS)" in script
     assert "after_sequence=${state.lastProgressSequence}" in script
     assert "function updateLastProgressSequence" in script
     assert "setServerStatus" in script
@@ -820,7 +996,10 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "MediaRecorder.isTypeSupported" in script
     assert "uploadReplayVideo" in script
     assert "blobToBase64" in script
-    assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" in script
+    assert "await normalizeReplayVideoDuration()" in script
+    assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" not in script
+    assert "els.replayVideo.addEventListener('durationchange', finishDurationFix" in script
+    assert "els.replayVideo.addEventListener('seeked', finishDurationFix" in script
     assert "els.replayVideo.currentTime = 1e101" in script
     assert "await showReplayVideoPreview(replayVideo.videoUrl)" in script
     assert "showRightTab('preview')" in script
@@ -829,6 +1008,9 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "recorder.start(1000)" in script
     assert "replayVideo.videoUrl" in script
     assert "replayFrameDelay" in script
+    assert "[replay-video] draw screenshot" in script
+    assert "replayFrameDisplayDuration" in script
+    assert "durationMs" in script
     assert "api(`/replay/${encodeURIComponent(requestId)}`)" in script
     assert "next.timestamp - current.timestamp" in script
     assert "window.setTimeout" in script
