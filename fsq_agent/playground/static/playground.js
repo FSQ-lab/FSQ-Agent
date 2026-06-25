@@ -294,7 +294,7 @@ async function refreshProgress() {
       window.clearInterval(state.progressTimer);
       state.progressTimer = null;
       state.currentRequestId = null;
-      setRunButtonIdle();
+      setRunButtonIdle({ disabled: true });
       appendProgress(`Finished: ${progress.status}`, null, [], statusFromValue(progress.status));
       if (progress.error) appendProgress(`Error: ${progress.error}`, null, [], 'failed');
       if (progress.result?.runId) {
@@ -316,6 +316,7 @@ async function refreshProgress() {
           appendProgress(`Replay video was not generated: ${replayVideo?.error || 'unknown error'}`, null, [], 'failed');
         }
       }
+      setRunButtonIdle();
       await refreshStatus();
       await refreshRuntime();
     }
