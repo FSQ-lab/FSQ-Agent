@@ -9,12 +9,24 @@ Use when `harness.platform` is Android. Follow the active harness tool schema; d
 | Launch app | `launch_app` | Use at the start of each Android case to foreground the configured target app before business actions. |
 | Kill app | `kill_app` | Use at the end of each Android case after final evidence is collected to clean up app state. |
 | Find visible UI | `assert_visible`, `assert_not_visible`, `ui_tree`, or evidence | Prefer resource id or accessibility id, then xpath. |
+| Verify required state | `assert_visible`, `assert_not_visible`, `assert_state`, or `assert_with_ai` | Use an assertion tool for verify/assert/confirm/check requirements. `ui_tree` is observation only and does not satisfy verification by itself. |
 | Tap element | `tap_on` | Re-evaluate stale or missing targets before retrying. |
 | Enter text | `input_text` | Verify the target field before setting text. |
 | Press key | `press_key` | Use the semantic key requested by the FSQ step. |
 | Wait / pause | `wait_ms` | Use for FSQ pauses and page-load waits; gestures are not waits. |
 | Screenshot evidence | harness artifact refs or CommonTool artifact utilities | Capture concise assertion evidence. |
 | AI visual assertion | `assert_with_ai` | Wait/observe first, then use the returned verdict. |
+
+## Verification and Assertion Rules
+
+- Treat any required step phrased as verify, assert, confirm, check, ensure, or validate as an assertion requirement.
+- Satisfy assertion requirements with assertion-kind tools: `assert_visible`, `assert_not_visible`, `assert_state`, or `assert_with_ai`.
+- Use `assert_state` for deterministic element state or text checks, such as verifying that `com.microsoft.emmx:id/url_bar` contains or equals a required URL or keyword.
+- Use `assert_visible` or `assert_not_visible` for required presence or absence of visible UI elements.
+- Use `assert_with_ai` only for visual/page-content assertions that cannot be expressed deterministically with element state or text.
+- Use `ui_tree` to inspect, locate, or collect evidence before an assertion, but do not count `ui_tree` output plus agent narrative as satisfying a required assertion.
+- If a required assertion fails, report the assertion as unmet. Do not recover by performing unrelated navigation, retyping, or alternate actions unless the task explicitly permits recovery before that assertion.
+- Before teardown, collect the final required verification with an assertion tool when an assertion-capable locator or text condition is available.
 
 ## Argument Rules
 
