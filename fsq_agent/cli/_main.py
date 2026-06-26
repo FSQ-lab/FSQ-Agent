@@ -16,7 +16,7 @@ from fsq_agent.cli._strict_case_recording import StrictCaseRecording, record_dyn
 from fsq_agent.cli._strict_replay import resolve_strict_replay_steps
 from fsq_agent.cli._task_loader import discover_case_yaml_paths, read_raw_text_file, resolve_case_yaml_path
 from fsq_agent.config import Settings, load_settings, validate_runtime_settings, validate_strict_core_settings
-from fsq_agent.core import AndroidHarness, ArtifactStore, UiAutomator2AndroidDriver
+from fsq_agent.core import AndroidHarness, ArtifactStore, PlaywrightWebDriver, UiAutomator2AndroidDriver, WebHarness
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import ConfigurationError, FsqAgentError, FsqCase, Task
 from fsq_agent.playground import PlaygroundServerOptions, run_playground
@@ -245,7 +245,8 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
     if case_yaml_path is not None:
         case_path = resolve_case_yaml_path(case_yaml_path, settings.cases.dir)
         case = loader.load_case(case_path)
-        validate_strict_core_settings(settings, requires_ai_assertion=_case_requires_ai_assertion(case))
+        _validate_strict_case_platform(settings, case)
+        validate_strict_core_settings(settings, requires_ai_assertion=_case_requires_ai_assertion(settings, case))
         _validate_strict_case_app_id(settings, case)
         artifact = _run_strict_case(settings, case_path, case, case.id)
         logger.info("Core report: %s", artifact.path)
@@ -257,7 +258,9 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
         raise ConfigurationError("--case-dir is required for strict directory runs.")
     case_paths = discover_case_yaml_paths(case_dir_path, settings.cases.dir)
     cases = [(case_path, loader.load_case(case_path)) for case_path in case_paths]
-    validate_strict_core_settings(settings, requires_ai_assertion=any(_case_requires_ai_assertion(case) for _, case in cases))
+    for _, case in cases:
+        _validate_strict_case_platform(settings, case)
+    validate_strict_core_settings(settings, requires_ai_assertion=any(_case_requires_ai_assertion(settings, case) for _, case in cases))
     for _, case in cases:
         _validate_strict_case_app_id(settings, case)
     summary = _run_strict_case_batch(settings, cases)
@@ -267,7 +270,7 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
 
 def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id: str):
     run_dir = Path(settings.output.runs_dir) / run_id
-    registry = build_capability_registry()
+    registry = build_capability_registry(platform=settings.harness.platform)
     executors = build_capability_executor_bindings()
     registry_snapshot = registry.snapshot()
     steps = resolve_strict_replay_steps(
@@ -275,7 +278,7 @@ def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id:
         settings,
         registry_snapshot=registry_snapshot,
     )
-    harness = _build_strict_android_harness(settings, _strict_case_app_id(settings, case), run_dir, _case_requires_ai_assertion(case))
+    harness = _build_strict_harness(settings, case, run_dir, _case_requires_ai_assertion(settings, case, registry_snapshot))
     return run_strict_fsq_core_case(
         case_path=case_path,
         harness=harness,
@@ -377,14 +380,36 @@ def _run_strict_case_batch(settings: Settings, cases: list[tuple[Path, FsqCase]]
     return summary
 
 
+def _build_strict_harness(settings: Settings, case: FsqCase, run_dir: Path, requires_ai_assertion: bool = False):
+    if settings.harness.platform == "android":
+        return _build_strict_android_harness(settings, _strict_case_app_id(settings, case), run_dir, requires_ai_assertion)
+    if settings.harness.platform == "web":
+        return _build_strict_web_harness(settings, run_dir, requires_ai_assertion)
+    raise ConfigurationError("Unsupported harness platform.", context={"platform": settings.harness.platform, "supported": ["android", "web"]})
+
+
 def _build_strict_android_harness(settings: Settings, app_id: str, run_dir: Path, requires_ai_assertion: bool = False) -> AndroidHarness:
     driver = UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial)
     evaluator = build_ai_assertion_evaluator(settings) if requires_ai_assertion else None
     return AndroidHarness(driver=driver, artifact_store=ArtifactStore(run_dir=run_dir), ai_assertion_evaluator=evaluator)
 
 
-def _case_requires_ai_assertion(case: FsqCase) -> bool:
-    registry_snapshot = build_capability_registry().snapshot()
+def _build_strict_web_harness(settings: Settings, run_dir: Path, requires_ai_assertion: bool = False) -> WebHarness:
+    web = settings.harness.web
+    viewport = (web.viewport_width, web.viewport_height) if web.viewport_width is not None and web.viewport_height is not None else None
+    driver = PlaywrightWebDriver(
+        channel=web.channel,
+        executable_path=web.browser_executable_path,
+        headless=web.headless,
+        base_url=web.base_url,
+        viewport=viewport,
+    )
+    evaluator = build_ai_assertion_evaluator(settings) if requires_ai_assertion else None
+    return WebHarness(driver=driver, artifact_store=ArtifactStore(run_dir=run_dir), ai_assertion_evaluator=evaluator)
+
+
+def _case_requires_ai_assertion(settings: Settings, case: FsqCase, registry_snapshot=None) -> bool:
+    registry_snapshot = registry_snapshot or build_capability_registry(platform=settings.harness.platform).snapshot()
     return any(
         step.action_name == "assert_with_ai"
         for step in FsqExecutableStepAdapter(registry_snapshot=registry_snapshot).to_executable_steps(case)
@@ -396,11 +421,22 @@ def _strict_case_app_id(settings: Settings, case: FsqCase) -> str:
 
 
 def _validate_strict_case_app_id(settings: Settings, case: FsqCase) -> None:
+    if settings.harness.platform != "android":
+        return
     if not _strict_case_app_id(settings, case):
         raise ConfigurationError(
             "Android app id is required for strict-core runs.",
             context={"case_path": str(case.path), "config_key": "harness.android.app_id", "case_key": "appId"},
         )
+
+
+def _validate_strict_case_platform(settings: Settings, case: FsqCase) -> None:
+    if case.config.platform == settings.harness.platform:
+        return
+    raise ConfigurationError(
+        "Strict case platform must match the configured harness platform.",
+        context={"case_path": str(case.path), "case_platform": case.config.platform, "harness_platform": settings.harness.platform},
+    )
 
 
 def _task_from_goal(goal: str) -> Task:

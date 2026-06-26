@@ -10,7 +10,9 @@ from fsq_agent.capabilities import (
     discover_capability_definitions,
     platform_driver_capability,
 )
+from fsq_agent._capability_bootstrap import build_capability_registry
 from fsq_agent.core.harness._driver_tools import _discover_driver_capability_definitions
+from fsq_agent.core.harness._playwright_driver import PlaywrightWebDriver
 from fsq_agent.core.harness._uiautomator2_driver import UiAutomator2AndroidDriver
 from fsq_agent.models import ConfigurationError, ReplayPolicy
 from fsq_agent.tools import DefaultCommonToolProvider
@@ -193,6 +195,52 @@ def test_android_driver_declarations_keep_catalog_backed_metadata() -> None:
     assert definitions["ui_tree"].capture_evidence is False
     assert definitions["ui_tree"].step_kind == "observation"
     assert "perform_actions" not in definitions
+
+
+def test_playwright_web_driver_declarations_keep_catalog_backed_metadata() -> None:
+    definitions = {
+        definition.name: definition
+        for definition in _discover_driver_capability_definitions(
+            PlaywrightWebDriver,
+            platform="web",
+            metadata={"driver_class": "PlaywrightWebDriver", "backend": "playwright"},
+        )
+    }
+
+    click = definitions["click_on"]
+    assert click.aliases == ["clickOn"]
+    assert click.executor_kind == "driver"
+    assert click.owner == "driver"
+    assert click.platform == "web"
+    assert click.backend == "playwright"
+    assert click.capture_evidence is True
+    assert click.metadata["driver_method"] == "click_on"
+    assert click.metadata["fsq_action_name"] == "clickOn"
+    assert click.replay == ReplayPolicy(kind="fsq_command", alias="clickOn")
+    assert definitions["page_snapshot"].aliases == ["pageSnapshot"]
+    assert definitions["page_snapshot"].step_kind == "observation"
+    assert definitions["page_snapshot"].capture_evidence is False
+    assert definitions["assert_visible"].step_kind == "assertion"
+    assert "assert_with_ai" not in definitions
+
+
+def test_web_registry_uses_web_only_platform_capabilities_without_playwright_import() -> None:
+    snapshot = build_capability_registry(platform="web").snapshot()
+    definitions = {definition.name: definition for definition in snapshot.capabilities}
+
+    assert "click_on" in definitions
+    assert "page_snapshot" in definitions
+    assert "tap_on" not in definitions
+    assert definitions["click_on"].aliases == ["clickOn"]
+    assert definitions["click_on"].executor_kind == "driver"
+    assert definitions["click_on"].platform == "web"
+    assert definitions["click_on"].backend == "playwright"
+    assert definitions["click_on"].capture_evidence is True
+    assert definitions["click_on"].metadata["driver_method"] == "click_on"
+    assert definitions["page_snapshot"].aliases == ["pageSnapshot"]
+    assert definitions["page_snapshot"].step_kind == "observation"
+    assert definitions["assert_with_ai"].executor_kind == "harness"
+    assert snapshot.resolve("clickOn") is definitions["click_on"]
 
 
 def test_capabilities_imports_only_models_across_project_modules() -> None:

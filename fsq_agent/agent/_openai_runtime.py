@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fsq_agent.config import Settings, validate_runtime_settings
-from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, UiAutomator2AndroidDriver
+from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, PlaywrightWebDriver, UiAutomator2AndroidDriver, WebHarness
 from fsq_agent.agent._harness_tools import HarnessToolAdapter
 from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, KnowledgeBundle, PlanningError, RunEvent, RunEventSink, SkillBundle, StepResult, Task
 from fsq_agent.providers import build_ai_assertion_evaluator, build_model_provider_session
@@ -268,6 +268,7 @@ class OpenAIAgentsRuntime:
                     reserved_tool_names={*self._common_tool_names, *_RUNTIME_TOOL_NAMES},
                     common_tool_providers=self._common_tool_providers(),
                     post_action_delay_seconds=self.settings.execution.post_action_delay_seconds,
+                    platform=self.settings.harness.platform,
                 )
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name
@@ -456,6 +457,18 @@ class OpenAIAgentsRuntime:
                     "backend": android.backend,
                     "app_id_configured": bool(android.app_id),
                     "serial_configured": bool(android.serial),
+                }
+            )
+        if self.settings.harness.platform == "web":
+            web = self.settings.harness.web
+            payload.update(
+                {
+                    "backend": web.backend,
+                    "channel": web.channel,
+                    "browser_executable_configured": web.browser_executable_path is not None,
+                    "headless": web.headless,
+                    "base_url_configured": bool(web.base_url),
+                    "viewport_configured": web.viewport_width is not None and web.viewport_height is not None,
                 }
             )
         if harness is not None:
@@ -750,6 +763,23 @@ class OpenAIAgentsRuntime:
                 raise ConfigurationError("Unsupported Android harness backend.", context={"backend": android.backend})
             driver = UiAutomator2AndroidDriver(app_id=android.app_id or "", serial=android.serial)
             return AndroidHarness(
+                driver=driver,
+                artifact_store=ArtifactStore(self.settings.output.runs_dir / run_id),
+                ai_assertion_evaluator=build_ai_assertion_evaluator(self.settings),
+            )
+        if self.settings.harness.platform == "web":
+            web = self.settings.harness.web
+            if web.backend != "playwright":
+                raise ConfigurationError("Unsupported Web harness backend.", context={"backend": web.backend})
+            viewport = (web.viewport_width, web.viewport_height) if web.viewport_width is not None and web.viewport_height is not None else None
+            driver = PlaywrightWebDriver(
+                channel=web.channel,
+                executable_path=web.browser_executable_path,
+                headless=web.headless,
+                base_url=web.base_url,
+                viewport=viewport,
+            )
+            return WebHarness(
                 driver=driver,
                 artifact_store=ArtifactStore(self.settings.output.runs_dir / run_id),
                 ai_assertion_evaluator=build_ai_assertion_evaluator(self.settings),

@@ -14,6 +14,8 @@ No project module dependencies. May depend on external libraries such as `pydant
 
 Target `__init__.py` exports via `__all__` after this change:
 
+Platform-neutral task, run, report, knowledge, capability, and execution exports:
+
 - `Task`: Pydantic model describing a dynamic LLM goal/reference task, optional metadata, optional explicit planning reference kind/text, optional execution key actions, one final `verification_goal`, retry limits, timeout, and knowledge references. Only `description` is required. `planning_reference_kind` may identify first-party planning inputs such as `goal` or `raw_case`; `planning_reference_text` stores the authoritative text the pre-planner should use before falling back to legacy goal/description behavior. Execution key actions are planning context only; final verification checks `verification_goal` against execution evidence.
 - `AGENT_FINAL_OUTPUT_SCHEMA_VERSION`: Constant containing the current supported final-output schema version. The runtime supports only the current schema; future compatible schema evolution may add fields, while breaking changes replace the current schema rather than exposing a user-selectable schema configuration.
 - `AgentTaskInput`: Pydantic model describing the structured task envelope rendered into the model input. It includes a schema version, the task, complete key actions for execution planning, the single `verification_goal`, optional runtime policy text, and the final output contract name expected for the run.
@@ -56,9 +58,12 @@ Target `__init__.py` exports via `__all__` after this change:
 - `ToolCall`: Backward-compatible diagnostic alias for serializable tool invocation requests during migration.
 - `ToolResult`: Backward-compatible diagnostic alias for normalized tool invocation responses during migration.
 - Execution-core contract models: Pydantic models for StepRunner, runner events, harness inputs/outputs, capability invocation/result metadata, and EvidenceBundle manifests. These include `ExecutableStep`, `SourceRef`, `RetryPolicy`, `EvidencePolicy`, `StepCallInfo`, `StepPhaseReport`, `RunnerStepResult`, `RunnerEvent`, `HarnessContext`, `HarnessActionResult`, `HarnessArtifactRef`, `EvidenceBundle`, and `EvidenceManifest`.
-- `AndroidLocator`: Pydantic model for Android target locators with optional `resourceId`, `accessibilityId`, `text`, `className`, and `xpath` fields.
 - `RuntimeSecretRef`: Pydantic model for one strict replay runtime-secret reference. Its serialized YAML/JSON shape is `{"runtimeSecret": "ENV_NAME"}`. It stores only the environment variable name and never a secret value.
 - `WaitMsParams`: Pydantic model for the decorated `wait_ms` CommonTool capability and strict replay `waitMs` alias. It contains a bounded `duration_ms` value and optional reason text, and represents a pure elapsed-time wait that must not touch platform state.
+
+Android platform exports:
+
+- `AndroidLocator`: Pydantic model for Android target locators with optional `resourceId`, `accessibilityId`, `text`, `className`, and `xpath` fields.
 - `AndroidPoint`: Pydantic model for integer Android screen coordinates used by point-based swipes.
 - `AndroidLaunchAppParams`: Pydantic model for `launch_app` driver parameters, including optional `app_id`.
 - `AndroidKillAppParams`: Pydantic model for `kill_app` driver parameters, including optional `app_id`.
@@ -75,8 +80,33 @@ Target `__init__.py` exports via `__all__` after this change:
 - `AndroidElementState`: Pydantic model for element locators plus expected boolean Android state fields `enabled`, `checked`, `selected`, `clickable`, and `focused`.
 - `AndroidAssertStateParams`: Pydantic model for FSQ `assert` driver parameters. It supports `element` existence/state assertions and optional `text` assertions.
 - `AndroidAssertWithAIParams`: Pydantic model for authored Android visual assertion parameters with a required prompt and optional assertion metadata. This parameter model is consumed by `AndroidHarness`; concrete Android drivers must not call providers or expose this as a driver-owned function schema.
+
+Web platform exports:
+
+- `WebLocator`: Pydantic model for Web target locators with optional `role`, `name`, `text`, `label`, `placeholder`, `testId`, `css`, and `xpath` fields. Web action parameter models that accept either a semantic `target` or `locator` require at least one populated target signal.
+- `WebNavigateToParams`: Pydantic model for `navigate_to` parameters, including required `url` and optional Playwright-safe `wait_until` lifecycle state.
+- `WebNavigateBackParams`: Pydantic model for `navigate_back` parameters. It accepts no fields in the first batch.
+- `WebClickOnParams`: Pydantic model for `click_on` parameters. It requires either an exact snapshot `target` or non-empty `locator`, with optional human-readable `element`, `double_click`, `button`, and `modifiers` fields.
+- `WebTypeTextParams`: Pydantic model for `type_text` parameters. It requires string `text` plus either an exact snapshot `target` or non-empty `locator`, with optional human-readable `element`, `submit`, and `slowly` fields.
+- `WebSelectOptionParams`: Pydantic model for `select_option` parameters. It requires one or more `values` plus either an exact snapshot `target` or non-empty `locator`, with optional human-readable `element`.
+- `WebHoverOnParams`: Pydantic model for `hover_on` parameters. It requires either an exact snapshot `target` or non-empty `locator`, with optional human-readable `element`.
+- `WebPressKeyParams`: Pydantic model for `press_key` parameters with one normalized required key string.
+- `WebWaitForParams`: Pydantic model for `wait_for` parameters. It requires exactly one bounded wait condition: `time`, `text`, or `text_gone`.
+- `WebTakeScreenshotParams`: Pydantic model for `take_screenshot` parameters. It accepts optional exact snapshot `target` or non-empty `locator`, optional human-readable `element`, optional image `type`, and optional `full_page`; artifact filenames are not user-controlled through the parameter model.
+- `WebAssertVisibleParams`: Pydantic model for Web `assert_visible` parameters. It requires either `target` or non-empty `locator` plus optional assertion metadata.
+- `WebAssertNotVisibleParams`: Pydantic model for Web `assert_not_visible` parameters. It requires either `target` or non-empty `locator` plus optional assertion metadata.
+- `WebTextAssertion`: Pydantic model for Web text assertion predicates, supporting `contains` and `equals`.
+- `WebAssertTextParams`: Pydantic model for `assert_text` parameters. It supports optional `target` or `locator` plus a text predicate.
+- `WebPageSnapshotParams`: Pydantic model for the read-only `page_snapshot` Web observation capability. It accepts optional exact snapshot `target` or non-empty `locator`, optional `depth`, and optional `boxes` so dynamic agents and strict Web cases can request a current accessibility/DOM-oriented page snapshot through the normal harness action schema path.
+- `WebAssertWithAIParams`: Pydantic model for authored Web visual/page assertion parameters with a required prompt and optional assertion metadata. This parameter model is consumed by `WebHarness`; concrete Web drivers must not call providers or expose this as a driver-owned function schema.
+
+Provider-backed assertion exports:
+
 - `AIAssertionRequest`: Pydantic model describing one provider-backed platform visual assertion request. It includes platform, prompt, screenshot artifact reference or screenshot path, optional UI/context metadata, run/step metadata, and provider/model metadata fields safe for reports.
 - `AIAssertionResult`: Pydantic model describing one provider-backed platform visual assertion verdict. It includes status/pass boolean, explanation, confidence when available, provider/model metadata, token/latency diagnostics when safe, and evidence artifact references. It must not contain raw secret values or hidden model reasoning.
+
+Shared settings exports:
+
 - `OpenAIAgentsSettings`: Pydantic model for OpenAI Agents SDK provider configuration, including provider selection (`github_copilot` by default, or explicit `azure_openai`), tracing policy, turn limits, file-based prompt template customization, internal context trimming policy, internal CommonTool output artifact policy, and resolved provider runtime values. GitHub Copilot uses fixed model `gpt-5.5`; Azure OpenAI endpoint, deployment/model, and API key are sourced from fixed environment variable names by configuration loading rather than from YAML fields. GitHub Copilot OAuth token storage is runtime-owned under the configured workspace and is not exposed as a YAML token setting. The agent runtime uses the Responses API for configured model providers.
 - `OpenAIAgentPromptConfig`: Pydantic model containing optional Jinja template file paths and scalar prompt variables. It does not contain inline or file-backed custom instruction fields; project-specific guidance belongs in project knowledge, and reusable guidance belongs in configured skills.
 - `ContextTrimmingSettings`: Pydantic model controlling SDK model-input trimming for older large tool outputs, including recent turn retention, maximum inline tool output size, preview size, and optional trimmable tool names. These values are internal runtime defaults and are not part of the default YAML surface.
@@ -84,8 +114,12 @@ Target `__init__.py` exports via `__all__` after this change:
 - `RuntimeSecretSettings`: Pydantic model listing environment variable names that local SDK tools may reveal to the model during a run. Values are loaded through normal environment or `.env` loading but are never stored in YAML case files.
 - `ExecutionSettings`: Pydantic model grouping runner-owned execution policy that applies across dynamic and strict execution.
 - `PostActionDelaySettings`: Pydantic model containing non-negative post-action delay defaults in seconds. `platform` defaults to `1.0` and applies to harness/driver capabilities when capability metadata does not override it. `common` defaults to `0.0` and applies to CommonTool capabilities when capability metadata does not override it.
+
+Platform settings exports:
+
 - `HarnessSettings`: Pydantic model selecting the platform harness configuration used by goal-driven task execution. It contains platform-specific harness settings only; runner-owned execution pacing belongs to `ExecutionSettings`.
 - `AndroidHarnessSettings`: Pydantic model for the built-in Android harness runtime construction. YAML selects the Android backend; configuration loading fills optional `app_id` and device `serial` from `FSQ_ANDROID_APP_ID` and `FSQ_ANDROID_SERIAL`. Strict-core execution does not enable AI assertion evaluators through this settings model.
+- `WebHarnessSettings`: Pydantic model for the built-in Web harness runtime construction. YAML selects the Playwright backend, local browser channel, headless mode, optional base URL, and optional viewport settings; configuration loading fills the required local browser executable path from `FSQ_WEB_BROWSER_EXECUTABLE_PATH`. Strict-core execution does not enable AI assertion evaluators through this settings model.
 - `AgentContextSettings`: Pydantic model grouping knowledge-root resources used to build agent context.
 - `AgentKnowledgeSettings`: Pydantic model containing the configured private knowledge `root_dir`, nested skill resource configuration, and optional pre-plan page-knowledge configuration.
 - `KnowledgeSkillSettings`: Pydantic model containing the skill directory under the knowledge root and the configured `SkillConfig` items loaded from that directory.
@@ -96,12 +130,41 @@ Target `__init__.py` exports via `__all__` after this change:
 - `WorkspaceSettings`: Pydantic model for the managed fsq-agent workspace root. Marker file name and auto-initialization behavior are internal workspace policy rather than YAML settings.
 - `CaseSettings`: Pydantic model for the read-only FSQ case directory.
 - `OutputSettings`: Pydantic model for the managed output root. The per-run report/artifact layout under the output root is internal policy. All logs, reports, tool artifacts, and generated files must live under the output root.
+
+Exception exports:
+
 - `FsqAgentError`: Base exception for all project errors.
 - `ConfigurationError`: Raised when configuration is missing or invalid.
 - `PlanningError`: Raised when a task cannot be converted into an executable plan.
 - `ToolExecutionError`: Raised when a tool call fails after retries or returns invalid output.
 - `VerificationError`: Raised when verification cannot complete.
 - `ReportGenerationError`: Raised when report generation fails.
+
+## Platform Contract Blocks
+
+Shared platform contracts:
+
+- `HarnessPlatform`, `HarnessSettings`, `HarnessContext`, `HarnessActionResult`, `HarnessArtifactRef`, capability metadata, invocation/result contracts, and evidence manifest models are platform-neutral contracts.
+- Platform-specific action parameter models live in this module only when they are consumed across module boundaries by `fsq`, `core`, `cli`, `agent`, or tests.
+- Platform parameter models forbid unexpected fields and produce canonical `model_dump(mode="json", exclude_none=True)` output.
+
+Android contracts:
+
+- Android parameter models include locator, point, lifecycle, gesture, input, assertion, UI-tree observation, W3C-action placeholder, and Android AI assertion models.
+- Android settings are grouped under `AndroidHarnessSettings` and are selected by `HarnessSettings.platform == "android"`.
+- Android observation is represented as `ui_tree`/`uiTree`.
+
+Web contracts:
+
+- Web parameter models include locator, navigation, click, text typing, select, hover, key, wait, screenshot, page snapshot, deterministic assertions, and Web AI assertion models.
+- Web settings are grouped under `WebHarnessSettings` and are selected by `HarnessSettings.platform == "web"`.
+- Web observation is represented as `page_snapshot`/`pageSnapshot`; it is distinct from Android `ui_tree`.
+- Web action parameter design follows Playwright MCP's LLM-facing core automation conventions where appropriate: action targets are exact page-snapshot references or unique selectors, optional `element` fields are human-readable descriptions for interaction permission/auditing, screenshots are evidence/debugging observations rather than the normal action-selection substrate, and unsafe/opt-in capability families are excluded from the first batch.
+
+Future platform contracts:
+
+- New platforms must add their own parameter and settings blocks here before implementation.
+- Shared models must remain serializable and must not import SDK objects, concrete drivers, or provider runtime objects.
 
 ## Internal Structure
 
@@ -112,7 +175,7 @@ Target `__init__.py` exports via `__all__` after this change:
 - `_fsq.py`: FSQ AI Test DSL case metadata and case models.
 - `_tools.py`: Unified capability metadata, replay policy, invocation/result contracts, registry snapshot models, CommonTool call/result models, and temporary backward-compatible diagnostic aliases.
 - `_ai_assertion.py`: Provider-backed platform AI assertion request/result models.
-- `_core.py`: Shared execution-core contract models for executable steps, strict replay refs, pure wait params, runner phases/events, harness context/results, artifact references, evidence manifests, and Android parameter models used across `fsq`, `cli`, and `core`.
+- `_core.py`: Shared execution-core contract models for executable steps, strict replay refs, pure wait params, runner phases/events, harness context/results, artifact references, evidence manifests, and Android/Web parameter models used across `fsq`, `cli`, and `core`.
 - `_settings.py`: Settings value models.
 - `_skills.py`: Skill configuration and loaded skill bundle models.
 - `_report.py`: Report artifact and evidence models.
@@ -146,8 +209,10 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Capability definitions are deliberately serializable. They do not import or wrap OpenAI Agents SDK tool objects, driver instances, Python function callables, decorator marker objects, or platform catalog helper objects. Runtime bindings live in `tools`, `core`, and `agent`; declaration marker metadata lives in `capabilities`.
 - `capture_evidence` on capability metadata is a typed cross-module execution contract for reviewed harness and driver capabilities whose default `EvidencePolicy()` should receive the standard screenshot and UI-tree evidence policy before the action, after the action, and on failure in both dynamic execution and strict replay. The flag defaults to `False` and is not user YAML configuration.
 - Android driver parameter models forbid unexpected fields and provide canonical `model_dump(mode="json", exclude_none=True)` output. Runtime-only step metadata such as evidence policy, timeout fields, source references, retry policy, replay-source metadata, and step identifiers stays on `ExecutableStep` rather than inside driver parameter models.
+- Web driver parameter models forbid unexpected fields and provide canonical `model_dump(mode="json", exclude_none=True)` output. Runtime-only step metadata such as evidence policy, timeout fields, source references, retry policy, replay-source metadata, and step identifiers stays on `ExecutableStep` rather than inside Web driver parameter models.
 - `RuntimeSecretRef` is a pre-resolution FSQ replay reference, not a driver parameter value. Strict entry-layer code must resolve it to a string in memory and then validate the resolved payload against the appropriate Android driver parameter model before `core` invokes a harness.
 - `WaitMsParams` belongs to the decorated `wait_ms` CommonTool capability and its strict replay alias `waitMs`. It lets recorded strict cases replay pure waits without routing through Android gesture or driver APIs.
+- Web `page_snapshot` is a driver-owned, read-only observation capability with canonical alias `pageSnapshot`. It returns a Web page snapshot and must not reuse Android-oriented `ui_tree` or `uiTree` naming.
 - Pydantic is used at boundaries where external inputs, config files, agent output, and tool output enter the system.
 - The agent final output contract is model-owned. The runtime always uses the current `AgentFinalOutput` schema through OpenAI Agents SDK structured output. The schema version is emitted in the final output for traceability, but schema selection is not a user-facing configuration.
 - Task verification data is split from execution planning data. `key_actions` preserves caller-supplied or internally generated execution guidance, while `verification_goal` records the single final outcome the evidence-based verifier must check. Dynamic CLI inputs do not use typed assertion/operation verifier contracts or configurable verification modes.
@@ -163,7 +228,7 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Runtime secrets are model-owned as an allowlist of environment variable names. This keeps credential values out of cases and config YAML while allowing the tools module to expose only explicitly approved values to the SDK runner and allowing recorded strict cases to reference approved names through `RuntimeSecretRef`. Secret values must be redacted from user-visible events, artifact output, model-facing previews, strict evidence, recording manifests, and final reports.
 - CommonTool request/result models are serializable and SDK-neutral. The tools module adapts decorated CommonTool capabilities to OpenAI Agents SDK `FunctionTool` objects through the registry path, but shared models must not import SDK types.
 - AI assertion request/result models are serializable execution evidence. They describe explicit authored platform assertions and provider-backed verdicts; they do not represent locator fallback, testcase mutation, recovery, or hidden model reasoning.
-- Harness and driver selection is model-owned through `HarnessSettings` and platform-specific nested settings. Runner-owned post-action delay defaults are model-owned through `ExecutionSettings.post_action_delay_seconds` because they apply to both dynamic and strict `StepRunner` execution, not provider behavior, dynamic recording logic, or FSQ command semantics. Concrete platform behavior is implemented by the entry/runtime layer and the `core` harness/driver modules so configuration parsing does not own execution logic.
+- Harness and driver selection is model-owned through `HarnessSettings` and platform-specific nested settings for Android and Web. Runner-owned post-action delay defaults are model-owned through `ExecutionSettings.post_action_delay_seconds` because they apply to both dynamic and strict `StepRunner` execution, not provider behavior, dynamic recording logic, or FSQ command semantics. Concrete platform behavior is implemented by the entry/runtime layer and the `core` harness/driver modules so configuration parsing does not own execution logic.
 - fsq-agent does not expose MCP as a runtime capability path. Screenshots, UI trees, page sources, and other platform observations are represented by harness or CommonTool artifact references rather than by MCP tool output.
 - Page knowledge is represented as a compact graph-like Markdown/JSON format owned by shared models so external generators can produce compatible files. `index.md` is a concise JSON index for page lookup; each `pages/*.md` file contains one JSON page node. Page identifiers are semantic descriptions without locators. Element locators are explicitly reference locators, not authoritative runtime truth.
 - Internal dynamic goal planning is represented separately from execution results. It produces ordered key actions from a goal/reference task and loaded page knowledge, but it does not execute UI actions or verify runtime state.

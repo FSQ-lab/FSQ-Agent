@@ -14,10 +14,12 @@ DEFAULT_CONFIG_PATHS = (Path("config.yaml"), Path("config.yml"), Path("config.ex
 DEFAULT_ENV_PATH = Path(".env")
 ANDROID_APP_ID_ENV = "FSQ_ANDROID_APP_ID"
 ANDROID_SERIAL_ENV = "FSQ_ANDROID_SERIAL"
+WEB_BROWSER_EXECUTABLE_PATH_ENV = "FSQ_WEB_BROWSER_EXECUTABLE_PATH"
 AZURE_OPENAI_BASE_URL_ENV = "AZURE_OPENAI_BASE_URL"
 AZURE_OPENAI_MODEL_ENV = "AZURE_OPENAI_MODEL"
 AZURE_OPENAI_API_KEY_ENV = "AZURE_OPENAI_API_KEY"
 GITHUB_COPILOT_MODEL = "gpt-5.5"
+CHROME_EXECUTABLE_NAMES = {"chrome", "chrome.exe", "google chrome", "google-chrome", "google-chrome-stable"}
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -132,6 +134,9 @@ def _apply_environment_settings(settings: Settings) -> None:
         settings.harness.android.app_id = app_id
     if serial:
         settings.harness.android.serial = serial
+    browser_executable_path = _env_value(WEB_BROWSER_EXECUTABLE_PATH_ENV)
+    if browser_executable_path:
+        settings.harness.web.browser_executable_path = browser_executable_path
 
     if settings.openai_agents.provider == "github_copilot":
         settings.openai_agents.model = GITHUB_COPILOT_MODEL
@@ -159,11 +164,11 @@ def _env_value(name: str) -> str | None:
 
 def validate_runtime_settings(settings: Settings) -> None:
     _validate_openai_provider_settings(settings)
-    _validate_android_harness_settings(settings)
+    _validate_harness_settings(settings)
 
 
 def validate_strict_core_settings(settings: Settings, requires_ai_assertion: bool = False) -> None:
-    _validate_android_harness_settings(settings)
+    _validate_harness_settings(settings)
     if requires_ai_assertion:
         _validate_openai_provider_settings(settings)
 
@@ -196,14 +201,65 @@ def _validate_openai_provider_settings(settings: Settings) -> None:
         )
 
 
+def _validate_harness_settings(settings: Settings) -> None:
+    if settings.harness.platform == "android":
+        _validate_android_harness_settings(settings)
+        return
+    if settings.harness.platform == "web":
+        _validate_web_harness_settings(settings)
+        return
+    raise ConfigurationError(
+        "Unsupported harness platform.",
+        context={"platform": settings.harness.platform, "supported": ["android", "web"]},
+    )
+
+
 def _validate_android_harness_settings(settings: Settings) -> None:
-    if settings.harness.platform != "android":
-        raise ConfigurationError(
-            "Unsupported harness platform.",
-            context={"platform": settings.harness.platform, "supported": ["android"]},
-        )
     if settings.harness.android.backend != "uiautomator2":
         raise ConfigurationError(
             "Unsupported Android harness backend.",
             context={"backend": settings.harness.android.backend, "supported": ["uiautomator2"]},
+        )
+
+
+def _validate_web_harness_settings(settings: Settings) -> None:
+    if settings.harness.web.backend != "playwright":
+        raise ConfigurationError(
+            "Unsupported Web harness backend.",
+            context={"backend": settings.harness.web.backend, "supported": ["playwright"]},
+        )
+    _validate_web_browser_executable_path(settings)
+
+
+def _validate_web_browser_executable_path(settings: Settings) -> None:
+    browser_path = settings.harness.web.browser_executable_path
+    if browser_path is None:
+        raise ConfigurationError(
+            "Web browser executable path environment variable is not set.",
+            context={"executable_path_env": WEB_BROWSER_EXECUTABLE_PATH_ENV, "channel": settings.harness.web.channel},
+        )
+    if not browser_path.exists():
+        raise ConfigurationError(
+            "Configured Web browser executable path does not exist.",
+            context={"executable_path_env": WEB_BROWSER_EXECUTABLE_PATH_ENV, "path": str(browser_path)},
+        )
+    if not browser_path.is_file():
+        raise ConfigurationError(
+            "Configured Web browser executable path must point to the browser executable file.",
+            context={"executable_path_env": WEB_BROWSER_EXECUTABLE_PATH_ENV, "path": str(browser_path)},
+        )
+    if settings.harness.web.channel == "chrome" and browser_path.name.casefold() not in CHROME_EXECUTABLE_NAMES:
+        raise ConfigurationError(
+            "Configured Web browser executable path does not match harness.web.channel.",
+            context={
+                "executable_path_env": WEB_BROWSER_EXECUTABLE_PATH_ENV,
+                "path": str(browser_path),
+                "channel": settings.harness.web.channel,
+                "expected_file_names": sorted(CHROME_EXECUTABLE_NAMES),
+            },
+        )
+    if os.name != "nt" and not os.access(browser_path, os.X_OK):
+        raise ConfigurationError(
+            "Configured Web browser executable path is not executable.",
+            context={"executable_path_env": WEB_BROWSER_EXECUTABLE_PATH_ENV, "path": str(browser_path)},
         )

@@ -56,6 +56,10 @@ def _adapter() -> FsqExecutableStepAdapter:
     return FsqExecutableStepAdapter(registry_snapshot=build_capability_registry().snapshot())
 
 
+def _web_adapter() -> FsqExecutableStepAdapter:
+    return FsqExecutableStepAdapter(registry_snapshot=build_capability_registry(platform="web").snapshot())
+
+
 def test_fsq_executable_step_adapter_preserves_order_and_canonical_action_names(tmp_path: Path) -> None:
     case = _load_case(tmp_path)
 
@@ -234,3 +238,79 @@ platform: android
     case = FsqCaseLoader().load_case(case_path)
 
     assert _adapter().to_executable_steps(case) == []
+
+
+def test_fsq_executable_step_adapter_resolves_web_aliases_from_web_registry(tmp_path: Path) -> None:
+    case_path = tmp_path / "web_case.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Web Case
+platform: web
+---
+- navigateTo:
+    url: https://www.bing.com
+- pageSnapshot
+- clickOn:
+    target: Search box
+    locator:
+      role: textbox
+      name: Search
+- typeText:
+    text: playwright
+    target: Search box
+- pressKey:
+    key: Enter
+- waitFor:
+    text: playwright
+    timeout_ms: 5000
+- assertText:
+    target: Results
+    text:
+      contains: playwright
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    steps = _web_adapter().to_executable_steps(case)
+
+    assert [step.action_name for step in steps] == [
+        "navigate_to",
+        "page_snapshot",
+        "click_on",
+        "type_text",
+        "press_key",
+        "wait_for",
+        "assert_text",
+    ]
+    assert [step.kind for step in steps] == ["action", "observation", "action", "action", "action", "action", "assertion"]
+    assert steps[0].params == {"url": "https://www.bing.com"}
+    assert steps[2].params == {"target": "Search box", "locator": {"role": "textbox", "name": "Search"}}
+    assert steps[3].params == {"target": "Search box", "text": "playwright"}
+    assert steps[5].params == {"text": "playwright", "timeout_ms": 5000}
+    assert steps[6].params == {"target": "Results", "text": {"contains": "playwright"}}
+    assert all(step.metadata["platform"] == "web" for step in steps)
+
+
+def test_fsq_executable_step_adapter_preserves_web_runtime_secret_refs(tmp_path: Path) -> None:
+    case_path = tmp_path / "web_secret.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Web Secret Case
+platform: web
+---
+- typeText:
+    text:
+      runtimeSecret: TEST_ACCOUNT_PASSWORD
+    target: Password field
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    steps = _web_adapter().to_executable_steps(case)
+
+    assert steps[0].action_name == "type_text"
+    assert steps[0].params == {"text": {"runtimeSecret": "TEST_ACCOUNT_PASSWORD"}, "target": "Password field"}

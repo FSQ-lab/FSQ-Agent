@@ -4,8 +4,8 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from fsq_agent.core import CapabilityExecutorBindings, CapabilityRegistry, android_capability_definitions
-from fsq_agent.models import CapabilityDefinition, CapabilityExecutionResult, CommonToolCall, ConfigurationError, ExecutableStep, ReplayPolicy
+from fsq_agent.core import CapabilityExecutorBindings, CapabilityRegistry, android_capability_definitions, web_capability_definitions
+from fsq_agent.models import CapabilityDefinition, CapabilityExecutionResult, CommonToolCall, ConfigurationError, ExecutableStep, HarnessPlatform, ReplayPolicy
 from fsq_agent.tools import CommonToolExecutor, CommonToolProvider, CommonToolRegistry, DefaultCommonToolProvider, FileOps
 
 
@@ -13,13 +13,21 @@ def common_capability_definitions() -> list[CapabilityDefinition]:
     return DefaultCommonToolProvider.capability_definitions()
 
 
-def build_capability_registry(*, include_ai_assertion: bool = True) -> CapabilityRegistry:
+def build_capability_registry(*, platform: HarnessPlatform = "android", include_ai_assertion: bool = True) -> CapabilityRegistry:
     return CapabilityRegistry.from_definitions(
         [
             *common_capability_definitions(),
-            *android_capability_definitions(include_ai_assertion=include_ai_assertion),
+            *_platform_capability_definitions(platform, include_ai_assertion=include_ai_assertion),
         ]
     )
+
+
+def _platform_capability_definitions(platform: HarnessPlatform, *, include_ai_assertion: bool) -> list[CapabilityDefinition]:
+    if platform == "android":
+        return android_capability_definitions(include_ai_assertion=include_ai_assertion)
+    if platform == "web":
+        return web_capability_definitions(include_ai_assertion=include_ai_assertion)
+    raise ConfigurationError("Unsupported harness platform.", context={"platform": platform, "supported": ["android", "web"]})
 
 
 def build_common_tool_provider(

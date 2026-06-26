@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from fsq_agent.models._skills import SkillConfig
 
@@ -101,11 +101,46 @@ class AndroidHarnessSettings(BaseModel):
         self._serial = value
 
 
+class WebHarnessSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backend: Literal["playwright"] = "playwright"
+    channel: Literal["chrome"] = "chrome"
+    headless: bool = True
+    base_url: str | None = None
+    viewport_width: int | None = Field(default=None, ge=1)
+    viewport_height: int | None = Field(default=None, ge=1)
+    _browser_executable_path: Path | None = PrivateAttr(default=None)
+
+    @property
+    def browser_executable_path(self) -> Path | None:
+        return self._browser_executable_path
+
+    @browser_executable_path.setter
+    def browser_executable_path(self, value: str | Path | None) -> None:
+        self._browser_executable_path = Path(value) if value else None
+
+    @field_validator("base_url")
+    @classmethod
+    def normalize_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _validate_viewport_pair(self) -> "WebHarnessSettings":
+        if (self.viewport_width is None) == (self.viewport_height is None):
+            return self
+        raise ValueError("viewport_width and viewport_height must be configured together")
+
+
 class HarnessSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    platform: Literal["android"] = "android"
+    platform: Literal["android", "web"] = "android"
     android: AndroidHarnessSettings = Field(default_factory=AndroidHarnessSettings)
+    web: WebHarnessSettings = Field(default_factory=WebHarnessSettings)
 
 
 class PostActionDelaySettings(BaseModel):

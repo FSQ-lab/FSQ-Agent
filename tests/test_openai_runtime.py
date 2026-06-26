@@ -146,6 +146,19 @@ class _DirectInvokeForbiddenHarness(_FakeHarness):
         raise AssertionError("adapter must not directly invoke the harness")
 
 
+class _FakeWebHarness(_FakeHarness):
+    def __init__(self) -> None:
+        super().__init__(tool_name="click_on", driver_method="click_on", fsq_action_name="clickOn")
+
+    def action_space(self) -> list[HarnessFunctionSchema]:
+        schemas = super().action_space()
+        return [schemas[0].model_copy(update={"platform": "web"})]
+
+    def get_context(self) -> HarnessContext:
+        self.calls.append("get_context")
+        return HarnessContext(platform="web", session_id="session-1")
+
+
 def _fake_harness_factory(_run_id: str) -> _FakeHarness:
     return _FakeHarness()
 
@@ -317,6 +330,63 @@ def test_runtime_harness_timeout_does_not_wait_for_worker_shutdown() -> None:
     asyncio.run(run_timeout())
 
     assert time.perf_counter() - started < 1.8
+
+
+def test_runtime_builds_configured_web_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: dict[str, Any] = {}
+
+    class _FakeWebDriver:
+        def __init__(self, **kwargs: Any) -> None:
+            calls["driver"] = kwargs
+
+    import fsq_agent.agent._openai_runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "PlaywrightWebDriver", _FakeWebDriver)
+    monkeypatch.setattr(runtime_module, "build_ai_assertion_evaluator", lambda _settings: "ai-evaluator")
+    chrome_path = tmp_path / "chrome.exe"
+    chrome_path.write_text("", encoding="utf-8")
+    settings = Settings(
+        harness={
+            "platform": "web",
+            "web": {
+                "backend": "playwright",
+                "channel": "chrome",
+                "headless": False,
+                "base_url": "https://example.test",
+                "viewport_width": 390,
+                "viewport_height": 844,
+            },
+        },
+        output={"root_dir": tmp_path / "output"},
+        openai_agents=OpenAIAgentsSettings(),
+    )
+    settings.harness.web.browser_executable_path = chrome_path
+    settings.output.runs_dir = tmp_path / "runs"
+    runtime = OpenAIAgentsRuntime(settings, _EmptyToolFactory())
+
+    payload = runtime._harness_setup_payload()
+    harness = runtime._build_harness("web-run")
+    completed_payload = runtime._harness_setup_payload(harness)
+
+    assert calls["driver"] == {
+        "channel": "chrome",
+        "executable_path": chrome_path,
+        "headless": False,
+        "base_url": "https://example.test",
+        "viewport": (390, 844),
+    }
+    assert payload == {
+        "platform": "web",
+        "timeout_seconds": 60,
+        "backend": "playwright",
+        "channel": "chrome",
+        "browser_executable_configured": True,
+        "headless": False,
+        "base_url_configured": True,
+        "viewport_configured": True,
+    }
+    assert completed_payload["harness_class"] == "WebHarness"
+    assert completed_payload["driver_class"] == "_FakeWebDriver"
 
 
 def test_runtime_builds_step_results_from_structured_pre_plan() -> None:
@@ -627,6 +697,28 @@ async def test_harness_tool_adapter_uses_registry_metadata_for_effective_evidenc
         "capture:screenshot:after-action:agent-tap_on-1:finalize:session-1",
         "capture:ui_tree:after-action:agent-tap_on-1:finalize:session-1",
     ]
+
+
+@pytest.mark.asyncio
+async def test_harness_tool_adapter_uses_web_platform_registry_for_evidence_policy() -> None:
+    harness = _FakeWebHarness()
+    adapter = HarnessToolAdapter(harness, run_id="run-1", platform="web")
+
+    tools = adapter.build_tools(_FakeFunctionTool)
+    output = await tools[0].on_invoke_tool(None, json.dumps({"target": "Search"}))
+
+    payload = json.loads(output)
+    assert payload["status"] == "passed"
+    assert payload["fsq_action_name"] == "clickOn"
+    assert [ref["kind"] for ref in payload["artifact_refs"]] == [
+        "screenshot",
+        "page_snapshot",
+        "screenshot",
+        "page_snapshot",
+    ]
+    assert harness.steps[0].action_name == "click_on"
+    assert harness.steps[0].metadata["authored_action_name"] == "clickOn"
+    assert harness.steps[0].evidence_policy.artifact_kinds == ["screenshot", "page_snapshot"]
 
 
 @pytest.mark.asyncio

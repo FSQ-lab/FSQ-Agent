@@ -7,6 +7,8 @@ from pydantic import ValidationError
 from fsq_agent.models import (
     ANDROID_ACTION_DEFINITIONS,
     ANDROID_ACTION_DEFINITIONS_BY_NAME,
+    WEB_ACTION_DEFINITIONS,
+    WEB_ACTION_DEFINITIONS_BY_NAME,
     AndroidPressKeyParams,
     AndroidSwipeParams,
     AndroidTapOnParams,
@@ -24,6 +26,10 @@ from fsq_agent.models import (
     RunnerStepResult,
     SourceRef,
     StepPhaseReport,
+    WebClickOnParams,
+    WebPageSnapshotParams,
+    WebTypeTextParams,
+    WebWaitForParams,
 )
 
 
@@ -135,6 +141,42 @@ def test_android_action_definitions_are_single_source_for_android_contract() -> 
     assert ANDROID_ACTION_DEFINITIONS_BY_NAME["uiTree"].step_kind == "observation"
     assert ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].driver_method == "assert_with_ai"
     assert ANDROID_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].step_kind == "assertion"
+
+
+def test_web_action_definitions_are_single_source_for_web_contract() -> None:
+    action_names = [definition.fsq_action_name for definition in WEB_ACTION_DEFINITIONS]
+
+    assert len(action_names) == len(set(action_names))
+    assert set(WEB_ACTION_DEFINITIONS_BY_NAME) == set(action_names)
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["clickOn"].driver_method == "click_on"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["clickOn"].params_model is WebClickOnParams
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["clickOn"].capture_evidence is True
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["typeText"].driver_method == "type_text"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["typeText"].params_model is WebTypeTextParams
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["waitFor"].driver_method == "wait_for"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["waitFor"].params_model is WebWaitForParams
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["pageSnapshot"].driver_method == "page_snapshot"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["pageSnapshot"].params_model is WebPageSnapshotParams
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["pageSnapshot"].step_kind == "observation"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].driver_method == "assert_with_ai"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].owner == "harness"
+
+
+def test_web_parameter_models_produce_canonical_dumps_and_reject_extra_fields() -> None:
+    click = WebClickOnParams.model_validate({"target": "Sign in"})
+    typed = WebTypeTextParams.model_validate({"locator": {"role": "textbox", "name": "Search"}, "text": "bing.com"})
+    wait = WebWaitForParams.model_validate({"text": "Results", "state": "visible", "timeout_ms": 5000})
+
+    assert click.model_dump(mode="json", exclude_none=True) == {"target": "Sign in"}
+    assert typed.model_dump(mode="json", exclude_none=True) == {
+        "locator": {"role": "textbox", "name": "Search"},
+        "text": "bing.com",
+    }
+    assert wait.model_dump(mode="json", exclude_none=True) == {"text": "Results", "state": "visible", "timeout_ms": 5000}
+    with pytest.raises(ValidationError):
+        WebClickOnParams.model_validate({"locator": {"unknown": "Login"}})
+    with pytest.raises(ValidationError):
+        WebClickOnParams.model_validate({"value": "Login"})
 
 
 def test_executable_step_accepts_contract_fields() -> None:

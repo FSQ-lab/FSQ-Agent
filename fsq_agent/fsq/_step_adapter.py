@@ -116,7 +116,7 @@ class FsqExecutableStepAdapter:
         return canonical
 
     def _runtime_secret_ref(self, capability: CapabilityDefinition, params: dict[str, Any]) -> RuntimeSecretRef | None:
-        if capability.name != "input_text":
+        if capability.name not in {"input_text", "type_text"}:
             return None
         text = params.get("text")
         if not isinstance(text, dict) or "runtimeSecret" not in text:

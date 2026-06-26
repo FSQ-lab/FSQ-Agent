@@ -21,7 +21,9 @@ All executable behavior is declared through decorator-driven capability metadata
 
 Decorator unification is a declaration-layer concern, not an execution-layer merge. CommonTool utilities remain implemented and executed by `tools`; harness-owned and driver/platform actions remain implemented and executed by `core` harnesses and drivers. Both domains use the same declaration metadata and the same `CapabilityDefinition` contract.
 
-`StepRunner` is the common execution manager for CommonTool, harness-owned, and driver/platform capabilities. It looks up the capability registry, validates params, applies evidence, post-action delay, and sensitivity policy, invokes the appropriate executor binding, emits structured safe events, and returns normalized runner results. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True`, a default step evidence policy resolves to the standard screenshot and UI-tree capture policy before the action, after the action, and on failure; explicit non-default `ExecutableStep.evidence_policy` values remain caller overrides. For every capability, the effective post-action delay resolves from `CapabilityDefinition.post_action_delay_seconds` when set, otherwise from configured `execution.post_action_delay_seconds` defaults for platform or CommonTool capabilities. A positive delay is execution timing only, occurs after invoke and before finalize/after-action/failure evidence capture, and must not create synthetic `waitMs` commands, evidence steps, replay commands, or action results. Executable paths must not branch on names such as `waitMs`, `wait_ms`, `get_runtime_secret`, or Android command names.
+`StepRunner` is the common execution manager for CommonTool, harness-owned, and driver/platform capabilities. It looks up the capability registry, validates params, applies evidence, post-action delay, and sensitivity policy, invokes the appropriate executor binding, emits structured safe events, and returns normalized runner results. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True`, a default step evidence policy resolves to the standard screenshot plus active platform observation capture policy before the action, after the action, and on failure; Android uses `ui_tree`, and Web uses `page_snapshot`. Explicit non-default `ExecutableStep.evidence_policy` values remain caller overrides. For every capability, the effective post-action delay resolves from `CapabilityDefinition.post_action_delay_seconds` when set, otherwise from configured `execution.post_action_delay_seconds` defaults for platform or CommonTool capabilities. A positive delay is execution timing only, occurs after invoke and before finalize/after-action/failure evidence capture, and must not create synthetic `waitMs` commands, evidence steps, replay commands, or action results. Executable paths must not branch on names such as `waitMs`, `wait_ms`, `get_runtime_secret`, Android command names, or Web command names.
+
+Capability registry bootstrap is platform-selected. Entry layers register CommonTool capabilities plus only the configured platform capability set. Android and Web capabilities must not be registered together in the default runtime registry, so each platform can expose native canonical names and replay aliases without cross-platform ambiguity.
 
 ## Recorded Strict Case Artifacts
 
@@ -37,7 +39,38 @@ Dynamic LLM `--case-yaml` and `--case-dir` runs read authored case files as raw 
 
 ## Runtime Configuration Defaults
 
-Default local LLM runs use GitHub Copilot provider authentication with Copilot model `gpt-5.5` and tracing enabled. Azure OpenAI remains available only when config explicitly selects `openai_agents.provider: azure_openai`; Azure endpoint, deployment/model, and API key values come from fixed environment variable names rather than YAML fields. Local user values such as Android app id, Android device serial, account secrets, and Azure provider values belong in process environment or `.env`. YAML config owns developer policy and runtime shape such as provider selection, tracing default, harness platform/backend, execution post-action delay defaults, runtime secret allowlist, agent context knowledge-root resources, workspace root, cases root, and output root.
+Default local LLM runs use GitHub Copilot provider authentication with Copilot model `gpt-5.5` and tracing enabled. Azure OpenAI remains available only when config explicitly selects `openai_agents.provider: azure_openai`; Azure endpoint, deployment/model, and API key values come from fixed environment variable names rather than YAML fields. Local user values such as Android app id, Android device serial, account secrets, and Azure provider values belong in process environment or `.env`. YAML config owns developer policy and runtime shape such as provider selection, tracing default, harness platform/backend, Web browser/base URL settings, execution post-action delay defaults, runtime secret allowlist, agent context knowledge-root resources, workspace root, cases root, and output root.
+
+## Platform Blocks
+
+Shared platform rules:
+
+- `harness.platform` selects exactly one active platform for normal dynamic, strict, and playground execution.
+- Entry layers build a platform-selected capability registry: CommonTool capabilities plus only the active platform's harness/driver capabilities.
+- `StepRunner`, `StepSequenceRunner`, evidence, recording, report generation, and FSQ parsing stay platform-neutral and consume capability metadata rather than platform action-name branches.
+- Platform-specific behavior belongs in platform parameter models, action catalogs, harnesses, drivers, config blocks, and configured skill Markdown.
+
+Android platform block:
+
+- Platform id: `android`.
+- First backend: `uiautomator2`.
+- Local app/device values come from `FSQ_ANDROID_APP_ID` and `FSQ_ANDROID_SERIAL` or strict FSQ case metadata where allowed.
+- Observation artifact: `ui_tree` with alias `uiTree`.
+- Harness skill: `android-harness.md`.
+
+Web platform block:
+
+- Platform id: `web`.
+- First backend: `playwright`.
+- Runtime settings include browser channel, environment-backed browser executable path, headless mode, optional base URL, and optional viewport fields when specified by module specs.
+- Observation artifact: `page_snapshot` with alias `pageSnapshot`; Web must not expose Android `ui_tree`/`uiTree` naming.
+- First-batch action surface follows Playwright MCP core automation semantics: snapshot-first targets, semantic actions, screenshots as observation/evidence, and unsafe/opt-in capability families deferred to later SPEC-reviewed groups.
+- Harness skill: `web-harness.md`.
+
+Future platform block:
+
+- New platforms must add their own module SPEC sections before implementation.
+- New platforms must reuse shared capability declaration/registry contracts, provide platform-selected default capability definitions, add platform-specific skill guidance, and keep runner/report/recording behavior metadata-driven.
 
 ## Prompt Context Boundaries
 
@@ -59,9 +92,9 @@ Loader diagnostics such as missing optional skills or missing optional knowledge
 | fsq | fsq_agent/fsq/SPEC.md | Loads FSQ AI Test DSL YAML cases, resolves authored action aliases through the capability registry, validates replay references, and converts parsed cases into canonical deterministic executable steps. |
 | skills | fsq_agent/skills/SPEC.md | Loads complete configured automation skill instruction bundles and skips or fails broken bundles according to requiredness. |
 | report | fsq_agent/report/SPEC.md | Generates LLM task reports, strict-core evidence reports, reconstructs tool calls from structured capability metadata, and resolves stored reports by run id. |
-| core | fsq_agent/core/SPEC.md | Defines the shared `StepRunner` execution manager, capability executor routing, harness/driver interfaces, and evidence coordination. |
+| core | fsq_agent/core/SPEC.md | Defines the shared `StepRunner` execution manager, capability executor routing, Android/Web harness and driver interfaces, concrete platform backends, and evidence coordination. |
 | agent | fsq_agent/agent/SPEC.md | Orchestrates dynamic goal/reference execution through OpenAI Agents SDK, registry-driven capability tool exposure, verification, replayable event metadata, and report generation. |
-| playground | fsq_agent/playground/SPEC.md | Serves the local browser playground for Android session setup, dynamic goal/raw-case execution, strict YAML execution, progress polling, screenshots, replay video preview, and report lookup. |
+| playground | fsq_agent/playground/SPEC.md | Serves the local browser playground for active-platform runtime status, Android session setup where applicable, dynamic goal/raw-case execution, strict YAML execution, screenshots, replay video preview, and report lookup. |
 | cli | fsq_agent/cli/SPEC.md | Exposes the public `init`, `run`, `report`, `playground`, capability registry bootstrap, strict replay, dynamic-run recording, and local playground workflows. |
 
 ## Architecture Diagram
@@ -109,7 +142,7 @@ flowchart TD
 - Package-private composition helpers at the `fsq_agent` package root may compose public module APIs for shared entry-layer bootstrap. They must remain private, must not expose public module contracts, and must not be imported by `models`, `capabilities`, `tools`, `fsq`, `core`, `providers`, or `report`.
 - `capabilities` may import `models` only among project modules. It must not import `tools`, `core`, `agent`, `cli`, `fsq`, `providers`, `report`, `playground`, SDK objects, concrete drivers, or backend runtime types.
 - Provider construction lives in `providers`; `core` must use provider-neutral protocols and must not import provider/runtime modules.
-- Cross-platform local utilities live as CommonTool capabilities in `tools`; platform actions and AI assertions live as harness or driver capabilities in `core`. Both domains declare executable metadata through `capabilities`. All executable capabilities must be registered before strict YAML parsing or SDK tool exposure.
+- Cross-platform local utilities live as CommonTool capabilities in `tools`; platform actions and AI assertions live as harness or driver capabilities in `core`. Both domains declare executable metadata through `capabilities`. All executable capabilities must be registered before strict YAML parsing or SDK tool exposure, and platform registries must contain only the active platform's harness/driver capabilities.
 - Replay, sensitivity, evidence, and tool-origin behavior must come from capability metadata and normalized `StepRunner` results, not hard-coded tool-name sets.
 - Public interface changes require `SPEC.md` update and user confirmation before implementation.
 - `CLAUDE.md` and `AGENTS.md` are agent entry points only. They must point to this root `SPEC.md` and must not duplicate project specification content.
@@ -117,7 +150,7 @@ flowchart TD
 ## Python Architecture Rules
 
 - Use the lowest architecture level that keeps the module clear, testable, and changeable.
-- `models`, `capabilities`, `tools`, `fsq`, `report`, `knowledge`, `skills`, `config`, `providers`, `observation`, and `playground` default to Level 2 Simple Package unless a module SPEC records a stronger need.
-- `core`, `agent`, and `cli` use Level 3 Layered Application because they coordinate execution flows, external SDKs, harnesses, providers, persistence, and user entry points.
+- `models`, `capabilities`, `tools`, `fsq`, `report`, `knowledge`, `skills`, `config`, `providers`, and `observation` default to Level 2 Simple Package unless a module SPEC records a stronger need.
+- `core`, `agent`, `cli`, and `playground` use Level 3 Layered Application because they coordinate execution flows, external SDKs, harnesses, providers, persistence, HTTP entry points, and user entry points.
 - Public APIs must be exported from module `__init__.py` files, and internal implementation modules must remain private across module boundaries.
 - Do not introduce Repository, Unit of Work, Clean Architecture, or DDD patterns unless a confirmed SPEC records the concrete reason.

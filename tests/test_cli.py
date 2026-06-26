@@ -19,6 +19,17 @@ appId: com.microsoft.emmx
 """
 
 
+WEB_FSQ_CASE = """
+schemaVersion: fsq.ai-test/v1
+name: Strict Web CLI Case
+platform: web
+---
+- navigateTo:
+    url: https://www.bing.com
+- pageSnapshot
+"""
+
+
 def _config(tmp_path: Path, body: str = "") -> Path:
     workspace = tmp_path / "workspace"
     cases_dir = tmp_path / "cases"
@@ -238,6 +249,85 @@ def test_run_strict_case_requires_config_or_case_app_id_before_driver_constructi
     result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--strict", "--case-yaml", str(case_path)])
 
     assert result.exit_code != 0
+
+
+def test_run_strict_web_case_builds_web_harness_without_android_app_id(tmp_path: Path, monkeypatch) -> None:
+    chrome_path = tmp_path / "chrome.exe"
+    chrome_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("FSQ_WEB_BROWSER_EXECUTABLE_PATH", str(chrome_path))
+    config_path = _config(
+        tmp_path,
+        """
+harness:
+  platform: web
+  web:
+    backend: playwright
+    channel: chrome
+    headless: true
+    base_url: https://www.bing.com
+    viewport_width: 1280
+    viewport_height: 720
+""",
+    )
+    case_path = tmp_path / "cases" / "strict_web.codex.yaml"
+    case_path.write_text(WEB_FSQ_CASE, encoding="utf-8")
+    calls = {}
+
+    class FakeWebDriver:
+        def __init__(self, **kwargs) -> None:
+            calls["driver"] = kwargs
+
+    def fake_run_strict_fsq_core_case(**kwargs):
+        calls["strict"] = kwargs
+        report_path = kwargs["output_dir"] / "core-report.md"
+        manifest_path = kwargs["output_dir"] / "evidence-manifest.json"
+        kwargs["output_dir"].mkdir(parents=True, exist_ok=True)
+        report_path.write_text("report", encoding="utf-8")
+        manifest_path.write_text("{}", encoding="utf-8")
+        return ReportArtifact(run_id=kwargs["run_id"], path=report_path, evidence_manifest_path=manifest_path)
+
+    monkeypatch.setattr("fsq_agent.cli._main.PlaywrightWebDriver", FakeWebDriver)
+    monkeypatch.setattr("fsq_agent.cli._main.run_strict_fsq_core_case", fake_run_strict_fsq_core_case)
+
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--strict", "--case-yaml", "strict_web.codex.yaml"])
+
+    assert result.exit_code == 0, result.output
+    assert calls["driver"] == {
+        "channel": "chrome",
+        "executable_path": chrome_path,
+        "headless": True,
+        "base_url": "https://www.bing.com",
+        "viewport": (1280, 720),
+    }
+    assert calls["strict"]["case_path"] == case_path.resolve()
+    assert calls["strict"]["run_id"] == "strict_web"
+    assert calls["strict"]["registry"].resolve("pageSnapshot") is not None
+    assert calls["strict"]["registry"].resolve("tapOn") is None
+
+
+def test_run_strict_rejects_case_platform_mismatch_before_driver_construction(tmp_path: Path, monkeypatch) -> None:
+    config_path = _config(
+        tmp_path,
+        """
+harness:
+  platform: web
+""",
+    )
+    case_path = tmp_path / "cases" / "android_case.codex.yaml"
+    case_path.write_text(FSQ_CASE, encoding="utf-8")
+    constructed = False
+
+    def fail_driver(**_kwargs):
+        nonlocal constructed
+        constructed = True
+        raise AssertionError("driver should not be constructed")
+
+    monkeypatch.setattr("fsq_agent.cli._main.PlaywrightWebDriver", fail_driver)
+
+    result = CliRunner().invoke(main, ["run", "--config", str(config_path), "--strict", "--case-yaml", "android_case.codex.yaml"])
+
+    assert result.exit_code != 0
+    assert constructed is False
 
 
 def test_run_strict_case_dir_continues_and_writes_summary(tmp_path: Path, monkeypatch) -> None:

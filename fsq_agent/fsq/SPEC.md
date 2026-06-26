@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository, including generated strict replay refs and pure waits, resolve authored action names through the capability registry, and convert parsed cases into deterministic canonical execution-core steps for strict-core execution. Dynamic LLM execution that uses a YAML file reads that file as raw text in the CLI layer and deliberately bypasses this module.
+Load FSQ AI Test DSL YAML cases from the merged FSQ testcase repository, including generated strict replay refs and pure waits, resolve authored Android or Web action names through the platform-selected capability registry, and convert parsed cases into deterministic canonical execution-core steps for strict-core execution. Dynamic LLM execution that uses a YAML file reads that file as raw text in the CLI layer and deliberately bypasses this module.
 
 Goal-only FSQ cases may omit the command document or provide an empty command list; parsed goal-only cases produce no executable steps.
 
@@ -29,7 +29,9 @@ steps = adapter.to_executable_steps(case)
 
 `FsqExecutableStepAdapter` resolves authored FSQ action names and replay aliases through the registry and stores the canonical capability name in `ExecutableStep.action_name`. Authored names such as `tapOn`, `inputText`, `pressKey`, `assertVisible`, `assert`, `assertWithAI`, and generated replay alias `waitMs` are preserved in `ExecutableStep.metadata["authored_action_name"]`.
 
-The adapter should normalize each known YAML command into `ExecutableStep.params` by resolving the action alias to a `CapabilityDefinition`, validating object-shaped payloads against `capability.params_model`, then storing `model_dump(mode="json", exclude_none=True)`. Known action payloads should be authored in the same field shape as their parameter models rather than relying on action-specific scalar shorthand. The first-batch canonical forms are:
+The adapter should normalize each known YAML command into `ExecutableStep.params` by resolving the action alias to a `CapabilityDefinition`, validating object-shaped payloads against `capability.params_model`, then storing `model_dump(mode="json", exclude_none=True)`. Known action payloads should be authored in the same field shape as their parameter models rather than relying on action-specific scalar shorthand. The first-batch canonical forms are grouped by active platform plus shared CommonTool commands.
+
+Android command block:
 
 | FSQ command shape | canonical `action_name` | `params` |
 |---|---|---|
@@ -45,6 +47,26 @@ The adapter should normalize each known YAML command into `ExecutableStep.params
 | `assert: {element: ..., text: ...}` | `assert_state` | validated `AndroidAssertStateParams` dump |
 | `assertWithAI: {prompt: ...}` | `assert_with_ai` | validated `AndroidAssertWithAIParams` dump |
 | `inputText: {text: {runtimeSecret: TEST_PASSWORD}, ...}` | `input_text` | pre-resolution params preserving `{"text": {"runtimeSecret": "TEST_PASSWORD"}}` for strict entry resolution |
+
+Web command block:
+
+| FSQ command shape | canonical `action_name` | `params` |
+|---|---|---|
+| `navigateTo: {url: https://example.test}` | `navigate_to` | validated `WebNavigateToParams` dump |
+| `navigateBack: {}` | `navigate_back` | validated `WebNavigateBackParams` dump |
+| `clickOn: {target: Submit}` | `click_on` | validated `WebClickOnParams` dump |
+| `typeText: {target: Email, text: user@example.test}` | `type_text` | validated `WebTypeTextParams` dump |
+| `selectOption: {target: Country, values: [US]}` | `select_option` | validated `WebSelectOptionParams` dump |
+| `hoverOn: {target: Menu}` | `hover_on` | validated `WebHoverOnParams` dump |
+| `waitFor: {text: Loaded}` | `wait_for` | validated `WebWaitForParams` dump |
+| `takeScreenshot: {full_page: true}` | `take_screenshot` | validated `WebTakeScreenshotParams` dump |
+| `assertText: {text: {contains: Welcome}}` | `assert_text` | validated `WebAssertTextParams` dump |
+| `pageSnapshot: {}` | `page_snapshot` | validated `WebPageSnapshotParams` dump |
+
+Shared command block:
+
+| FSQ command shape | canonical `action_name` | `params` |
+|---|---|---|
 | `waitMs: {duration_ms: 1000, reason: settle}` | `wait_ms` | validated `WaitMsParams` dump |
 
 For commands containing `runtimeSecret` replay refs, `FsqExecutableStepAdapter` may validate the non-secret shape using placeholder text while preserving the `RuntimeSecretRef` object/dict in `ExecutableStep.params`. Final capability parameter validation with the real secret value is owned by the strict CLI entry after in-memory resolution.
@@ -57,8 +79,8 @@ Step kind mapping for known actions is owned by capability metadata:
 |---|---|
 | `launchApp` | `setup` |
 | `killApp` | `teardown` |
-| `assert`, `assertVisible`, `assertNotVisible`, `assertWithAI` | `assertion` |
-| `takeScreenshot`, `startRecording`, `stopRecording` | `observation` |
+| `assert`, `assertVisible`, `assertNotVisible`, `assertText`, `assertWithAI` | `assertion` |
+| `takeScreenshot`, `startRecording`, `stopRecording`, `pageSnapshot` | `observation` |
 | `waitMs` | `action` |
 | all other commands | `action` |
 
@@ -100,10 +122,11 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Unsupported 
 - Configured `cases.dir` is treated as read-only input. Strict-core execution may parse FSQ case files from it, while dynamic LLM execution may read case files from it as raw text. Generated files and evidence must be written under the output root.
 - Markdown conversion reports are intentionally ignored and are not loaded as task inputs.
 - FSQ commands are deterministic ordered input for the strict-core execution path when converted by `FsqExecutableStepAdapter`. Generated recorded cases may include strict replay refs and pure wait commands, but those are still deterministic authored input by the time strict execution begins.
-- Deterministic command payload normalization uses the capability registry snapshot. Authored command payloads use the same object field names as the resolved capability parameter models, which keeps case parsing, future case generation, harness dispatch, and SDK schemas aligned to one payload contract while preserving authored names in metadata. Strict replay refs are the sole exception: the adapter may preserve `RuntimeSecretRef` values in pre-resolution params so the CLI strict entry can resolve them before final validation.
+- Deterministic command payload normalization uses the platform-selected capability registry snapshot. Authored command payloads use the same object field names as the resolved capability parameter models, which keeps case parsing, future case generation, harness dispatch, and SDK schemas aligned to one payload contract while preserving authored names in metadata. Strict replay refs are the sole exception: the adapter may preserve `RuntimeSecretRef` values in pre-resolution params so the CLI strict entry can resolve them before final validation.
 - Capability decorators and platform action catalogs are declaration-time inputs only. FSQ parsing consumes resolved `CapabilityDefinition` data from the registry snapshot and must not inspect decorated functions or platform catalog objects directly.
 - `waitMs` is a generated strict replay alias for the decorated `wait_ms` CommonTool capability. It is validated by `WaitMsParams`, converted into an `ExecutableStep(action_name="wait_ms")`, and later handled by `StepRunner` through the normal registry path without invoking Android harness or driver actions.
 - `assertWithAI` is parsed and validated like any other authored assertion command. This module does not evaluate AI assertions, build provider-backed evaluators, capture screenshots, or decide assertion verdicts.
+- Web aliases such as `navigateTo`, `navigateBack`, `clickOn`, `typeText`, `selectOption`, `hoverOn`, `waitFor`, `takeScreenshot`, `assertText`, and `pageSnapshot` are accepted only when the supplied registry snapshot contains the corresponding Web capabilities. Android registries must not accept Web-only aliases, and Web registries must not accept Android-only aliases.
 - `launchApp` and `killApp` are treated as setup and teardown step kinds for strict-core execution.
 - Commands marked `optional: true` are still converted into executable steps; optional/non-blocking execution semantics do not belong to this adapter.
 - Parsed FSQ cases are not converted into LLM `Task` descriptions. For normal LLM `run --case-yaml` and `run --case-dir`, the CLI reads raw file text and builds goal/reference tasks without calling this module.

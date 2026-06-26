@@ -523,6 +523,54 @@ def test_playground_execute_requires_session() -> None:
     assert "No active" in payload["error"]
 
 
+def test_playground_web_platform_does_not_require_android_session(monkeypatch) -> None:
+    settings = Settings(harness={"platform": "web"})
+    captured = {}
+
+    def fake_start_dynamic_goal_execution(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("fsq_agent.playground._server.start_dynamic_goal_execution", fake_start_dynamic_goal_execution)
+    server = PlaygroundServer(settings)
+
+    status, payload = server.handle_post("/execute", {"goal": "Do it"})
+
+    assert status == 202
+    assert payload["requestId"]
+    assert captured["device_id"] is None
+
+
+def test_playground_web_platform_session_endpoints_are_unavailable() -> None:
+    chrome_path = Path("C:/Chrome/chrome.exe")
+    settings = Settings(
+        harness={
+            "platform": "web",
+            "web": {"backend": "playwright", "channel": "chrome", "headless": False, "base_url": "https://example.test"},
+        }
+    )
+    settings.harness.web.browser_executable_path = chrome_path
+    server = PlaygroundServer(settings)
+
+    session_status, session_payload = server.handle_get("/session", {})
+    setup_status, setup_payload = server.handle_get("/session/setup", {})
+    auto_status, auto_payload = server.handle_post("/session/auto", {})
+    runtime_status, runtime_payload = server.handle_get("/runtime-info", {})
+
+    assert session_status == 200
+    assert session_payload["available"] is False
+    assert setup_status == 200
+    assert setup_payload["available"] is False
+    assert auto_status == 409
+    assert auto_payload["available"] is False
+    assert runtime_status == 200
+    assert runtime_payload["platformId"] == "web"
+    assert runtime_payload["metadata"]["backend"] == "playwright"
+    assert runtime_payload["metadata"]["channel"] == "chrome"
+    assert runtime_payload["metadata"]["browserExecutableConfigured"] is True
+    assert runtime_payload["metadata"]["headless"] is False
+    assert runtime_payload["metadata"]["baseUrlPresent"] is True
+
+
 def test_playground_execute_requires_exactly_one_source() -> None:
     server = PlaygroundServer(Settings())
     server.state.create_session("device-1")
@@ -766,6 +814,92 @@ appId: com.microsoft.emmx
     assert captured["driver"] == {"app_id": "com.microsoft.emmx", "serial": "device-1"}
     assert captured["steps"][0].action_name == "launch_app"
     assert captured["steps"][0].metadata["authored_action_name"] == "launchApp"
+
+
+def test_playground_strict_web_yaml_execution_uses_web_harness(tmp_path: Path, monkeypatch) -> None:
+    chrome_path = tmp_path / "chrome.exe"
+    chrome_path.write_text("", encoding="utf-8")
+    settings = Settings(
+        harness={
+            "platform": "web",
+            "web": {
+                "backend": "playwright",
+                "channel": "chrome",
+                "headless": True,
+                "base_url": "https://example.test",
+                "viewport_width": 1280,
+                "viewport_height": 720,
+            },
+        }
+    )
+    settings.harness.web.browser_executable_path = chrome_path
+    settings.cases.dir = tmp_path / "cases"
+    settings.output.runs_dir = tmp_path / "runs"
+    settings.cases.dir.mkdir()
+    case_path = settings.cases.dir / "strict_web.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Strict Web Case
+platform: web
+---
+- navigateTo:
+    url: /search
+- clickOn:
+    target: Search
+""",
+        encoding="utf-8",
+    )
+    state = PlaygroundState()
+    request_id = state.start_task("Strict Web")
+    captured = {}
+
+    class FakeWebDriver:
+        def __init__(self, **kwargs):
+            captured["driver"] = kwargs
+
+    def fake_run_strict_core_steps(**kwargs):
+        captured["steps"] = kwargs["steps"]
+        captured["registry"] = kwargs["registry"]
+        output_dir = kwargs["output_dir"]
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report_path = output_dir / "core-report.md"
+        json_path = output_dir / "core-report.json"
+        manifest_path = output_dir / "evidence-manifest.json"
+        report_path.write_text("report", encoding="utf-8")
+        json_path.write_text('{"summary":{"status":"passed","failed_steps":0}}', encoding="utf-8")
+        manifest_path.write_text("{}", encoding="utf-8")
+        return ReportArtifact(run_id=kwargs["run_id"], path=report_path, evidence_manifest_path=manifest_path)
+
+    monkeypatch.setattr("fsq_agent.playground._execution.PlaywrightWebDriver", FakeWebDriver)
+    monkeypatch.setattr("fsq_agent.playground._execution._run_strict_core_steps", fake_run_strict_core_steps)
+
+    _run_dynamic_task(
+        settings=settings,
+        state=state,
+        request_id=request_id,
+        goal=None,
+        case_yaml_path=None,
+        strict_case_yaml_path="strict_web.codex.yaml",
+        device_id=None,
+        record=True,
+        record_on_failure=True,
+    )
+
+    progress = state.get_task(request_id)
+    assert progress is not None
+    assert progress["result"]["status"] == "success"
+    assert captured["driver"] == {
+        "channel": "chrome",
+        "executable_path": chrome_path,
+        "headless": True,
+        "base_url": "https://example.test",
+        "viewport": (1280, 720),
+    }
+    assert captured["registry"].resolve("pageSnapshot") is not None
+    assert captured["registry"].resolve("tapOn") is None
+    assert captured["steps"][0].action_name == "navigate_to"
+    assert captured["steps"][0].metadata["authored_action_name"] == "navigateTo"
 
 
 def test_playground_strict_yaml_runs_outside_async_event_loop(monkeypatch) -> None:

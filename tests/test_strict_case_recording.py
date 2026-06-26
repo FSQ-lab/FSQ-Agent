@@ -97,3 +97,55 @@ def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_
     manifest = json.loads((run_dir / "recording.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "recorded"
     assert manifest["command_count"] == 2
+
+
+def test_record_dynamic_web_run_validates_against_web_registry(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "recorded-web-run"
+    run_dir.mkdir(parents=True)
+    events_path = run_dir / "events.jsonl"
+    task = Task(id="task-1", name="Search", description="Search the web")
+    result = TaskResult(
+        task_id="task-1",
+        status="success",
+        steps=[],
+        verification=VerificationResult(status="success", summary="ok"),
+        report=ReportArtifact(run_id="recorded-web-run", path=run_dir / "report.md"),
+    )
+    output_settings = OutputSettings()
+    output_settings.runs_dir = tmp_path / "runs"
+    settings = Settings(output=output_settings, harness=HarnessSettings(platform="web"))
+
+    _write_event(
+        events_path,
+        RunEvent(
+            run_id="recorded-web-run",
+            task_id="task-1",
+            type="tool_call_started",
+            title="Tool call started",
+            tool_name="click_on",
+            tool_call_id="call-1",
+            tool_arguments={"target": "Search"},
+            payload={"tool_origin": "harness", "capability_name": "click_on", "replay": {"kind": "fsq_command", "alias": "clickOn"}},
+        ),
+    )
+    _write_event(
+        events_path,
+        RunEvent(
+            run_id="recorded-web-run",
+            task_id="task-1",
+            type="tool_call_completed",
+            title="Tool call completed",
+            tool_name="click_on",
+            tool_call_id="call-1",
+            payload={"tool_origin": "harness", "capability_name": "click_on", "replay": {"kind": "fsq_command", "alias": "clickOn"}, "status": "passed"},
+        ),
+    )
+
+    recording = record_dynamic_run_as_strict_case(run_dir=run_dir, task=task, result=result, settings=settings)
+
+    assert recording.status == "recorded"
+    assert recording.validation_status == "passed"
+    docs = list(yaml.safe_load_all((run_dir / "recorded.codex.yaml").read_text(encoding="utf-8")))
+    assert docs[0]["platform"] == "web"
+    assert "appId" not in docs[0]
+    assert docs[1] == [{"clickOn": {"target": "Search"}}]

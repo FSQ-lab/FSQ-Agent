@@ -30,13 +30,16 @@ Target `__init__.py` exports via `__all__`:
 - `AndroidDriverInterface`: Protocol describing typed Android backend driver methods that Android driver capabilities may call.
 - `AndroidHarness`: Built-in Android runner-facing harness that satisfies `HarnessInterface`, hosts harness-owned capabilities such as `assert_with_ai`, routes driver capabilities to `AndroidDriverInterface`, validates action payloads with shared Pydantic models, converts driver/evaluator output into `HarnessActionResult`, and owns Android artifact capture integration.
 - `UiAutomator2AndroidDriver`: Optional Android backend driver that satisfies `AndroidDriverInterface` using uiautomator2 when the `android` extra is installed.
+- `WebDriverInterface`: Protocol describing typed Web backend driver methods that Web driver capabilities may call.
+- `WebHarness`: Built-in Web runner-facing harness that satisfies `HarnessInterface`, hosts harness-owned capabilities such as `assert_with_ai`, routes driver capabilities to `WebDriverInterface`, validates action payloads with shared Pydantic models, converts driver/evaluator output into `HarnessActionResult`, and owns Web artifact capture integration.
+- `PlaywrightWebDriver`: Optional Web backend driver that satisfies `WebDriverInterface` using Playwright sync APIs when the `web` extra is installed and a configured local browser executable path is available for the selected Web channel.
 - `driver_tool` compatibility helper and catalog-backed platform driver declaration helpers: Decorate concrete backend methods with capability metadata using the shared `capabilities` declaration layer; they do not execute or register capabilities by themselves. Android-specific behavior is represented by Android action catalog entries rather than a unique decorator implementation.
 
 Planned subpackage exports:
 
 - `fsq_agent.core.registry`: `CapabilityRegistry`, registry validation, alias resolution, and registry snapshots.
 - `fsq_agent.core.runner`: `StepRunner`, executor binding protocols, and sequence runner orchestration.
-- `fsq_agent.core.harness`: `HarnessInterface`, `AIAssertionEvaluatorProtocol`, Android harness/driver contracts, concrete Android backend implementations, and thin driver declaration helpers backed by `capabilities`.
+- `fsq_agent.core.harness`: `HarnessInterface`, `AIAssertionEvaluatorProtocol`, Android/Web harness and driver contracts, concrete Android/Web backend implementations, and thin driver declaration helpers backed by `capabilities`.
 - `fsq_agent.core.evidence`: `EvidenceRecorder`, `ArtifactStore`, and evidence coordination logic.
 
 `StepRunner` exposes a narrow API:
@@ -59,7 +62,7 @@ For each invocation, `StepRunner` must:
 1. Resolve the canonical capability from the registry.
 2. Validate params with `capability.params_model`.
 3. Build safe invocation context containing run id, step id, source ref, authored action metadata, and capability metadata.
-4. Derive the effective evidence policy from capability metadata and any explicit step policy. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True` and the default `EvidencePolicy()`, the effective policy must capture `screenshot` and `ui_tree` artifacts before the action, after the action, and on failure. A non-default `ExecutableStep.evidence_policy` is explicit and must not be overwritten by capability metadata.
+4. Derive the effective evidence policy from capability metadata and any explicit step policy. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True` and the default `EvidencePolicy()`, the effective policy must capture `screenshot` plus the active platform observation artifact before the action, after the action, and on failure. Android captures `ui_tree`; Web captures `page_snapshot`. A non-default `ExecutableStep.evidence_policy` is explicit and must not be overwritten by capability metadata.
 5. Resolve the effective post-action delay from `CapabilityDefinition.post_action_delay_seconds` when it is not `None`; otherwise use configured `execution.post_action_delay_seconds.common` for `common` capabilities and `execution.post_action_delay_seconds.platform` for `harness` and `driver` capabilities.
 6. Route by `executor_kind`: `common` to the CommonTool executor binding, `harness` to a harness-owned handler, and `driver` through the active harness to the platform driver/backend.
 7. Normalize backend output into the shared runner result contract.
@@ -81,7 +84,21 @@ It must not import `fsq`, parse YAML, construct platform drivers, resolve strict
 
 `HarnessInterface` provides runner-facing behavior for context, artifact capture, and harness/driver capability execution. Platform harnesses are FSQ-controlled adapters; drivers execute backend mechanics and return raw platform observations. Harnesses and drivers do not decide runner ordering, retry policy, event emission, evidence manifest structure, artifact directory policy, case aggregation, or report generation.
 
+### Android Platform Block
+
 Android LLM-exposed uiautomator2 capabilities in this SPEC cycle include canonical names such as `launch_app`, `kill_app`, `tap_on`, `long_press_on`, `input_text`, `press_key`, `swipe`, `assert_visible`, `assert_not_visible`, `assert_state`, `ui_tree`, and harness-owned `assert_with_ai`. Authored FSQ aliases include `launchApp`, `killApp`, `tapOn`, `longPressOn`, `inputText`, `pressKey`, `swipe`, `assertVisible`, `assertNotVisible`, `assert`, `uiTree`, and `assertWithAI`. The Android action catalog may describe `perform_actions` / `performActions`, but an unimplemented uiautomator2 backend method must not be decorated as a capability and must not appear in harness `action_space()` or SDK tool exposure.
+
+Android owns `AndroidHarness`, `AndroidDriverInterface`, `UiAutomator2AndroidDriver`, Android catalog-backed driver declarations, and Android default capability definitions. Android artifact capture supports `screenshot` and `ui_tree`.
+
+### Web Platform Block
+
+Web LLM-exposed Playwright capabilities in this SPEC cycle are inspired by Playwright MCP core automation and include canonical names `navigate_to`, `navigate_back`, `click_on`, `type_text`, `select_option`, `hover_on`, `press_key`, `wait_for`, `take_screenshot`, `page_snapshot`, `assert_visible`, `assert_not_visible`, `assert_text`, and harness-owned `assert_with_ai`. Authored FSQ aliases include `navigateTo`, `navigateBack`, `clickOn`, `typeText`, `selectOption`, `hoverOn`, `pressKey`, `waitFor`, `takeScreenshot`, `pageSnapshot`, `assertVisible`, `assertNotVisible`, `assertText`, and `assertWithAI`. Web observation uses `page_snapshot`/`pageSnapshot` and must not reuse Android `ui_tree`/`uiTree` naming. Unsafe JavaScript/evaluate, generated Playwright test code, network/storage/devtools, tabs, drag/drop, file upload, PDF, and coordinate/vision capabilities are out of first-batch scope unless a later SPEC adds opt-in capability groups.
+
+Web owns `WebHarness`, `WebDriverInterface`, `PlaywrightWebDriver`, Web catalog-backed driver declarations, and Web default capability definitions. Web artifact capture supports `screenshot` and `page_snapshot`. Playwright import and configured channel/executable launch are lazy runtime/backend concerns, not registry-bootstrap concerns.
+
+### Future Platform Block
+
+Future Web-adjacent capability groups and future platforms must add their own platform block, parameter models, default capability definitions, harness/driver contracts, and verification expectations before implementation. New platform blocks must keep `StepRunner` and `StepSequenceRunner` platform-neutral.
 
 Capability metadata, not a static Android action table, is the runtime source of truth for Android method name, parameter model, step kind, owner, platform/backend metadata, replay alias, and evidence capture intent. Android action catalog entries are declaration-time validation inputs that generate capability metadata; they are not an execution path or parser fallback.
 
@@ -89,7 +106,7 @@ Capability metadata, not a static Android action table, is the runtime source of
 
 - `__init__.py`: Public exports only.
 - `_capabilities.py`: Capability registry, alias resolution, duplicate validation, executor bindings, and snapshot creation.
-- `_default_capabilities.py`: Android harness/driver capability definitions used by entry-layer registry bootstrap without constructing a real backend connection.
+- `_default_capabilities.py`: Android and Web harness/driver capability definitions used by entry-layer registry bootstrap without constructing a real backend connection.
 - `runner/__init__.py`: Runner subpackage exports only.
 - `runner/_runner.py`: `StepRunner` implementation for single-step capability execution.
 - `runner/_sequence.py`: `StepSequenceRunner` implementation for ordered execution and evidence recording.
@@ -97,8 +114,11 @@ Capability metadata, not a static Android action table, is the runtime source of
 - `harness/_interface.py`: `HarnessInterface` and `AIAssertionEvaluatorProtocol` protocols.
 - `harness/_android.py`: Built-in `AndroidHarness` implementation and Android harness-owned capability declarations.
 - `harness/_android_driver.py`: `AndroidDriverInterface` protocol and driver-owned contracts.
-- `harness/_driver_tools.py`: Thin driver declaration compatibility helpers, Android action catalog wiring, and function schema/capability discovery wrappers backed by `capabilities`.
+- `harness/_web.py`: Built-in `WebHarness` implementation and Web harness-owned capability declarations.
+- `harness/_web_driver.py`: `WebDriverInterface` protocol and driver-owned contracts.
+- `harness/_driver_tools.py`: Thin driver declaration compatibility helpers, Android/Web action catalog wiring, and function schema/capability discovery wrappers backed by `capabilities`.
 - `harness/_uiautomator2_driver.py`: Optional uiautomator2 backend implementation with lazy dependency import and fake-device injection for tests.
+- `harness/_playwright_driver.py`: Optional Playwright backend implementation with lazy dependency import, browser/page lifecycle management, and fake-page injection for tests.
 - `evidence/__init__.py`: Evidence subpackage exports only.
 - `evidence/_recorder.py`: `EvidenceRecorder` implementation.
 - `evidence/_artifact_store.py`: `ArtifactStore` implementation for run-local artifact paths and file writing.
@@ -109,7 +129,7 @@ Core must not define Pydantic models shared across modules. Shared models belong
 ## Python Architecture
 
 - Architecture level: 3 Layered Application.
-- Public API: capability registry, executor bindings, Android capability definitions, runner, sequence runner, harness protocols, Android harness/driver contracts, evidence recorder/store, and provider-neutral AI assertion evaluator protocol exported from package/subpackage `__init__.py` files.
+- Public API: capability registry, executor bindings, Android/Web capability definitions, runner, sequence runner, harness protocols, Android/Web harness/driver contracts, evidence recorder/store, and provider-neutral AI assertion evaluator protocol exported from package/subpackage `__init__.py` files.
 - Internal modules: all `_*.py` files and implementation subpackages remain private outside documented exports.
 - Domain boundaries: core owns execution orchestration and provider-neutral platform coordination. Provider construction, SDK tool creation, CLI parsing, FSQ parsing, and report generation live outside core.
 - Boundary models: all serializable contracts come from `models`; core protocols and concrete runners operate on those contracts.
@@ -132,10 +152,10 @@ Sensitive capabilities must return values in the standard normalized shape `outp
 
 ## Testing Contract
 
-- Unit tests: registry validation, alias resolution, duplicate/ambiguous failures, StepRunner routing by executor kind, capability-derived evidence policy application, explicit evidence policy preservation, post-action delay resolution and ordering, sensitivity redaction, structured event payloads, sequence teardown behavior, and Android harness dispatch.
-- Integration-style tests with fakes: strict `waitMs` alias resolves to canonical `wait_ms`; dynamic and strict `wait_ms` reach the same decorated implementation; Android aliases resolve to canonical driver capabilities; registry bootstrap does not connect to real Android devices.
+- Unit tests: registry validation, alias resolution, duplicate/ambiguous failures, StepRunner routing by executor kind, capability-derived evidence policy application, explicit evidence policy preservation, post-action delay resolution and ordering, sensitivity redaction, structured event payloads, sequence teardown behavior, Android harness dispatch, and Web harness dispatch.
+- Integration-style tests with fakes: strict `waitMs` alias resolves to canonical `wait_ms`; dynamic and strict `wait_ms` reach the same decorated implementation; Android aliases resolve to canonical driver capabilities; Web aliases resolve to canonical driver capabilities; registry bootstrap does not connect to real Android devices or launch Playwright browsers.
 - Regression tests: no `waitMs` action-name special branch in StepRunner, no static Android action registry dependency in FSQ parsing, no name-based CommonTool replay/sensitivity/delay branches, no synthetic `waitMs` or evidence steps from post-action delay, no StepSequenceRunner configured inter-step sleep, and no dynamic/strict drift for `capture_evidence=True` harness or driver capabilities.
-- Verification commands: `./.venv/Scripts/python.exe -m pytest tests/test_core_contracts.py tests/test_step_runner.py tests/test_android_harness.py` plus broader tests when implementation touches CLI/agent/report paths.
+- Verification commands: `./.venv/Scripts/python.exe -m pytest tests/test_core_contracts.py tests/test_step_runner.py tests/test_android_harness.py tests/test_web_harness.py` plus broader tests when implementation touches CLI/agent/report paths.
 
 ## Design Decisions
 
@@ -147,8 +167,9 @@ Sensitive capabilities must return values in the standard normalized shape `outp
 - `wait_ms` is a decorated CommonTool capability with replay alias `waitMs`, not a core-owned special command.
 - `get_runtime_secret` is a decorated sensitive CommonTool capability with dependency replay alias `runtimeSecret`, not a report/recorder special case.
 - Harness-owned actions such as Android `assert_with_ai` use the same capability metadata path as driver-backed actions but route through the active harness rather than a driver method.
-- Concrete drivers control dynamic exposure by decorating implemented methods with shared capability metadata. A protocol method existing on `AndroidDriverInterface`, a Pydantic parameter model, or an action catalog entry is not enough to expose it to the registry or to the LLM. Future web, desktop, and iOS platforms should add platform action catalogs and reuse catalog-backed declaration helpers rather than creating platform-specific decorator implementations.
+- Concrete drivers control dynamic exposure by decorating implemented methods with shared capability metadata. A protocol method existing on `AndroidDriverInterface` or `WebDriverInterface`, a Pydantic parameter model, or an action catalog entry is not enough to expose it to the registry or to the LLM. Web, desktop, and iOS platforms should add platform action catalogs and reuse catalog-backed declaration helpers rather than creating platform-specific decorator implementations.
 - Android backend construction must be lazy enough that registry bootstrap and strict YAML parsing never require a real device connection.
+- Web backend construction must be lazy enough that registry bootstrap and strict YAML parsing never require importing Playwright or launching a browser.
 - AI assertion is explicit assertion execution. It may call an injected evaluator only because the authored capability requested AI assertion; it must not be used for locator fallback, action repair, screenshot reinspection of unrelated steps, or testcase mutation.
 - Locator self-healing is not part of strict execution. Any deterministic fallback or AI-assisted repair must be represented as recovery execution so reports can compare strict truth with recovery outcome.
 - Evidence artifacts use run-relative paths. `ArtifactStore` owns directory layout and artifact writing; runners and harnesses do not construct artifact paths manually.

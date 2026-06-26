@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
 from fsq_agent.agent import FsqAgent
 from fsq_agent.config import Settings, validate_runtime_settings, validate_strict_core_settings
-from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, StepRunner, StepSequenceRunner, UiAutomator2AndroidDriver
+from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, PlaywrightWebDriver, StepRunner, StepSequenceRunner, UiAutomator2AndroidDriver, WebHarness
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import CapabilityRegistrySnapshot, ExecutableStep, PostActionDelaySettings, ReportArtifact, RunEvent, RunnerEvent, RuntimeSecretRef, Task, TaskResult, VerificationResult
 from fsq_agent.playground._recording import record_dynamic_result
@@ -217,7 +217,7 @@ async def _run_dynamic_task_async(
 	record_on_failure: bool,
 ) -> None:
 	run_settings = settings.model_copy(deep=True)
-	if device_id:
+	if device_id and run_settings.harness.platform == "android":
 		run_settings.harness.android.serial = device_id
 	try:
 		_raise_if_cancelled(state, request_id)
@@ -269,14 +269,12 @@ def _raise_if_cancelled(state: PlaygroundState, request_id: str) -> None:
 def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id: str, path_text: str) -> TaskResult:
 	case_path = _resolve_case_yaml_path(path_text, settings)
 	case = FsqCaseLoader().load_case(case_path)
-	registry = build_capability_registry()
+	_validate_strict_case_platform(settings, case)
+	registry = build_capability_registry(platform=settings.harness.platform)
 	executors = build_capability_executor_bindings()
 	registry_snapshot = registry.snapshot()
 	requires_ai_assertion = _case_requires_ai_assertion(case, registry_snapshot)
 	validate_strict_core_settings(settings, requires_ai_assertion=requires_ai_assertion)
-	app_id = settings.harness.android.app_id or case.config.app_id or ""
-	if not app_id:
-		raise ValueError("Android app id is required for strict YAML runs.")
 	run_id = case.id
 	run_dir = Path(settings.output.runs_dir) / run_id
 	state.add_event(
@@ -288,11 +286,7 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		settings,
 		registry_snapshot,
 	)
-	harness = AndroidHarness(
-		driver=UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial),
-		artifact_store=ArtifactStore(run_dir=run_dir),
-		ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
-	)
+	harness = _build_strict_harness(settings, case, run_dir, requires_ai_assertion)
 	cancellable_harness = _CancellableHarness(harness, state, request_id)
 	artifact = _run_strict_core_steps(
 		case_path=case_path,
@@ -328,7 +322,7 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 
 
 class _CancellableHarness:
-	def __init__(self, harness: AndroidHarness, state: PlaygroundState, request_id: str) -> None:
+	def __init__(self, harness: Any, state: PlaygroundState, request_id: str) -> None:
 		self._harness = harness
 		self._state = state
 		self._request_id = request_id
@@ -375,7 +369,7 @@ def _resolve_case_yaml_path(path_text: str, settings: Settings) -> Path:
 def _run_strict_core_steps(
 	*,
 	case_path: Path,
-	harness: AndroidHarness,
+	harness: Any,
 	output_dir: Path,
 	run_id: str,
 	steps: list[ExecutableStep],
@@ -444,7 +438,7 @@ def _strict_report_status(artifact: ReportArtifact) -> tuple[str, str]:
 
 
 def _case_requires_ai_assertion(case, registry_snapshot: CapabilityRegistrySnapshot | None = None) -> bool:
-	snapshot = registry_snapshot or build_capability_registry().snapshot()
+	snapshot = registry_snapshot or build_capability_registry(platform=case.config.platform).snapshot()
 	return any(step.action_name == "assert_with_ai" for step in FsqExecutableStepAdapter(registry_snapshot=snapshot).to_executable_steps(case))
 
 
@@ -454,7 +448,7 @@ def _resolve_strict_replay_steps(
 	registry_snapshot: CapabilityRegistrySnapshot | None = None,
 ) -> list[ExecutableStep]:
 	allowed_names = set(settings.runtime_secrets.allowed_env_names)
-	snapshot = registry_snapshot or build_capability_registry().snapshot()
+	snapshot = registry_snapshot or build_capability_registry(platform=settings.harness.platform).snapshot()
 	resolved_steps = []
 	for step in steps:
 		resolved_params = _resolve_replay_value(step.params, allowed_names, step.step_id)
@@ -498,6 +492,41 @@ def _validate_resolved_params(step: ExecutableStep, params: dict[str, Any], regi
 		capability.params_model.model_validate(params)
 	except ValidationError as exc:
 		raise ValueError(f"Invalid strict replay command after runtime secret resolution: {step.step_id}") from exc
+
+
+def _validate_strict_case_platform(settings: Settings, case) -> None:
+	if case.config.platform == settings.harness.platform:
+		return
+	raise ValueError(
+		f"Strict case platform {case.config.platform!r} does not match configured harness platform {settings.harness.platform!r}."
+	)
+
+
+def _build_strict_harness(settings: Settings, case, run_dir: Path, requires_ai_assertion: bool) -> Any:
+	if settings.harness.platform == "android":
+		app_id = settings.harness.android.app_id or case.config.app_id or ""
+		if not app_id:
+			raise ValueError("Android app id is required for strict YAML runs.")
+		return AndroidHarness(
+			driver=UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial),
+			artifact_store=ArtifactStore(run_dir=run_dir),
+			ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
+		)
+	if settings.harness.platform == "web":
+		web = settings.harness.web
+		viewport = (web.viewport_width, web.viewport_height) if web.viewport_width is not None and web.viewport_height is not None else None
+		return WebHarness(
+			driver=PlaywrightWebDriver(
+				channel=web.channel,
+				executable_path=web.browser_executable_path,
+				headless=web.headless,
+				base_url=web.base_url,
+				viewport=viewport,
+			),
+			artifact_store=ArtifactStore(run_dir=run_dir),
+			ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
+		)
+	raise ValueError(f"Unsupported harness platform: {settings.harness.platform}")
 
 
 def _event_sink(state: PlaygroundState, request_id: str) -> Callable[[RunEvent], None]:
