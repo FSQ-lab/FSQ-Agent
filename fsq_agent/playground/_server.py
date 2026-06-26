@@ -140,14 +140,28 @@ class PlaygroundServer:
             "screenshot": base64.b64encode(preview_path.read_bytes()).decode("ascii"),
         }
 
-    def handle_replay_video_file(self, path: str) -> tuple[int, bytes, str]:
+    def handle_replay_video_file(self, path: str, range_header: str | None = None) -> tuple[int, bytes, str, dict[str, str]]:
         replay_id = unquote(path.removeprefix("/replay-video-file/")).strip()
         run_id = self.state.run_id_for_request(replay_id) or replay_id
         video_path = self._replay_video_path(run_id)
         if not video_path.exists():
             payload = {"available": False, "error": "Replay video not found.", "runId": run_id}
-            return 404, json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8"
-        return 200, video_path.read_bytes(), "video/webm"
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            return 404, body, "application/json; charset=utf-8", {}
+        total_size = video_path.stat().st_size
+        byte_range = _parse_byte_range(range_header, total_size)
+        if byte_range is None:
+            body = video_path.read_bytes()
+            return 200, body, "video/webm", {"Accept-Ranges": "bytes"}
+        start, end = byte_range
+        with video_path.open("rb") as handle:
+            handle.seek(start)
+            body = handle.read(end - start + 1)
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{total_size}",
+        }
+        return 206, body, "video/webm", headers
 
     def handle_post(self, path: str, body: dict[str, object]) -> tuple[int, object]:
         if path == "/session":
@@ -549,8 +563,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API.
         parsed = urlparse(self.path)
         if parsed.path.startswith("/replay-video-file/"):
-            status, payload, content_type = self.server.playground.handle_replay_video_file(parsed.path)
-            self._send_bytes(status, payload, content_type)
+            status, payload, content_type, extra_headers = self.server.playground.handle_replay_video_file(
+                parsed.path, self.headers.get("Range")
+            )
+            self._send_bytes(status, payload, content_type, extra_headers)
             return
         if _is_api_path(parsed.path):
             status, payload = self.server.playground.handle_get(parsed.path, parse_qs(parsed.query))
@@ -593,10 +609,12 @@ class _RequestHandler(BaseHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self._send_bytes(status, body, "application/json; charset=utf-8")
 
-    def _send_bytes(self, status: int, payload: bytes, content_type: str) -> None:
+    def _send_bytes(self, status: int, payload: bytes, content_type: str, extra_headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(payload)
 
@@ -628,6 +646,36 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _parse_byte_range(range_header: str | None, total_size: int) -> tuple[int, int] | None:
+    if not range_header or total_size <= 0:
+        return None
+    raw = range_header.strip()
+    if not raw.lower().startswith("bytes="):
+        return None
+    spec = raw[len("bytes="):].split(",", 1)[0].strip()
+    if not spec or "-" not in spec:
+        return None
+    start_text, end_text = spec.split("-", 1)
+    start_text = start_text.strip()
+    end_text = end_text.strip()
+    last_index = total_size - 1
+    try:
+        if start_text == "":
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                return None
+            start = max(0, total_size - suffix_length)
+            end = last_index
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else last_index
+    except ValueError:
+        return None
+    if start < 0 or start > last_index or end < start:
+        return None
+    return start, min(end, last_index)
 
 
 def _after_sequence(query: dict[str, list[str]]) -> int | None:
