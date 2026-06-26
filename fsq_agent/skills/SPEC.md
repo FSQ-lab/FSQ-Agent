@@ -25,6 +25,16 @@ Current `__init__.py` exports via `__all__`:
 
 Invalid or missing required skill files raise `FsqAgentError` subclasses from `models` with the failing path and skill name. Optional skill entries with missing paths, missing files, unreadable files, invalid directories, or no inline content are skipped and logged as diagnostics. Skipped optional skills must not be returned as warning-only `SkillBundle` values or sent to LLM prompts. Inline skill bundles are accepted as descriptive instructions and do not imply shell execution authority.
 
+## Platform Skill Blocks
+
+Shared skill guidance belongs in `automation-basics.md`.
+
+Android runs should configure `android-harness.md` alongside shared automation guidance. The Android harness skill describes Android action selection, locators, assertions, UI-tree usage, waits, and recovery.
+
+Web runs should configure `web-harness.md` alongside shared automation guidance. The Web harness skill should mirror Playwright's LLM-facing guidance: prefer `page_snapshot` over screenshots for target selection, use exact snapshot target references or stable selectors, use `navigate_to`, `navigate_back`, `click_on`, `type_text`, `select_option`, `hover_on`, `press_key`, `wait_for`, `take_screenshot`, assertion tools, and `assert_with_ai` according to active schemas, and reserve unsupported Playwright MCP capability families for future SPEC-reviewed opt-in tools.
+
+Future platform skills must be separate platform-specific Markdown bundles instead of expanding Android or Web skill files with unrelated platform rules.
+
 ## Design Decisions
 
 - Skills are advisory context, not executable authority.

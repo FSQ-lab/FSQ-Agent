@@ -15,7 +15,7 @@ def resolve_strict_replay_steps(
     registry_snapshot: CapabilityRegistrySnapshot | None = None,
 ) -> list[ExecutableStep]:
     allowed_names = set(settings.runtime_secrets.allowed_env_names)
-    snapshot = registry_snapshot or build_capability_registry().snapshot()
+    snapshot = registry_snapshot or build_capability_registry(platform=settings.harness.platform).snapshot()
     resolved_steps: list[ExecutableStep] = []
     for step in steps:
         resolved_params = _resolve_value(step.params, allowed_names, step.step_id)

@@ -34,9 +34,12 @@ RunnerEventType: TypeAlias = Literal[
     "step_error",
     "step_finish",
 ]
-EvidenceArtifactKind: TypeAlias = Literal["screenshot", "ui_tree", "tool_call", "log", "json", "text", "other"]
+EvidenceArtifactKind: TypeAlias = Literal["screenshot", "ui_tree", "page_snapshot", "tool_call", "log", "json", "text", "other"]
 HarnessPlatform: TypeAlias = Literal["android", "ios", "macos", "windows", "web"]
 AndroidSwipeDirection: TypeAlias = Literal["up", "down", "left", "right"]
+WebMouseButton: TypeAlias = Literal["left", "right", "middle"]
+WebWaitUntil: TypeAlias = Literal["commit", "domcontentloaded", "load", "networkidle"]
+WebWaitForState: TypeAlias = Literal["visible", "hidden", "attached", "detached"]
 
 
 class SourceRef(BaseModel):
@@ -320,6 +323,185 @@ class AndroidAssertWithAIParams(BaseModel):
         raise ValueError("requires non-empty prompt")
 
 
+class WebLocator(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str | None = None
+    role: str | None = None
+    name: str | None = None
+    text: str | None = None
+    label: str | None = None
+    placeholder: str | None = None
+    testId: str | None = None
+    css: str | None = None
+    xpath: str | None = None
+    altText: str | None = None
+    title: str | None = None
+
+    def has_value(self) -> bool:
+        return any(isinstance(value, str) and value.strip() for value in self.model_dump().values())
+
+
+class _WebTargetParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str | None = None
+    locator: WebLocator | None = None
+
+    @model_validator(mode="after")
+    def _require_target(self) -> "_WebTargetParams":
+        if self._has_target_value():
+            return self
+        raise ValueError("requires target or non-empty locator")
+
+    def _has_target_value(self) -> bool:
+        if isinstance(self.target, str) and self.target.strip():
+            return True
+        return self.locator is not None and self.locator.has_value()
+
+
+class WebNavigateToParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    waitUntil: WebWaitUntil | None = None
+
+    @model_validator(mode="after")
+    def _require_url(self) -> "WebNavigateToParams":
+        if self.url.strip():
+            return self
+        raise ValueError("requires non-empty url")
+
+
+class WebNavigateBackParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    waitUntil: WebWaitUntil | None = None
+
+
+class WebClickOnParams(_WebTargetParams):
+    button: WebMouseButton | None = None
+    double: bool | None = None
+
+
+class WebTypeTextParams(_WebTargetParams):
+    text: str
+    clear: bool | None = None
+
+    @model_validator(mode="after")
+    def _require_text(self) -> "WebTypeTextParams":
+        if isinstance(self.text, str):
+            return self
+        raise ValueError("requires text")
+
+
+class WebSelectOptionParams(_WebTargetParams):
+    value: str | None = None
+    label: str | None = None
+    index: int | None = Field(default=None, ge=0)
+    values: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _require_option(self) -> "WebSelectOptionParams":
+        has_single = any(isinstance(value, str) and value.strip() for value in [self.value, self.label])
+        has_index = self.index is not None
+        has_values = self.values is not None and any(isinstance(value, str) and value.strip() for value in self.values)
+        if has_single or has_index or has_values:
+            return self
+        raise ValueError("requires value, label, index, or values")
+
+
+class WebHoverOnParams(_WebTargetParams):
+    pass
+
+
+class WebPressKeyParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+
+    @model_validator(mode="after")
+    def _require_key(self) -> "WebPressKeyParams":
+        if self.key.strip():
+            return self
+        raise ValueError("requires non-empty key")
+
+
+class WebWaitForParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str | None = None
+    locator: WebLocator | None = None
+    text: str | None = None
+    url: str | None = None
+    state: WebWaitForState | None = None
+    timeout_ms: int | None = Field(default=None, ge=1, le=60000)
+
+    @model_validator(mode="after")
+    def _require_wait_condition(self) -> "WebWaitForParams":
+        if isinstance(self.target, str) and self.target.strip():
+            return self
+        if self.locator is not None and self.locator.has_value():
+            return self
+        if isinstance(self.text, str) and self.text.strip():
+            return self
+        if isinstance(self.url, str) and self.url.strip():
+            return self
+        if self.timeout_ms is not None:
+            return self
+        raise ValueError("requires target, locator, text, url, or timeout_ms")
+
+
+class WebTakeScreenshotParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fullPage: bool | None = None
+    omitBackground: bool | None = None
+
+
+class WebPageSnapshotParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class WebAssertVisibleParams(_WebTargetParams):
+    optional: bool | None = None
+
+
+class WebAssertNotVisibleParams(_WebTargetParams):
+    optional: bool | None = None
+
+
+class WebTextAssertion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contains: str | None = None
+    equals: str | None = None
+
+    @model_validator(mode="after")
+    def _require_text_assertion(self) -> "WebTextAssertion":
+        if isinstance(self.contains, str) or isinstance(self.equals, str):
+            return self
+        raise ValueError("requires contains or equals")
+
+
+class WebAssertTextParams(_WebTargetParams):
+    text: WebTextAssertion
+    optional: bool | None = None
+
+
+class WebAssertWithAIParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str
+    optional: bool | None = None
+
+    @model_validator(mode="after")
+    def _require_prompt(self) -> "WebAssertWithAIParams":
+        if self.prompt.strip():
+            return self
+        raise ValueError("requires non-empty prompt")
+
+
 @dataclass(frozen=True)
 class AndroidActionDefinition:
     fsq_action_name: str
@@ -347,6 +529,38 @@ ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
 )
 ANDROID_ACTION_DEFINITIONS_BY_NAME: dict[str, AndroidActionDefinition] = {
     definition.fsq_action_name: definition for definition in ANDROID_ACTION_DEFINITIONS
+}
+
+
+@dataclass(frozen=True)
+class WebActionDefinition:
+    fsq_action_name: str
+    driver_method: str
+    params_model: type[BaseModel]
+    step_kind: ExecutableStepKind
+    owner: Literal["driver", "harness"] = "driver"
+    strict: bool = True
+    capture_evidence: bool = False
+
+
+WEB_ACTION_DEFINITIONS: tuple[WebActionDefinition, ...] = (
+    WebActionDefinition("navigateTo", "navigate_to", WebNavigateToParams, "action", capture_evidence=True),
+    WebActionDefinition("navigateBack", "navigate_back", WebNavigateBackParams, "action", capture_evidence=True),
+    WebActionDefinition("clickOn", "click_on", WebClickOnParams, "action", capture_evidence=True),
+    WebActionDefinition("typeText", "type_text", WebTypeTextParams, "action", capture_evidence=True),
+    WebActionDefinition("selectOption", "select_option", WebSelectOptionParams, "action", capture_evidence=True),
+    WebActionDefinition("hoverOn", "hover_on", WebHoverOnParams, "action", capture_evidence=True),
+    WebActionDefinition("pressKey", "press_key", WebPressKeyParams, "action", capture_evidence=True),
+    WebActionDefinition("waitFor", "wait_for", WebWaitForParams, "action"),
+    WebActionDefinition("takeScreenshot", "take_screenshot", WebTakeScreenshotParams, "observation"),
+    WebActionDefinition("pageSnapshot", "page_snapshot", WebPageSnapshotParams, "observation"),
+    WebActionDefinition("assertVisible", "assert_visible", WebAssertVisibleParams, "assertion"),
+    WebActionDefinition("assertNotVisible", "assert_not_visible", WebAssertNotVisibleParams, "assertion"),
+    WebActionDefinition("assertText", "assert_text", WebAssertTextParams, "assertion"),
+    WebActionDefinition("assertWithAI", "assert_with_ai", WebAssertWithAIParams, "assertion", "harness"),
+)
+WEB_ACTION_DEFINITIONS_BY_NAME: dict[str, WebActionDefinition] = {
+    definition.fsq_action_name: definition for definition in WEB_ACTION_DEFINITIONS
 }
 
 

@@ -112,7 +112,7 @@ def record_dynamic_run_as_strict_case(
     )
     try:
         generated_case = FsqCaseLoader().load_case(recorded_case_path)
-        FsqExecutableStepAdapter(registry_snapshot=build_capability_registry().snapshot()).to_executable_steps(generated_case)
+        FsqExecutableStepAdapter(registry_snapshot=build_capability_registry(platform=settings.harness.platform).snapshot()).to_executable_steps(generated_case)
         recording.validation_status = "passed"
     except ConfigurationError as exc:
         recording.status = "failed"
@@ -296,7 +296,7 @@ def _metadata_doc(
     warnings: list[str],
     draft: bool,
 ) -> dict[str, Any]:
-    app_id = settings.harness.android.app_id
+    app_id = settings.harness.android.app_id if settings.harness.platform == "android" else None
     doc: dict[str, Any] = {
         "schemaVersion": "fsq.ai-test/v1",
         "name": f"Recorded: {task.name}",

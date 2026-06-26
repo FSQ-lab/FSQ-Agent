@@ -8,6 +8,8 @@ See [docs/openai-agent-loop.md](docs/openai-agent-loop.md) for how task executio
 
 ## Quick Start
 
+For Android runs:
+
 ```bash
 python -m pip install -e ".[dev,android]"
 copy .env.example .env
@@ -16,6 +18,15 @@ fsq-agent run --config config.example.yaml --goal "Access Downloads through the 
 fsq-agent run --config config.example.yaml --case-yaml cases/android/example.codex.yaml
 fsq-agent run --config config.example.yaml --strict --case-yaml cases/android/example.codex.yaml
 fsq-agent report --config config.example.yaml --run-id RUN_ID --format markdown
+```
+
+For Web runs with your locally installed Chrome:
+
+```bash
+python -m pip install -e ".[dev,web]"
+copy .env.example .env
+fsq-agent init --config config.local.web.yaml
+fsq-agent run --config config.local.web.yaml --goal "Open https://www.bing.com, search for Playwright, and verify the results page is visible."
 ```
 
 ## Runtime Configuration
@@ -52,6 +63,31 @@ AZURE_OPENAI_API_KEY=
 ```
 
 `FSQ_ANDROID_APP_ID` is required for dynamic LLM runs and for strict cases that do not provide `appId` in FSQ case metadata. Set `FSQ_ANDROID_SERIAL` to an `adb devices` serial when more than one device is connected; otherwise leave it blank.
+
+For Web runs, install the Web extra, set the browser executable path in `.env`, and select the Web platform:
+
+```dotenv
+FSQ_WEB_BROWSER_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
+```
+
+The path is required for Web runs. It must point to an existing local Chrome executable that matches `channel: chrome`.
+
+```yaml
+harness:
+  platform: web
+  web:
+    backend: playwright
+    channel: chrome
+    headless: false
+    base_url: null
+
+execution:
+  post_action_delay_seconds:
+    platform: 1.0
+    common: 0.0
+```
+
+  `channel: chrome` is the Web browser selector. fsq-agent launches Playwright's Chromium engine with `FSQ_WEB_BROWSER_EXECUTABLE_PATH`, so Web runs use the user's configured local Chrome and do not require `python -m playwright install chromium`.
 
 For account-dependent cases, put secret values in `.env` and allow only those names in config:
 

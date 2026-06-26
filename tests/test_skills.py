@@ -60,3 +60,23 @@ def test_repository_android_harness_skill_documents_tool_usage_recovery() -> Non
     assert "submit_visual_assertion" not in bundles[0].instructions
     assert "sessionId" not in bundles[0].instructions
     assert "pointerType" not in bundles[0].instructions
+
+
+def test_repository_web_harness_skill_documents_snapshot_first_guidance() -> None:
+    skill_path = Path(__file__).resolve().parents[1] / "knowledge" / "skills" / "web-harness.md"
+
+    bundles = SkillLoader(skill_path.parent).load([SkillConfig(name="web-harness", path=Path("web-harness.md"), required=True)])
+
+    assert "Tool Selection" in bundles[0].instructions
+    assert "Snapshot-First Rules" in bundles[0].instructions
+    assert "Tool Usage Error Recovery" in bundles[0].instructions
+    assert "page_snapshot" in bundles[0].instructions
+    assert "click_on" in bundles[0].instructions
+    assert "type_text" in bundles[0].instructions
+    assert "assert_text" in bundles[0].instructions
+    assert "runtimeSecret" in bundles[0].instructions
+    assert "Unsupported Capability Families" in bundles[0].instructions
+    assert "raw Playwright APIs" in bundles[0].instructions
+    assert "JavaScript evaluation" in bundles[0].instructions
+    assert "active harness tool schema" in bundles[0].instructions
+    assert "ui_tree" not in bundles[0].instructions

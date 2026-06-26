@@ -29,6 +29,9 @@ dev = [
 android = [
     "uiautomator2>=3.0.0",
 ]
+web = [
+    "playwright>=1.48.0",
+]
 
 [project.scripts]
 fsq-agent = "fsq_agent.cli:main"

@@ -85,12 +85,22 @@ class PlaygroundServer:
         if path == "/status":
             return 200, self.state.status()
         if path == "/session":
+            if self.settings.harness.platform != "android":
+                return 200, self._android_unavailable("Android session selection is unavailable for the active Web platform.")
             return 200, self.state.session.to_json()
         if path == "/session/setup":
+            if self.settings.harness.platform != "android":
+                return 200, self._android_unavailable("Android setup is unavailable for the active Web platform.")
             return 200, build_android_setup_schema(self.settings)
         if path == "/runtime-info":
             return 200, self._runtime_info()
         if path == "/screenshot":
+            if self.settings.harness.platform != "android":
+                return 200, {
+                    "available": False,
+                    "platform": self.settings.harness.platform,
+                    "error": "Live screenshot preview is not available before Web harness execution.",
+                }
             if not self.state.session.connected:
                 return 200, {"available": False, "error": "No active session."}
             try:
@@ -165,6 +175,8 @@ class PlaygroundServer:
 
     def handle_post(self, path: str, body: dict[str, object]) -> tuple[int, object]:
         if path == "/session":
+            if self.settings.harness.platform != "android":
+                return 409, self._android_unavailable("Android session selection is unavailable for the active Web platform.")
             device_id = body.get("deviceId")
             if not isinstance(device_id, str) or not device_id.strip():
                 return 400, {"error": "deviceId is required."}
@@ -173,6 +185,8 @@ class PlaygroundServer:
             except BusyError as exc:
                 return 409, {"error": str(exc)}
         if path == "/session/auto":
+            if self.settings.harness.platform != "android":
+                return 409, self._android_unavailable("Android auto session selection is unavailable for the active Web platform.")
             try:
                 session, info = resolve_auto_session(self.settings)
                 if session is None:
@@ -195,7 +209,7 @@ class PlaygroundServer:
             has_strict_case_yaml = isinstance(strict_case_yaml_path, str) and bool(strict_case_yaml_path.strip())
             if sum([has_goal, has_case_yaml, has_strict_case_yaml]) != 1:
                 return 400, {"error": "Exactly one of goal, caseYamlPath, or strictCaseYamlPath is required."}
-            if not self.state.session.connected:
+            if self.settings.harness.platform == "android" and not self.state.session.connected:
                 return 409, {"error": "No active Android session. Create a session before execution."}
             if has_goal:
                 task_label = goal.strip()
@@ -216,7 +230,7 @@ class PlaygroundServer:
                 goal=goal.strip() if has_goal else None,
                 case_yaml_path=case_yaml_path.strip() if has_case_yaml else None,
                 strict_case_yaml_path=strict_case_yaml_path.strip() if has_strict_case_yaml else None,
-                device_id=self.state.session.device_id,
+                device_id=self.state.session.device_id if self.settings.harness.platform == "android" else None,
                 record=self.options.record,
                 record_on_failure=self.options.record_on_failure,
             )
@@ -238,6 +252,8 @@ class PlaygroundServer:
 
     def handle_delete(self, path: str) -> tuple[int, object]:
         if path == "/session":
+            if self.settings.harness.platform != "android":
+                return 409, self._android_unavailable("Android session selection is unavailable for the active Web platform.")
             try:
                 return 200, {"session": self.state.destroy_session(), "runtimeInfo": self._runtime_info()}
             except BusyError as exc:
@@ -257,6 +273,25 @@ class PlaygroundServer:
         return 200, candidate.read_bytes(), content_type
 
     def _runtime_info(self) -> dict[str, object]:
+        if self.settings.harness.platform == "web":
+            web = self.settings.harness.web
+            return {
+                "platformId": "web",
+                "title": "FSQ-Agent Web Playground",
+                "interface": {"type": "Web", "description": "FSQ-Agent Web harness"},
+                "preview": {"kind": "screenshot", "screenshotPath": "/screenshot", "live": False},
+                "session": self._android_unavailable("Android session selection is unavailable for the active Web platform."),
+                "metadata": {
+                    "backend": web.backend,
+                    "channel": web.channel,
+                    "browserExecutableConfigured": web.browser_executable_path is not None,
+                    "headless": web.headless,
+                    "baseUrlPresent": bool(web.base_url),
+                    "viewportConfigured": web.viewport_width is not None and web.viewport_height is not None,
+                    "busy": self.state.current_request_id is not None,
+                    "lastRun": self.state.last_run,
+                },
+            }
         return {
             "platformId": "android",
             "title": "FSQ-Agent Android Playground",
@@ -270,6 +305,15 @@ class PlaygroundServer:
                 "busy": self.state.current_request_id is not None,
                 "lastRun": self.state.last_run,
             },
+        }
+
+
+    def _android_unavailable(self, message: str) -> dict[str, object]:
+        return {
+            "available": False,
+            "platform": self.settings.harness.platform,
+            "connected": False,
+            "message": message,
         }
 
     def _report_response(self, path: str, query: dict[str, list[str]]) -> tuple[int, object]:

@@ -25,7 +25,30 @@ Target `__init__.py` exports via `__all__`:
 - `platform_driver_capability`: Factory that binds a platform/backend/catalog and returns a decorator for catalog-backed driver method declarations.
 - `discover_capability_definitions(target: object, *, metadata: dict[str, object] | None = None) -> list[CapabilityDefinition]`: Inspect a decorated class or instance without invoking methods and return serializable capability definitions.
 
-The neutral decorator API accepts canonical name, aliases, executor kind, owner, parameter model, description, platform, backend, step kind, evidence flag, optional post-action delay override, sensitivity flag, replay policy, strict schema flag, safe metadata, and optional catalog/action name inputs. `post_action_delay_seconds=None` means inherit the configured executor-kind default; `0` explicitly disables runner-owned post-action delay for that capability; positive values override the configured default. Domain helpers should be preferred at call sites so CommonTool and platform-driver declarations remain readable.
+The neutral decorator API accepts canonical name, aliases, executor kind, owner, parameter model, description, platform, backend, step kind, evidence flag, optional post-action delay override, sensitivity flag, replay policy, strict schema flag, safe metadata, and optional catalog/action name inputs. `post_action_delay_seconds=None` means inherit the configured executor-kind default; `0` explicitly disables runner-owned post-action delay for that capability; positive values override the configured default. Domain helpers should be preferred at call sites so CommonTool and platform-driver declarations remain readable. Android and Web platform actions must be declared through catalog-backed `platform_driver_capability` helpers rather than platform-specific decorator semantics.
+
+## Platform Declaration Blocks
+
+Shared declaration rules:
+
+- `capability`, helper decorators, discovery, and `CapabilityDefinition` output stay platform-neutral.
+- Platform-specific authored aliases, parameter models, replay policy, evidence defaults, backend metadata, and required driver method names belong in platform action catalogs.
+- Registry/bootstrap code, not this module, chooses which platform catalog definitions are active.
+
+Android declaration block:
+
+- Android uiautomator2 driver methods use catalog-backed `platform_driver_capability` entries with Android aliases and parameter models.
+- Android harness-owned assertions use `harness_capability` when behavior is not a backend driver method.
+
+Web declaration block:
+
+- Web Playwright driver methods use catalog-backed `platform_driver_capability` entries with Web aliases and parameter models.
+- Web harness-owned assertions use `harness_capability` when behavior is not a backend driver method.
+
+Future platform declaration block:
+
+- New platforms must provide a catalog and reuse existing decorators before registry exposure.
+- New platform behavior must not add new decorator semantics unless a later SPEC changes the shared declaration contract.
 
 ## Internal Structure
 
@@ -63,7 +86,7 @@ Duplicate capability names, alias conflicts, ambiguous aliases, and missing exec
 ## Testing Contract
 
 - Unit tests: neutral decorator metadata, domain helper defaults, post-action delay override validation, catalog lookup/validation, method-name and parameter-model validation, discovery from class and instance targets, safe metadata merging, and no method invocation during discovery.
-- Regression tests: `common_capability` produces the same `CapabilityDefinition` shape expected by CommonTool registry/bootstrap; catalog-backed Android declarations produce the same canonical names, aliases, parameter models, replay metadata, owner, platform/backend, evidence flags, and post-action delay overrides as the previous Android-specific helper plus the new delay contract.
+- Regression tests: `common_capability` produces the same `CapabilityDefinition` shape expected by CommonTool registry/bootstrap; catalog-backed Android and Web declarations produce the expected canonical names, aliases, parameter models, replay metadata, owner, platform/backend, evidence flags, and post-action delay overrides.
 - Boundary tests: `capabilities` imports only `models` among project modules and has no dependency on `core`, `tools`, SDK objects, or concrete backend libraries.
 - Verification commands: `./.venv/Scripts/python.exe -m pytest tests/test_capabilities.py tests/test_tools.py tests/test_android_harness.py` plus broader capability/runner tests when implementations change.
 
@@ -71,7 +94,7 @@ Duplicate capability names, alias conflicts, ambiguous aliases, and missing exec
 
 - One declaration mechanism prevents CommonTool, Android, future web, future desktop, and future iOS capabilities from growing separate decorator semantics.
 - Domain helper decorators are intentionally thin wrappers around the neutral decorator. They preserve readability while keeping one metadata format.
-- Platform differences belong in action catalogs, not in per-platform decorator implementations. Future platforms should add catalogs and reuse `platform_driver_capability`.
+- Platform differences belong in action catalogs, not in per-platform decorator implementations. Android and Web catalogs reuse `platform_driver_capability`; future platforms should follow the same pattern.
 - `CapabilityDefinition` remains the runtime contract and registry input. Decorators attach declaration metadata to functions, including optional post-action delay overrides; discovery converts that metadata into serializable definitions.
 - Discovery must be side-effect free. It may inspect method signatures and type hints, but it must not call methods, connect to devices, instantiate SDK tools, or build providers.
 - Runtime routing is out of scope. `executor_kind` is metadata consumed by `core.StepRunner` and executor bindings; `capabilities` never invokes the selected executor.

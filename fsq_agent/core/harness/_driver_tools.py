@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from fsq_agent.capabilities import CapabilityActionDefinition, driver_capability, discover_capability_definitions, platform_driver_capability
 from fsq_agent.models import (
     ANDROID_ACTION_DEFINITIONS,
+    WEB_ACTION_DEFINITIONS,
     CapabilityDefinition,
     HarnessFunctionSchema,
     HarnessPlatform,
@@ -35,6 +36,28 @@ _android_driver_capability = platform_driver_capability(
     platform="android",
     backend=None,
     catalog=ANDROID_DRIVER_ACTION_CATALOG,
+)
+
+WEB_DRIVER_ACTION_CATALOG = {
+    definition.fsq_action_name: CapabilityActionDefinition(
+        action_name=definition.fsq_action_name,
+        canonical_name=definition.driver_method,
+        executor_kind="driver",
+        owner=definition.owner,
+        params_model=definition.params_model,
+        step_kind=definition.step_kind,
+        method_name=definition.driver_method,
+        replay=ReplayPolicy(kind="fsq_command", alias=definition.fsq_action_name),
+        strict=definition.strict,
+        capture_evidence=definition.capture_evidence,
+    )
+    for definition in WEB_ACTION_DEFINITIONS
+    if definition.owner == "driver"
+}
+_web_driver_capability = platform_driver_capability(
+    platform="web",
+    backend=None,
+    catalog=WEB_DRIVER_ACTION_CATALOG,
 )
 
 
@@ -76,6 +99,23 @@ def _android_driver_tool(
     metadata: dict[str, object] | None = None,
 ) -> Callable[[F], F]:
     return _android_driver_capability(
+        fsq_action_name,
+        description=description,
+        strict=strict,
+        capture_evidence=capture_evidence,
+        metadata=metadata,
+    )
+
+
+def _web_driver_tool(
+    fsq_action_name: str,
+    *,
+    description: str,
+    strict: bool | None = None,
+    capture_evidence: bool | None = None,
+    metadata: dict[str, object] | None = None,
+) -> Callable[[F], F]:
+    return _web_driver_capability(
         fsq_action_name,
         description=description,
         strict=strict,

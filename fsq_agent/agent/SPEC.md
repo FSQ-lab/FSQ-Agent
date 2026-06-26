@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Coordinate dynamic goal/reference testing workflows using OpenAI Agents SDK: load runtime settings, construct or receive the configured lightweight capability hosts, obtain the shared provider session from `providers`, build the validated capability registry, build the OpenAI-compatible agent from registry-backed tools, load relevant project knowledge and complete configured skills, derive execution key actions and a final verification goal from a natural-language goal or raw reference content, execute every concrete capability invocation through `StepRunner`, persist safe normalized capability event metadata for post-run recording, derive verification status by checking the final verification goal against execution evidence, and trigger report generation.
+Coordinate dynamic goal/reference testing workflows using OpenAI Agents SDK: load runtime settings, construct or receive the configured lightweight capability hosts for the active Android or Web platform, obtain the shared provider session from `providers`, build the validated platform-selected capability registry, build the OpenAI-compatible agent from registry-backed tools, load relevant project knowledge and complete configured skills, derive execution key actions and a final verification goal from a natural-language goal or raw reference content, execute every concrete capability invocation through `StepRunner`, persist safe normalized capability event metadata for post-run recording, derive verification status by checking the final verification goal against execution evidence, and trigger report generation.
 
 ## Dependencies
 
@@ -39,7 +39,7 @@ Planned signatures:
 - `__init__.py`: Public exports only.
 - `_core.py`: `FsqAgent` orchestration and lifecycle.
 - `_events.py`: Run event emission, sequencing, persistence fan-out, and user-sink dispatch.
-- `_openai_runtime.py`: OpenAI Agents SDK runtime assembly using provider sessions from `providers`, lightweight capability host construction or injection, capability registry bootstrap, StepRunner/executor binding construction with configured post-action delay settings, agent construction, `Runner.run_streamed` invocation, and SDK stream event mapping.
+- `_openai_runtime.py`: OpenAI Agents SDK runtime assembly using provider sessions from `providers`, lightweight capability host construction or injection, platform-dispatching Android/Web harness construction, platform-selected capability registry bootstrap, StepRunner/executor binding construction with configured post-action delay settings, agent construction, `Runner.run_streamed` invocation, and SDK stream event mapping.
 - `_harness_tools.py`: Registry-backed harness `FunctionTool` adapter that converts harness capability schemas into SDK tools, maps SDK JSON arguments into canonical `ExecutableStep` records, delegates execution to `core.StepRunner` configured with runner-owned post-action delay policy, and serializes normalized capability results to bounded model-visible JSON with safe structured status/provenance fields suitable for reports and post-run recording. CommonTool SDK adaptation lives in `tools` and receives a StepRunner-backed invocation callback from the runtime.
 - `_pre_plan.py`: Internal prompt instructions and helpers for dynamic goal planning from page knowledge when directly invoked by `FsqAgent.run`.
 - `_prompt.py`: Prompt model construction and template rendering for agent instructions and task input.
@@ -47,6 +47,30 @@ Planned signatures:
 - `_verification_task.py`: Builds an evidence bundle from task context, execution records, event logs, and persisted tool artifacts for a separate evidence-based verification agent task.
 - `_verifier.py`: Evidence-based goal verification and failure diagnostics.
 - `SPEC.md`: Module design.
+
+## Platform Runtime Blocks
+
+Shared runtime rules:
+
+- `OpenAIAgentsRuntime` builds the active harness from `settings.harness.platform`.
+- SDK tools are generated from CommonTool capabilities plus the active harness `action_space()`.
+- The runtime remains decoupled from platform decorator internals and backend SDK APIs.
+
+Android runtime:
+
+- Uses `AndroidHarness` and `UiAutomator2AndroidDriver`.
+- Startup metadata includes safe Android app id and serial presence.
+- Expected platform skill is `android-harness.md` when configured.
+
+Web runtime:
+
+- Uses `WebHarness` and `PlaywrightWebDriver`.
+- Startup metadata includes safe Web backend, channel, browser executable configured state, headless, and base URL presence.
+- Expected platform skill is `web-harness.md` when configured.
+
+Future platform runtime:
+
+- New platforms must provide harness construction, default capability definitions, skill guidance, and startup metadata before dynamic tool exposure.
 
 ## Python Architecture
 
@@ -73,9 +97,10 @@ During `FsqAgent.run`, a dynamic task is internally planned before external UI a
 - Azure OpenAI and GitHub Copilot provider construction is delegated to `providers`. `agent` asks for a configured provider session and uses that session to create the OpenAI Agents SDK provider object for `RunConfig`. Provider authentication, endpoint selection, token caching, Copilot plan detection, and direct Responses-style model invocation are not implemented in `agent`.
 - Task execution requires the OpenAI Agents SDK package and provider authentication to be available through `providers`. There is no offline fallback execution path.
 - The SDK runner owns tool dispatch and turn continuation. The project should not reimplement the Responses function-call loop.
-- SDK tools are generated from validated CommonTool definitions and harness `action_space()` schemas. `OpenAIAgentsRuntime` converts dynamic capabilities into SDK `FunctionTool` objects using canonical capability names, schemas, descriptions, and strict-schema flags. Unimplemented backend methods must not appear in `action_space()` because they must not be decorated as capabilities. It creates SDK agents with no external platform tool servers. Harness-owned `assert_with_ai` is a harness capability when exposed by the active harness, not a common utility tool.
+- SDK tools are generated from validated CommonTool definitions and active harness `action_space()` schemas. `OpenAIAgentsRuntime` converts dynamic capabilities into SDK `FunctionTool` objects using canonical capability names, schemas, descriptions, and strict-schema flags. Unimplemented backend methods must not appear in `action_space()` because they must not be decorated as capabilities. It creates SDK agents with no external platform tool servers. Harness-owned `assert_with_ai` is a harness capability when exposed by the active harness, not a common utility tool.
+- `OpenAIAgentsRuntime` constructs the active harness from `settings.harness.platform`. Android construction remains `AndroidHarness` plus `UiAutomator2AndroidDriver`; Web construction is `WebHarness` plus `PlaywrightWebDriver` using `settings.harness.web`. The runtime must not inspect Playwright APIs or Web decorator internals when exposing tools; it uses `harness.action_space()` and `StepRunner` like every other platform.
 - The runtime treats decorators as compile/bootstrap-time declaration mechanics only. It consumes `CapabilityDefinition` values, `CapabilityRegistry` snapshots, and `StepRunner` results, and it must not inspect decorator marker attributes or platform action catalog entries directly.
-- Main execution startup is observable before the first SDK planning turn. `OpenAIAgentsRuntime.run_task` emits runtime progress events for startup, harness setup, tool setup, and SDK agent readiness before the existing main `Planning started` event. Harness setup events include only safe metadata such as platform, backend, app id presence, serial presence, timeout seconds, and driver class when available.
+- Main execution startup is observable before the first SDK planning turn. `OpenAIAgentsRuntime.run_task` emits runtime progress events for startup, harness setup, tool setup, and SDK agent readiness before the existing main `Planning started` event. Harness setup events include only safe metadata such as platform, backend, app id presence, serial presence, Web channel, Web browser executable configured state, headless mode, base URL presence, timeout seconds, and driver class when available.
 - Harness construction remains a synchronous platform concern internally, but dynamic main execution wraps it in an async-compatible timeout boundary. The runtime calls the configured harness factory or built-in harness construction through a worker-thread helper and applies `agent.step_timeout_seconds` as the startup timeout. A timed-out worker result is ignored after the runtime has returned a failed runner step; no UI action should be invoked from that timed-out path.
 - The capability tool adapter must preserve capability provenance, including canonical capability name, aliases, executor kind, step kind, platform, backend, owner, replay policy, sensitivity, and authored-action metadata when present, in run events and tool result metadata.
 - When the SDK calls a capability tool, the adapter parses JSON arguments, builds an `ExecutableStep` with the canonical capability name, and delegates execution to `StepRunner.run_step(run_id, step)` instead of directly invoking CommonTool providers, harnesses, or drivers. The adapter must not own the standard `capture_evidence=True` to screenshot/UI-tree policy conversion or the post-action delay algorithm; it supplies canonical steps and lets `StepRunner` derive the effective evidence policy and effective post-action delay from capability metadata, explicit step policy, and configured `execution.post_action_delay_seconds` defaults. Dynamic before/after evidence capture and post-action stabilization are therefore shared with strict replay and are derived from `CapabilityDefinition` metadata rather than private action-name allowlists. Capabilities with `capture_evidence=True` receive the standard runner evidence behavior that captures before/after screenshots and UI trees plus failure artifacts. Capabilities with the default `False`, including read-only, observation, and assertion capabilities such as `assert_visible`, `assert_not_visible`, `assert_state`, `assert_with_ai`, and `ui_tree`, keep the default evidence policy unless their metadata says otherwise.
@@ -106,7 +131,7 @@ During `FsqAgent.run`, a dynamic task is internally planned before external UI a
 - Runtime Markdown content under `knowledge/` is part of prompt quality. `knowledge/project.md` should contain only tested-project-specific guidance. Configured skills should contain concise, current, composable execution guidance aligned with exposed harness and CommonTool capabilities. Page-knowledge Markdown should stay pre-plan-oriented, concise, indexed, and free of stale historical narrative that does not help route planning.
 - If the user description is too broad to derive domain-specific checks, the default success standard is that the executable task flow completes without unrecovered errors and with enough evidence to show completion.
 - Skills are descriptive guidance. Command execution is not exposed through configured CLI tools or SDK `ShellTool` in this SPEC cycle; execution is performed through harness platform tools and CommonTool utilities only.
-- Harness- and platform-specific action selection, argument rules, and recovery recipes belong in configured skill Markdown rather than hard-coded agent runtime branches. The agent consumes those skills as current runtime policy while remaining decoupled from concrete platform backends.
+- Harness- and platform-specific action selection, argument rules, and recovery recipes belong in configured skill Markdown rather than hard-coded agent runtime branches. Android runs should load `android-harness.md`; Web runs should load `web-harness.md` alongside common automation guidance. The agent consumes those skills as current runtime policy while remaining decoupled from concrete platform backends.
 - The final SDK output must conform to `AgentFinalOutput`. `AgentFinalOutput` is passed to OpenAI Agents SDK through `Agent(output_type=AgentFinalOutput)`, which is the authoritative structured-output schema. The prompt may describe status and goal-verification semantics, but it must not duplicate the full JSON Schema text.
 - Final output includes `schema_version` for traceability. Schema selection is not configurable; the runtime owns the current contract.
 - The runtime converts `pre_plan` entries from typed final output into `StepResult` records, then appends one SDK runner summary step containing the serialized final output.

@@ -19,6 +19,12 @@ output:
 """
 
 
+def _chrome_executable(tmp_path: Path) -> Path:
+    chrome_path = tmp_path / "chrome.exe"
+    chrome_path.write_text("", encoding="utf-8")
+    return chrome_path
+
+
 @pytest.fixture(autouse=True)
 def _isolate_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
@@ -121,6 +127,178 @@ harness:
     assert settings.harness.android.backend == "uiautomator2"
     assert settings.harness.android.app_id == "com.example.app"
     assert settings.harness.android.serial == "emulator-5554"
+
+
+def test_load_settings_accepts_web_harness_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    chrome_path = _chrome_executable(tmp_path)
+    monkeypatch.setenv("FSQ_WEB_BROWSER_EXECUTABLE_PATH", str(chrome_path))
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  platform: web
+  web:
+    backend: playwright
+    channel: chrome
+    headless: false
+    base_url: https://www.bing.com
+    viewport_width: 1280
+    viewport_height: 720
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    validate_runtime_settings(settings)
+    validate_strict_core_settings(settings)
+    assert settings.harness.platform == "web"
+    assert settings.harness.web.backend == "playwright"
+    assert settings.harness.web.channel == "chrome"
+    assert settings.harness.web.browser_executable_path == chrome_path
+    assert settings.harness.web.headless is False
+    assert settings.harness.web.base_url == "https://www.bing.com"
+    assert settings.harness.web.viewport_width == 1280
+    assert settings.harness.web.viewport_height == 720
+
+
+def test_load_settings_accepts_web_chrome_channel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    chrome_path = _chrome_executable(tmp_path)
+    monkeypatch.setenv("FSQ_WEB_BROWSER_EXECUTABLE_PATH", str(chrome_path))
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  platform: web
+  web:
+    backend: playwright
+    channel: chrome
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    validate_runtime_settings(settings)
+    assert settings.harness.web.channel == "chrome"
+    assert settings.harness.web.browser_executable_path == chrome_path
+
+
+def test_validate_runtime_settings_rejects_missing_web_browser_executable_path(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  platform: web
+  web:
+    backend: playwright
+    channel: chrome
+""",
+        ),
+        encoding="utf-8",
+    )
+    settings = load_settings(config_path)
+
+    with pytest.raises(ConfigurationError, match="executable path environment variable is not set"):
+        validate_runtime_settings(settings)
+
+
+def test_validate_runtime_settings_rejects_missing_web_browser_executable_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    missing_path = tmp_path / "chrome.exe"
+    monkeypatch.setenv("FSQ_WEB_BROWSER_EXECUTABLE_PATH", str(missing_path))
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  platform: web
+  web:
+    backend: playwright
+    channel: chrome
+""",
+        ),
+        encoding="utf-8",
+    )
+    settings = load_settings(config_path)
+
+    with pytest.raises(ConfigurationError, match="does not exist"):
+        validate_runtime_settings(settings)
+
+
+def test_validate_runtime_settings_rejects_web_browser_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FSQ_WEB_BROWSER_EXECUTABLE_PATH", str(tmp_path))
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  platform: web
+  web:
+    backend: playwright
+    channel: chrome
+""",
+        ),
+        encoding="utf-8",
+    )
+    settings = load_settings(config_path)
+
+    with pytest.raises(ConfigurationError, match="browser executable file"):
+        validate_runtime_settings(settings)
+
+
+def test_validate_runtime_settings_rejects_web_browser_path_that_does_not_match_channel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firefox_path = tmp_path / "firefox.exe"
+    firefox_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("FSQ_WEB_BROWSER_EXECUTABLE_PATH", str(firefox_path))
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  platform: web
+  web:
+    backend: playwright
+    channel: chrome
+""",
+        ),
+        encoding="utf-8",
+    )
+    settings = load_settings(config_path)
+
+    with pytest.raises(ConfigurationError, match="does not match"):
+        validate_runtime_settings(settings)
+
+
+def test_load_settings_rejects_partial_web_viewport(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        _base_config(
+            tmp_path,
+            """
+harness:
+  platform: web
+  web:
+    viewport_width: 1280
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="Invalid configuration"):
+        load_settings(config_path)
 
 
 def test_load_settings_accepts_post_action_delay_defaults(tmp_path: Path) -> None:

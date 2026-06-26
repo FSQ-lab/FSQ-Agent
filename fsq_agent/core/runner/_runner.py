@@ -82,17 +82,18 @@ class StepRunner:
             return step
         if not capability.capture_evidence or not self._is_default_evidence_policy(step.evidence_policy):
             return step
-        return step.model_copy(update={"evidence_policy": self._standard_capture_evidence_policy()})
+        return step.model_copy(update={"evidence_policy": self._standard_capture_evidence_policy(capability)})
 
     def _is_default_evidence_policy(self, policy: EvidencePolicy) -> bool:
         return policy.model_dump(mode="python") == EvidencePolicy().model_dump(mode="python")
 
-    def _standard_capture_evidence_policy(self) -> EvidencePolicy:
+    def _standard_capture_evidence_policy(self, capability: CapabilityDefinition) -> EvidencePolicy:
+        observation_kind = "page_snapshot" if capability.platform == "web" else "ui_tree"
         return EvidencePolicy(
             capture_before=True,
             capture_after=True,
             capture_on_failure=True,
-            artifact_kinds=["screenshot", "ui_tree"],
+            artifact_kinds=["screenshot", observation_kind],
         )
 
     def _start_step(self, run_id: str, step: ExecutableStep) -> _StepExecutionState:
