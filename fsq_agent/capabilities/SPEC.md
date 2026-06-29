@@ -42,7 +42,7 @@ Android declaration block:
 
 Web declaration block:
 
-- Web Playwright driver methods use catalog-backed `platform_driver_capability` entries with Web aliases and parameter models.
+- Web Playwright driver methods use catalog-backed `platform_driver_capability` entries with Web aliases and parameter models, including explicit browser lifecycle actions `startBrowser`/`closeBrowser` alongside page actions such as `navigateTo` and `pageSnapshot`.
 - Web harness-owned assertions use `harness_capability` when behavior is not a backend driver method.
 
 Future platform declaration block:

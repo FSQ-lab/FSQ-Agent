@@ -12,6 +12,7 @@ from fsq_agent.models import (
     WebAssertNotVisibleParams,
     WebAssertTextParams,
     WebAssertVisibleParams,
+    WebCloseBrowserParams,
     WebClickOnParams,
     WebHoverOnParams,
     WebNavigateBackParams,
@@ -19,6 +20,7 @@ from fsq_agent.models import (
     WebPageSnapshotParams,
     WebPressKeyParams,
     WebSelectOptionParams,
+    WebStartBrowserParams,
     WebTakeScreenshotParams,
     WebTypeTextParams,
     WebWaitForParams,
@@ -26,6 +28,7 @@ from fsq_agent.models import (
 
 
 DEFAULT_WEB_WAIT_TIMEOUT_MS = 10000
+_BROWSER_NOT_STARTED_MESSAGE = "Browser is not started. Call startBrowser before Web page actions."
 _T = TypeVar("_T")
 
 
@@ -55,12 +58,8 @@ class PlaywrightWebDriver:
         self._playwright: object | None = None
         self._browser: object | None = None
         self._context: object | None = None
-        self._executor: ThreadPoolExecutor | None = None if page is not None else ThreadPoolExecutor(max_workers=1, thread_name_prefix="fsq-playwright")
-        try:
-            self.page = page if page is not None else self._run_sync(self._create_page)
-        except Exception:
-            self._shutdown_executor()
-            raise
+        self._executor: ThreadPoolExecutor | None = None
+        self.page: object | None = page
 
     def context(self) -> dict[str, object]:
         return self._run_sync(self._context_payload)
@@ -79,14 +78,44 @@ class PlaywrightWebDriver:
                 "browser_executable_configured": self.executable_path is not None,
                 "headless": self.headless,
                 "base_url_configured": self.base_url is not None,
+                "browser_started": self.page is not None,
             },
         }
+
+    @_web_driver_tool("startBrowser", description="Start or reuse the configured Web browser.")
+    def start_browser(self, params: WebStartBrowserParams) -> dict[str, object]:
+        if self.page is None:
+            self._ensure_executor()
+        try:
+            return self._run_sync(lambda: self._start_browser(params))
+        except Exception:
+            if self.page is None:
+                self._shutdown_executor()
+            raise
+
+    def _start_browser(self, params: WebStartBrowserParams) -> dict[str, object]:
+        if self.page is not None:
+            return self._passed({"already_started": True, "url": self._page_url()})
+        self.page = self._create_page()
+        return self._passed({"already_started": False, "url": self._page_url()})
+
+    @_web_driver_tool("closeBrowser", description="Close the active Web browser.")
+    def close_browser(self, params: WebCloseBrowserParams) -> dict[str, object]:
+        return self._run_sync(lambda: self._close_browser(params))
+
+    def _close_browser(self, params: WebCloseBrowserParams) -> dict[str, object]:
+        if self.page is None and self._context is None and self._browser is None and self._playwright is None:
+            return self._passed({"already_closed": True})
+        self._close()
+        return self._passed({"already_closed": False})
 
     @_web_driver_tool("navigateTo", description="Navigate the current Web page to a URL.")
     def navigate_to(self, params: WebNavigateToParams) -> dict[str, object]:
         return self._run_sync(lambda: self._navigate_to(params))
 
     def _navigate_to(self, params: WebNavigateToParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         url = self._resolve_url(params.url)
         kwargs: dict[str, object] = {}
         if params.waitUntil is not None:
@@ -100,6 +129,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._navigate_back(params))
 
     def _navigate_back(self, params: WebNavigateBackParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         kwargs: dict[str, object] = {}
         if params.waitUntil is not None:
             kwargs["wait_until"] = params.waitUntil
@@ -112,6 +143,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._click_on(params))
 
     def _click_on(self, params: WebClickOnParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         locator = self._locator(params)
         if not self._wait_for_locator(locator, state="visible"):
             return self._target_missing(params)
@@ -129,6 +162,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._type_text(params))
 
     def _type_text(self, params: WebTypeTextParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         locator = self._locator(params)
         if not self._wait_for_locator(locator, state="visible"):
             return self._target_missing(params)
@@ -144,6 +179,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._select_option(params))
 
     def _select_option(self, params: WebSelectOptionParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         locator = self._locator(params)
         if not self._wait_for_locator(locator, state="visible"):
             return self._target_missing(params)
@@ -164,6 +201,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._hover_on(params))
 
     def _hover_on(self, params: WebHoverOnParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         locator = self._locator(params)
         if not self._wait_for_locator(locator, state="visible"):
             return self._target_missing(params)
@@ -175,6 +214,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._press_key(params))
 
     def _press_key(self, params: WebPressKeyParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         self.page.keyboard.press(params.key)
         return self._passed({"key": params.key})
 
@@ -183,6 +224,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._wait_for(params))
 
     def _wait_for(self, params: WebWaitForParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         timeout = params.timeout_ms or DEFAULT_WEB_WAIT_TIMEOUT_MS
         if params.target or params.locator:
             locator = self._locator(params)
@@ -206,6 +249,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._take_screenshot(params))
 
     def _take_screenshot(self, params: WebTakeScreenshotParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         return self._passed({"bytes": len(self._screenshot(params))})
 
     @_web_driver_tool("pageSnapshot", description="Return the current Web page accessibility snapshot.")
@@ -213,6 +258,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._page_snapshot(params))
 
     def _page_snapshot(self, params: WebPageSnapshotParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         aria_snapshot = getattr(self.page, "aria_snapshot", None)
         if callable(aria_snapshot):
             try:
@@ -236,6 +283,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._assert_visible(params))
 
     def _assert_visible(self, params: WebAssertVisibleParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         locator = self._locator(params)
         if self._wait_for_locator(locator, state="visible"):
             return self._passed()
@@ -246,6 +295,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._assert_not_visible(params))
 
     def _assert_not_visible(self, params: WebAssertNotVisibleParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         locator = self._locator(params)
         if self._wait_for_locator(locator, state="hidden"):
             return self._passed()
@@ -256,6 +307,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._assert_text(params))
 
     def _assert_text(self, params: WebAssertTextParams) -> dict[str, object]:
+        if self.page is None:
+            return self._browser_not_started()
         locator = self._locator(params)
         if not self._wait_for_locator(locator, state="visible"):
             return self._target_missing(params)
@@ -272,6 +325,8 @@ class PlaywrightWebDriver:
         return self._run_sync(lambda: self._screenshot(params))
 
     def _screenshot(self, params: WebTakeScreenshotParams | None = None) -> bytes:
+        if self.page is None:
+            raise RuntimeError(_BROWSER_NOT_STARTED_MESSAGE)
         params = params or WebTakeScreenshotParams()
         return self.page.screenshot(full_page=bool(params.fullPage), omit_background=bool(params.omitBackground))
 
@@ -282,18 +337,28 @@ class PlaywrightWebDriver:
             self._shutdown_executor()
 
     def _close(self) -> None:
-        for candidate in [self._context, self._browser, self._playwright]:
-            close = getattr(candidate, "close", None)
-            stop = getattr(candidate, "stop", None)
-            if callable(close):
-                close()
-            elif callable(stop):
-                stop()
+        try:
+            for candidate in [self._context, self._browser, self._playwright]:
+                close = getattr(candidate, "close", None)
+                stop = getattr(candidate, "stop", None)
+                if callable(close):
+                    close()
+                elif callable(stop):
+                    stop()
+        finally:
+            self.page = None
+            self._context = None
+            self._browser = None
+            self._playwright = None
 
     def _run_sync(self, func: Callable[[], _T]) -> _T:
         if self._executor is None:
             return func()
         return self._executor.submit(func).result()
+
+    def _ensure_executor(self) -> None:
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fsq-playwright")
 
     def _shutdown_executor(self) -> None:
         executor = self._executor
@@ -344,9 +409,6 @@ class PlaywrightWebDriver:
         data = params.model_dump(mode="python", exclude_none=True)
         locator = data.get("locator")
         if isinstance(locator, dict):
-            ref = locator.get("ref")
-            if isinstance(ref, str) and ref.strip():
-                return self.page.locator(ref)
             role = locator.get("role")
             name = locator.get("name")
             if isinstance(role, str) and role.strip():
@@ -388,6 +450,8 @@ class PlaywrightWebDriver:
         return url if isinstance(url, str) else None
 
     def _page_viewport(self) -> tuple[int, int] | None:
+        if self.page is None:
+            return None
         viewport_size = getattr(self.page, "viewport_size", None)
         if not isinstance(viewport_size, dict):
             return None
@@ -423,6 +487,9 @@ class PlaywrightWebDriver:
             "Target was not found.",
             metadata={"params": params.model_dump(mode="json", exclude_none=True)},
         )
+
+    def _browser_not_started(self) -> dict[str, object]:
+        return self._failed("context_error", _BROWSER_NOT_STARTED_MESSAGE)
 
     def _passed(self, output: object | None = None) -> dict[str, object]:
         return {"status": "passed", "output": output}

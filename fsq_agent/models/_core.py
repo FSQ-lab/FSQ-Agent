@@ -326,7 +326,6 @@ class AndroidAssertWithAIParams(BaseModel):
 class WebLocator(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    ref: str | None = None
     role: str | None = None
     name: str | None = None
     text: str | None = None
@@ -358,6 +357,14 @@ class _WebTargetParams(BaseModel):
         if isinstance(self.target, str) and self.target.strip():
             return True
         return self.locator is not None and self.locator.has_value()
+
+
+class WebStartBrowserParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class WebCloseBrowserParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class WebNavigateToParams(BaseModel):
@@ -544,6 +551,8 @@ class WebActionDefinition:
 
 
 WEB_ACTION_DEFINITIONS: tuple[WebActionDefinition, ...] = (
+    WebActionDefinition("startBrowser", "start_browser", WebStartBrowserParams, "setup"),
+    WebActionDefinition("closeBrowser", "close_browser", WebCloseBrowserParams, "teardown"),
     WebActionDefinition("navigateTo", "navigate_to", WebNavigateToParams, "action", capture_evidence=True),
     WebActionDefinition("navigateBack", "navigate_back", WebNavigateBackParams, "action", capture_evidence=True),
     WebActionDefinition("clickOn", "click_on", WebClickOnParams, "action", capture_evidence=True),

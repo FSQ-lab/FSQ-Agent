@@ -1,8 +1,10 @@
 import time
 import os
 import inspect
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from fsq_agent.config import Settings, load_settings
 from fsq_agent.knowledge import PrivateKnowledgeLoader
@@ -41,7 +43,7 @@ class FsqAgent:
         return cls.from_settings(load_settings(path, workspace))
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "FsqAgent":
+    def from_settings(cls, settings: Settings, harness_factory: Callable[[str], Any] | None = None) -> "FsqAgent":
         output_root = settings.output.root_dir
         knowledge = settings.agent_context.knowledge
         knowledge_root = knowledge.root_dir
@@ -71,7 +73,7 @@ class FsqAgent:
             reporter,
             knowledge_loader,
             skill_loader,
-            OpenAIAgentsRuntime(settings, common_tool_adapter),
+            OpenAIAgentsRuntime(settings, common_tool_adapter, harness_factory=harness_factory),
             event_logger,
         )
 

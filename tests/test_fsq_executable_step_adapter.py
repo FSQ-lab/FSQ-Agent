@@ -248,6 +248,7 @@ schemaVersion: fsq.ai-test/v1
 name: Web Case
 platform: web
 ---
+- startBrowser
 - navigateTo:
     url: https://www.bing.com
 - pageSnapshot
@@ -268,6 +269,7 @@ platform: web
     target: Results
     text:
       contains: playwright
+- closeBrowser
 """,
         encoding="utf-8",
     )
@@ -276,6 +278,7 @@ platform: web
     steps = _web_adapter().to_executable_steps(case)
 
     assert [step.action_name for step in steps] == [
+        "start_browser",
         "navigate_to",
         "page_snapshot",
         "click_on",
@@ -283,14 +286,50 @@ platform: web
         "press_key",
         "wait_for",
         "assert_text",
+        "close_browser",
     ]
-    assert [step.kind for step in steps] == ["action", "observation", "action", "action", "action", "action", "assertion"]
-    assert steps[0].params == {"url": "https://www.bing.com"}
-    assert steps[2].params == {"target": "Search box", "locator": {"role": "textbox", "name": "Search"}}
-    assert steps[3].params == {"target": "Search box", "text": "playwright"}
-    assert steps[5].params == {"text": "playwright", "timeout_ms": 5000}
-    assert steps[6].params == {"target": "Results", "text": {"contains": "playwright"}}
+    assert [step.kind for step in steps] == [
+        "setup",
+        "action",
+        "observation",
+        "action",
+        "action",
+        "action",
+        "action",
+        "assertion",
+        "teardown",
+    ]
+    assert steps[0].params == {}
+    assert steps[1].params == {"url": "https://www.bing.com"}
+    assert steps[3].params == {"target": "Search box", "locator": {"role": "textbox", "name": "Search"}}
+    assert steps[4].params == {"target": "Search box", "text": "playwright"}
+    assert steps[6].params == {"text": "playwright", "timeout_ms": 5000}
+    assert steps[7].params == {"target": "Results", "text": {"contains": "playwright"}}
+    assert steps[8].params == {}
     assert all(step.metadata["platform"] == "web" for step in steps)
+
+
+def test_fsq_executable_step_adapter_rejects_web_locator_ref(tmp_path: Path) -> None:
+    case_path = tmp_path / "web_ref_case.codex.yaml"
+    case_path.write_text(
+        """
+schemaVersion: fsq.ai-test/v1
+name: Web Ref Case
+platform: web
+---
+- clickOn:
+    locator:
+      ref: e83
+""",
+        encoding="utf-8",
+    )
+    case = FsqCaseLoader().load_case(case_path)
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        _web_adapter().to_executable_steps(case)
+
+    assert exc_info.value.context["action_name"] == "clickOn"
+    assert exc_info.value.context["validation_errors"][0]["loc"] == ("locator", "ref")
 
 
 def test_fsq_executable_step_adapter_preserves_web_runtime_secret_refs(tmp_path: Path) -> None:

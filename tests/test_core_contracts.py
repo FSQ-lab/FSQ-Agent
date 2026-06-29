@@ -26,8 +26,10 @@ from fsq_agent.models import (
     RunnerStepResult,
     SourceRef,
     StepPhaseReport,
+    WebCloseBrowserParams,
     WebClickOnParams,
     WebPageSnapshotParams,
+    WebStartBrowserParams,
     WebTypeTextParams,
     WebWaitForParams,
 )
@@ -148,6 +150,14 @@ def test_web_action_definitions_are_single_source_for_web_contract() -> None:
 
     assert len(action_names) == len(set(action_names))
     assert set(WEB_ACTION_DEFINITIONS_BY_NAME) == set(action_names)
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["startBrowser"].driver_method == "start_browser"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["startBrowser"].params_model is WebStartBrowserParams
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["startBrowser"].step_kind == "setup"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["startBrowser"].capture_evidence is False
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["closeBrowser"].driver_method == "close_browser"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["closeBrowser"].params_model is WebCloseBrowserParams
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["closeBrowser"].step_kind == "teardown"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["closeBrowser"].capture_evidence is False
     assert WEB_ACTION_DEFINITIONS_BY_NAME["clickOn"].driver_method == "click_on"
     assert WEB_ACTION_DEFINITIONS_BY_NAME["clickOn"].params_model is WebClickOnParams
     assert WEB_ACTION_DEFINITIONS_BY_NAME["clickOn"].capture_evidence is True
@@ -163,16 +173,26 @@ def test_web_action_definitions_are_single_source_for_web_contract() -> None:
 
 
 def test_web_parameter_models_produce_canonical_dumps_and_reject_extra_fields() -> None:
+    start = WebStartBrowserParams.model_validate({})
+    close = WebCloseBrowserParams.model_validate({})
     click = WebClickOnParams.model_validate({"target": "Sign in"})
     typed = WebTypeTextParams.model_validate({"locator": {"role": "textbox", "name": "Search"}, "text": "bing.com"})
     wait = WebWaitForParams.model_validate({"text": "Results", "state": "visible", "timeout_ms": 5000})
 
+    assert start.model_dump(mode="json", exclude_none=True) == {}
+    assert close.model_dump(mode="json", exclude_none=True) == {}
     assert click.model_dump(mode="json", exclude_none=True) == {"target": "Sign in"}
     assert typed.model_dump(mode="json", exclude_none=True) == {
         "locator": {"role": "textbox", "name": "Search"},
         "text": "bing.com",
     }
     assert wait.model_dump(mode="json", exclude_none=True) == {"text": "Results", "state": "visible", "timeout_ms": 5000}
+    with pytest.raises(ValidationError):
+        WebStartBrowserParams.model_validate({"url": "https://example.com"})
+    with pytest.raises(ValidationError):
+        WebCloseBrowserParams.model_validate({"force": True})
+    with pytest.raises(ValidationError):
+        WebClickOnParams.model_validate({"locator": {"ref": "e83"}})
     with pytest.raises(ValidationError):
         WebClickOnParams.model_validate({"locator": {"unknown": "Login"}})
     with pytest.raises(ValidationError):

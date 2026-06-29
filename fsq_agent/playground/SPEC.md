@@ -67,7 +67,8 @@ Web playground behavior:
 
 - Android session/setup endpoints return structured unavailable responses when Web is active.
 - Web runtime info reports backend, channel, browser executable configured state, headless mode, and base URL presence.
-- Web screenshot preview uses the active Web harness/driver screenshot path.
+- Web dynamic and strict execution construct `WebHarness`/`PlaywrightWebDriver` without launching a browser; `startBrowser` and `closeBrowser` remain explicit task/FSQ capabilities and are not injected by playground routes.
+- Web screenshot preview uses the active Web harness/driver screenshot path when a page is started and returns a structured unavailable/error response before `startBrowser` or after `closeBrowser`.
 
 Future platform playground behavior:
 

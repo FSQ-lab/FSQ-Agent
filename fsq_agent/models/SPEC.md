@@ -84,6 +84,8 @@ Android platform exports:
 Web platform exports:
 
 - `WebLocator`: Pydantic model for Web target locators with optional `role`, `name`, `text`, `label`, `placeholder`, `testId`, `css`, and `xpath` fields. Web action parameter models that accept either a semantic `target` or `locator` require at least one populated target signal.
+- `WebStartBrowserParams`: Pydantic model for the explicit `start_browser` Web lifecycle capability. It accepts no fields in the first lifecycle batch.
+- `WebCloseBrowserParams`: Pydantic model for the explicit `close_browser` Web lifecycle capability. It accepts no fields in the first lifecycle batch.
 - `WebNavigateToParams`: Pydantic model for `navigate_to` parameters, including required `url` and optional Playwright-safe `wait_until` lifecycle state.
 - `WebNavigateBackParams`: Pydantic model for `navigate_back` parameters. It accepts no fields in the first batch.
 - `WebClickOnParams`: Pydantic model for `click_on` parameters. It requires either an exact snapshot `target` or non-empty `locator`, with optional human-readable `element`, `double_click`, `button`, and `modifiers` fields.
@@ -156,10 +158,10 @@ Android contracts:
 
 Web contracts:
 
-- Web parameter models include locator, navigation, click, text typing, select, hover, key, wait, screenshot, page snapshot, deterministic assertions, and Web AI assertion models.
+- Web parameter models include browser lifecycle, locator, navigation, click, text typing, select, hover, key, wait, screenshot, page snapshot, deterministic assertions, and Web AI assertion models.
 - Web settings are grouped under `WebHarnessSettings` and are selected by `HarnessSettings.platform == "web"`.
 - Web observation is represented as `page_snapshot`/`pageSnapshot`; it is distinct from Android `ui_tree`.
-- Web action parameter design follows Playwright MCP's LLM-facing core automation conventions where appropriate: action targets are exact page-snapshot references or unique selectors, optional `element` fields are human-readable descriptions for interaction permission/auditing, screenshots are evidence/debugging observations rather than the normal action-selection substrate, and unsafe/opt-in capability families are excluded from the first batch.
+- Web action parameter design follows Playwright MCP's LLM-facing core automation conventions where appropriate: action targets are replayable semantic locators or stable unique selectors, optional `element` fields are human-readable descriptions for interaction permission/auditing, screenshots are evidence/debugging observations rather than the normal action-selection substrate, and unsafe/opt-in capability families are excluded from the first batch.
 
 Future platform contracts:
 
@@ -212,6 +214,7 @@ All custom exceptions inherit from `FsqAgentError`. Exceptions carry concise hum
 - Web driver parameter models forbid unexpected fields and provide canonical `model_dump(mode="json", exclude_none=True)` output. Runtime-only step metadata such as evidence policy, timeout fields, source references, retry policy, replay-source metadata, and step identifiers stays on `ExecutableStep` rather than inside Web driver parameter models.
 - `RuntimeSecretRef` is a pre-resolution FSQ replay reference, not a driver parameter value. Strict entry-layer code must resolve it to a string in memory and then validate the resolved payload against the appropriate Android driver parameter model before `core` invokes a harness.
 - `WaitMsParams` belongs to the decorated `wait_ms` CommonTool capability and its strict replay alias `waitMs`. It lets recorded strict cases replay pure waits without routing through Android gesture or driver APIs.
+- Web browser lifecycle is represented by explicit no-field parameter models `WebStartBrowserParams` and `WebCloseBrowserParams`; `navigate_to` is navigation on an already-started browser/page, not an implicit startup contract.
 - Web `page_snapshot` is a driver-owned, read-only observation capability with canonical alias `pageSnapshot`. It returns a Web page snapshot and must not reuse Android-oriented `ui_tree` or `uiTree` naming.
 - Pydantic is used at boundaries where external inputs, config files, agent output, and tool output enter the system.
 - The agent final output contract is model-owned. The runtime always uses the current `AgentFinalOutput` schema through OpenAI Agents SDK structured output. The schema version is emitted in the final output for traceability, but schema selection is not a user-facing configuration.

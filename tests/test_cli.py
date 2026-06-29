@@ -24,9 +24,11 @@ schemaVersion: fsq.ai-test/v1
 name: Strict Web CLI Case
 platform: web
 ---
+- startBrowser
 - navigateTo:
     url: https://www.bing.com
 - pageSnapshot
+- closeBrowser
 """
 
 
@@ -301,7 +303,9 @@ harness:
     }
     assert calls["strict"]["case_path"] == case_path.resolve()
     assert calls["strict"]["run_id"] == "strict_web"
+    assert [step.action_name for step in calls["strict"]["steps"]] == ["start_browser", "navigate_to", "page_snapshot", "close_browser"]
     assert calls["strict"]["registry"].resolve("pageSnapshot") is not None
+    assert calls["strict"]["registry"].resolve("startBrowser") is not None
     assert calls["strict"]["registry"].resolve("tapOn") is None
 
 

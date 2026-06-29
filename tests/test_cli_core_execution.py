@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from fsq_agent.cli._capability_bootstrap import build_capability_registry
 from fsq_agent.cli._core_execution import run_fsq_core_case, run_strict_fsq_core_case
 from fsq_agent.models import (
     EvidenceBundle,
@@ -42,6 +43,19 @@ appId: com.microsoft.emmx
     text: skipped
     target: Search box
 - killApp
+"""
+
+
+WEB_FSQ_CASE_WITH_TEARDOWN = """
+schemaVersion: fsq.ai-test/v1
+name: Core Web Teardown Case
+platform: web
+---
+- startBrowser
+- navigateTo:
+    url: https://example.com
+- pageSnapshot
+- closeBrowser
 """
 
 
@@ -179,6 +193,28 @@ def test_run_fsq_core_case_runs_trailing_teardown_after_failure(tmp_path: Path) 
     ]
     artifact_reasons = [event["payload"]["reason"] for event in manifest["events"] if event["event_type"] == "artifact_captured"]
     assert artifact_reasons.count("failure") == 2
+
+
+def test_run_fsq_core_case_runs_trailing_web_close_browser_after_failure(tmp_path: Path) -> None:
+    case_path = tmp_path / "core_web_teardown.codex.yaml"
+    case_path.write_text(WEB_FSQ_CASE_WITH_TEARDOWN, encoding="utf-8")
+    harness = CliCoreHarness(fail_action="navigate_to")
+
+    bundle = run_fsq_core_case(
+        case_path=case_path,
+        harness=harness,
+        output_dir=tmp_path / "runs" / "run-1",
+        run_id="run-1",
+        registry=build_capability_registry(platform="web"),
+    )
+
+    assert harness.actions == ["start_browser", "navigate_to", "close_browser"]
+    assert [step.step_id for step in bundle.steps] == [
+        "core_web_teardown-step-001",
+        "core_web_teardown-step-002",
+        "core_web_teardown-step-004",
+    ]
+    assert [step.status for step in bundle.steps] == ["passed", "failed", "passed"]
 
 
 def test_run_strict_fsq_core_case_writes_evidence_and_core_report(tmp_path: Path) -> None:
