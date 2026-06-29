@@ -606,6 +606,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API.
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/task-stream/"):
+            request_id = unquote(parsed.path.removeprefix("/task-stream/")).strip()
+            self._stream_task_progress(request_id, parse_qs(parsed.query))
+            return
         if parsed.path.startswith("/replay-video-file/"):
             status, payload, content_type, extra_headers = self.server.playground.handle_replay_video_file(
                 parsed.path, self.headers.get("Range")
@@ -635,6 +639,50 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - stdlib signature.
         return None
+
+    def handle_one_request(self) -> None:
+        try:
+            super().handle_one_request()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
+
+    def _stream_task_progress(self, request_id: str, query: dict[str, list[str]]) -> None:
+        last_sequence = _after_sequence(query) or 0
+        first = self.server.playground.handle_get(f"/task-progress/{request_id}", {"after_sequence": [str(last_sequence)]})
+        if first[0] != 200 or not isinstance(first[1], dict):
+            self._send_json(404, {"error": "Task progress not found."})
+            return
+        self.close_connection = True
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            last_sequence = self._write_sse_progress(first[1], last_sequence)
+            status = str(first[1].get("status"))
+            revision = 0
+            while status == "running":
+                payload, revision = self.server.playground.state.wait_for_update(
+                    request_id, last_sequence, revision, timeout=15.0
+                )
+                if not isinstance(payload, dict):
+                    break
+                last_sequence = self._write_sse_progress(payload, last_sequence)
+                status = str(payload.get("status"))
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+    def _write_sse_progress(self, payload: dict[str, object], last_sequence: int) -> int:
+        events = payload.get("events")
+        if isinstance(events, list):
+            for event in events:
+                if isinstance(event, dict) and isinstance(event.get("sequence"), int):
+                    last_sequence = max(last_sequence, int(event["sequence"]))
+        self.wfile.write(b"data: " + json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n\n")
+        self.wfile.flush()
+        return last_sequence
 
     def _read_json_body(self) -> dict[str, object] | str:
         content_length = int(self.headers.get("Content-Length") or "0")

@@ -1,6 +1,8 @@
 const state = {
   currentRequestId: null,
   progressTimer: null,
+  progressStream: null,
+  progressScrollScheduled: false,
   replayRequestId: null,
   previewToken: null,
   pendingReplayVideoCleanup: null,
@@ -63,10 +65,7 @@ async function refreshAll() {
 }
 
 function clearPage() {
-  if (state.progressTimer) {
-    window.clearInterval(state.progressTimer);
-    state.progressTimer = null;
-  }
+  stopProgressUpdates();
   state.replayRequestId = null;
   state.previewToken = null;
   state.currentRequestId = null;
@@ -243,10 +242,7 @@ async function cancelExecution() {
   setRunButtonCancel({ disabled: true });
   try {
     const progress = await api(`/cancel/${encodeURIComponent(requestId)}`, { method: 'POST', body: JSON.stringify({}) });
-    if (state.progressTimer) {
-      window.clearInterval(state.progressTimer);
-      state.progressTimer = null;
-    }
+    stopProgressUpdates();
     appendProgress('Cancelled by user', null, [], 'failed');
     state.currentRequestId = null;
     state.replayRequestId = progress.result?.runId || progress.runId || state.replayRequestId;
@@ -273,37 +269,73 @@ function setRunButtonIdle({ disabled = false } = {}) {
 }
 
 function startProgressPolling() {
-  if (state.progressTimer) window.clearInterval(state.progressTimer);
+  stopProgressUpdates();
+  if (window.EventSource) {
+    const requestId = state.currentRequestId;
+    const stream = new EventSource(`/task-stream/${encodeURIComponent(requestId)}`);
+    state.progressStream = stream;
+    stream.onmessage = (event) => {
+      try {
+        applyProgress(JSON.parse(event.data));
+      } catch (error) {
+        appendProgress(`Progress error: ${error.message}`, null, [], 'failed');
+      }
+    };
+    stream.onerror = () => {
+      if (!state.currentRequestId) return;
+      stopProgressUpdates();
+      state.progressTimer = window.setInterval(refreshProgress, PROGRESS_POLL_INTERVAL_MS);
+    };
+    return;
+  }
   state.progressTimer = window.setInterval(refreshProgress, PROGRESS_POLL_INTERVAL_MS);
   refreshProgress();
+}
+
+function stopProgressUpdates() {
+  if (state.progressTimer) {
+    window.clearInterval(state.progressTimer);
+    state.progressTimer = null;
+  }
+  if (state.progressStream) {
+    state.progressStream.close();
+    state.progressStream = null;
+  }
 }
 
 async function refreshProgress() {
   if (!state.currentRequestId) return;
   try {
-    const progress = await api(progressPath(state.currentRequestId));
-    for (const event of progress.events || []) {
-      if (event.type === 'run_started') setRunId(event.run_id || event.runId);
-      appendProgress(eventLabel(event), event.sequence, eventDetails(event), eventStatus(event));
-      updateLastProgressSequence(event.sequence);
+    await applyProgress(await api(progressPath(state.currentRequestId)));
+  } catch (error) {
+    appendProgress(`Progress error: ${error.message}`, null, [], 'failed');
+  }
+}
+
+async function applyProgress(progress) {
+  if (!state.currentRequestId) return;
+  for (const event of progress.events || []) {
+    if (event.type === 'run_started') setRunId(event.run_id || event.runId);
+    appendProgress(eventLabel(event), event.sequence, eventDetails(event), eventStatus(event));
+    updateLastProgressSequence(event.sequence);
+  }
+  if (progress.preview?.token && progress.preview.token !== state.previewToken) {
+    await refreshPreview(progress.requestId, progress.preview.token);
+  }
+  if (progress.status !== 'running') {
+    stopProgressUpdates();
+    state.currentRequestId = null;
+    setRunButtonIdle({ disabled: true });
+    appendProgress(`Finished: ${progress.status}`, null, [], statusFromValue(progress.status));
+    if (progress.error) appendProgress(`Error: ${progress.error}`, null, [], 'failed');
+    if (progress.result?.runId) {
+      setRunId(progress.result.runId);
+      state.replayRequestId = progress.result.runId;
+      await loadReport(progress.result.runId);
+      await refreshPreviewFromReplay(progress.result.runId);
     }
-    if (progress.preview?.token && progress.preview.token !== state.previewToken) {
-      await refreshPreview(progress.requestId, progress.preview.token);
-    }
-    if (progress.status !== 'running') {
-      window.clearInterval(state.progressTimer);
-      state.progressTimer = null;
-      state.currentRequestId = null;
-      setRunButtonIdle({ disabled: true });
-      appendProgress(`Finished: ${progress.status}`, null, [], statusFromValue(progress.status));
-      if (progress.error) appendProgress(`Error: ${progress.error}`, null, [], 'failed');
-      if (progress.result?.runId) {
-        setRunId(progress.result.runId);
-        state.replayRequestId = progress.result.runId;
-        await loadReport(progress.result.runId);
-        await refreshPreviewFromReplay(progress.result.runId);
-      }
-      if (state.replayRequestId) {
+    if (state.replayRequestId && progress.status !== 'cancelled') {
+      try {
         const replay = await loadReplayFrames(state.replayRequestId);
         appendReplayFramesProgress(replay.frames);
         appendReplayVideoGeneratingProgress();
@@ -315,13 +347,13 @@ async function refreshProgress() {
         } else {
           appendProgress(`Replay video was not generated: ${replayVideo?.error || 'unknown error'}`, null, [], 'failed');
         }
+      } catch (error) {
+        appendProgress(`Replay video was not generated: ${error.message}`, null, [], 'failed');
       }
-      setRunButtonIdle();
-      await refreshStatus();
-      await refreshRuntime();
     }
-  } catch (error) {
-    appendProgress(`Progress error: ${error.message}`, null, [], 'failed');
+    setRunButtonIdle();
+    await refreshStatus();
+    await refreshRuntime();
   }
 }
 
@@ -492,7 +524,16 @@ function appendProgress(content, backendSequence = null, details = [], status = 
     item.appendChild(renderProgressDetail(eventKey, detail.label, detail.value));
   }
   els.progress.appendChild(item);
-  els.progress.scrollTop = els.progress.scrollHeight;
+  scheduleProgressScroll();
+}
+
+function scheduleProgressScroll() {
+  if (state.progressScrollScheduled) return;
+  state.progressScrollScheduled = true;
+  window.requestAnimationFrame(() => {
+    state.progressScrollScheduled = false;
+    els.progress.scrollTop = els.progress.scrollHeight;
+  });
 }
 
 function captureProgressDetailState() {

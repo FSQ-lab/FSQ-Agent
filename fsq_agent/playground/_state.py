@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from threading import Lock
+from threading import Condition
 from typing import Literal
 from uuid import uuid4
 
@@ -67,12 +67,32 @@ class TaskProgress:
 
 class PlaygroundState:
 	def __init__(self) -> None:
-		self._lock = Lock()
+		self._lock = Condition()
+		self._revision = 0
 		self.server_id = str(uuid4())
 		self.session = PlaygroundSession()
 		self.current_request_id: str | None = None
 		self.tasks: dict[str, TaskProgress] = {}
 		self.last_run: dict[str, object] | None = None
+
+	def _notify(self) -> None:
+		self._revision += 1
+		self._lock.notify_all()
+
+	def wait_for_update(self, request_id: str, after_sequence: int, last_revision: int, timeout: float) -> tuple[dict[str, object] | None, int]:
+		with self._lock:
+			if self._revision == last_revision:
+				self._lock.wait(timeout)
+			task = self.tasks.get(request_id)
+			if task is None:
+				return None, self._revision
+			payload = task.to_json()
+			payload["events"] = [
+				event
+				for event in task.events
+				if isinstance(event.get("sequence"), int) and event["sequence"] > after_sequence
+			]
+			return payload, self._revision
 
 	def status(self) -> dict[str, object]:
 		with self._lock:
@@ -124,6 +144,7 @@ class PlaygroundState:
 			if not isinstance(event_payload.get("sequence"), int) or event_payload["sequence"] <= 0:
 				event_payload["sequence"] = len(task.events) + 1
 			task.events.append(event_payload)
+			self._notify()
 
 	def bind_run_id(self, request_id: str, run_id: str) -> None:
 		with self._lock:
@@ -144,6 +165,7 @@ class PlaygroundState:
 			if task is None:
 				return
 			task.preview = preview
+			self._notify()
 
 	def mark_replay_reset(self, request_id: str) -> bool:
 		with self._lock:
@@ -168,6 +190,7 @@ class PlaygroundState:
 			task.error = "Cancelled by user."
 			if self.current_request_id == request_id:
 				self.current_request_id = None
+			self._notify()
 			return task.to_json()
 
 	def is_cancel_requested(self, request_id: str) -> bool:
@@ -196,6 +219,7 @@ class PlaygroundState:
 			self.last_run = task.result
 			if self.current_request_id == request_id:
 				self.current_request_id = None
+			self._notify()
 
 	def fail_task(self, request_id: str, error: BaseException | str) -> None:
 		with self._lock:
@@ -208,6 +232,7 @@ class PlaygroundState:
 				task.error = str(error) or error.__class__.__name__ if isinstance(error, BaseException) else str(error)
 			if self.current_request_id == request_id:
 				self.current_request_id = None
+			self._notify()
 
 	def get_task(self, request_id: str, after_sequence: int | None = None) -> dict[str, object] | None:
 		with self._lock:
