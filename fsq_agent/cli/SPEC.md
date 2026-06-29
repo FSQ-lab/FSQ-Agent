@@ -103,7 +103,8 @@ Android CLI behavior:
 Web CLI behavior:
 
 - Web strict runs do not require Android app id or serial.
-- Web strict runs build `WebHarness` with `PlaywrightWebDriver` and capture `screenshot`/`page_snapshot` evidence.
+- Web strict runs build `WebHarness` with `PlaywrightWebDriver` without launching a browser. Authored `startBrowser` starts or reuses the browser/page; authored `closeBrowser` closes it. CLI must not inject either command, and `navigateTo` must not be treated as startup.
+- Web strict runs capture `screenshot`/`page_snapshot` evidence only when the active Web driver has a started page.
 - Web strict navigation must use fully qualified URLs or the configured Web base URL policy.
 
 Future platform CLI behavior:
@@ -168,7 +169,7 @@ Recording failures happen after a dynamic run and must not change that dynamic r
 - Normal `run` is always dynamic LLM goal/reference execution. `--goal` supplies the user goal text. `--case-yaml` and `--case-dir` supply raw file content as reference material and must not use `FsqCaseLoader` or `FsqTaskAdapter`.
 - Dynamic task construction separates planning references from final verification. `--goal` tasks use `planning_reference_kind="goal"` with the normalized goal text. Raw case tasks use `planning_reference_kind="raw_case"` with source path plus complete raw file content. The CLI does not derive final verifier requirements itself; pre-plan must summarize one `verification_goal` before external UI actions.
 - Dynamic run recording is post-run evidence transformation, not task execution. It reads persisted normalized capability events after `FsqAgent.run` returns and writes only under that run directory.
-- Recorded cases reflect actual successfully completed capabilities with `ReplayPolicy(kind="fsq_command")` plus supported dependency capabilities with `ReplayPolicy(kind="dependency")`. The recorder must not invent setup, teardown, assertions, locator fallback, recovery actions, or source YAML mutations. Missing assertions or lifecycle actions produce warnings.
+- Recorded cases reflect actual successfully completed capabilities with `ReplayPolicy(kind="fsq_command")` plus supported dependency capabilities with `ReplayPolicy(kind="dependency")`. The recorder must not invent setup, teardown, Web `startBrowser`/`closeBrowser`, assertions, locator fallback, recovery actions, or source YAML mutations. Missing assertions or lifecycle actions produce warnings.
 - Runtime secrets in recorded cases are represented by environment variable names through `runtimeSecret` refs. Secret values are resolved only in memory during strict replay and are never written to generated YAML, event previews, manifests, reports, recording manifests, or logs.
 - `run --strict` is strict-core execution. It parses FSQ YAML, uses config-owned active platform settings, and does not construct or invoke LLM components for planning, recovery, locator fallback, action repair, or final verification. Android strict runs use Android aliases and `AndroidHarness`; Web strict runs use Web aliases and `WebHarness`. The sole provider-backed exception is an explicitly authored `assertWithAI` step, for which CLI may build and inject an AI assertion evaluator before execution.
 - Directory execution is intentionally serial because UI automation cases share external device and application state. Each case still creates independent run state so SDK sessions, harness context, and CommonTool state do not leak across cases.

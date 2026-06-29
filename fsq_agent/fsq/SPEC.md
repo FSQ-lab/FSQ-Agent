@@ -27,7 +27,7 @@ adapter = FsqExecutableStepAdapter(registry_snapshot=registry.snapshot())
 steps = adapter.to_executable_steps(case)
 ```
 
-`FsqExecutableStepAdapter` resolves authored FSQ action names and replay aliases through the registry and stores the canonical capability name in `ExecutableStep.action_name`. Authored names such as `tapOn`, `inputText`, `pressKey`, `assertVisible`, `assert`, `assertWithAI`, and generated replay alias `waitMs` are preserved in `ExecutableStep.metadata["authored_action_name"]`.
+`FsqExecutableStepAdapter` resolves authored FSQ action names and replay aliases through the registry and stores the canonical capability name in `ExecutableStep.action_name`. Authored names such as `tapOn`, `inputText`, `pressKey`, `assertVisible`, `assert`, `assertWithAI`, `startBrowser`, `closeBrowser`, and generated replay alias `waitMs` are preserved in `ExecutableStep.metadata["authored_action_name"]`.
 
 The adapter should normalize each known YAML command into `ExecutableStep.params` by resolving the action alias to a `CapabilityDefinition`, validating object-shaped payloads against `capability.params_model`, then storing `model_dump(mode="json", exclude_none=True)`. Known action payloads should be authored in the same field shape as their parameter models rather than relying on action-specific scalar shorthand. The first-batch canonical forms are grouped by active platform plus shared CommonTool commands.
 
@@ -52,6 +52,8 @@ Web command block:
 
 | FSQ command shape | canonical `action_name` | `params` |
 |---|---|---|
+| `startBrowser: {}` | `start_browser` | validated `WebStartBrowserParams` dump |
+| `closeBrowser: {}` | `close_browser` | validated `WebCloseBrowserParams` dump |
 | `navigateTo: {url: https://example.test}` | `navigate_to` | validated `WebNavigateToParams` dump |
 | `navigateBack: {}` | `navigate_back` | validated `WebNavigateBackParams` dump |
 | `clickOn: {target: Submit}` | `click_on` | validated `WebClickOnParams` dump |
@@ -79,6 +81,8 @@ Step kind mapping for known actions is owned by capability metadata:
 |---|---|
 | `launchApp` | `setup` |
 | `killApp` | `teardown` |
+| `startBrowser` | `setup` |
+| `closeBrowser` | `teardown` |
 | `assert`, `assertVisible`, `assertNotVisible`, `assertText`, `assertWithAI` | `assertion` |
 | `takeScreenshot`, `startRecording`, `stopRecording`, `pageSnapshot` | `observation` |
 | `waitMs` | `action` |
@@ -126,8 +130,8 @@ Invalid FSQ YAML raises `ConfigurationError` with the failing path. Unsupported 
 - Capability decorators and platform action catalogs are declaration-time inputs only. FSQ parsing consumes resolved `CapabilityDefinition` data from the registry snapshot and must not inspect decorated functions or platform catalog objects directly.
 - `waitMs` is a generated strict replay alias for the decorated `wait_ms` CommonTool capability. It is validated by `WaitMsParams`, converted into an `ExecutableStep(action_name="wait_ms")`, and later handled by `StepRunner` through the normal registry path without invoking Android harness or driver actions.
 - `assertWithAI` is parsed and validated like any other authored assertion command. This module does not evaluate AI assertions, build provider-backed evaluators, capture screenshots, or decide assertion verdicts.
-- Web aliases such as `navigateTo`, `navigateBack`, `clickOn`, `typeText`, `selectOption`, `hoverOn`, `waitFor`, `takeScreenshot`, `assertText`, and `pageSnapshot` are accepted only when the supplied registry snapshot contains the corresponding Web capabilities. Android registries must not accept Web-only aliases, and Web registries must not accept Android-only aliases.
-- `launchApp` and `killApp` are treated as setup and teardown step kinds for strict-core execution.
+- Web aliases such as `startBrowser`, `closeBrowser`, `navigateTo`, `navigateBack`, `clickOn`, `typeText`, `selectOption`, `hoverOn`, `waitFor`, `takeScreenshot`, `assertText`, and `pageSnapshot` are accepted only when the supplied registry snapshot contains the corresponding Web capabilities. Android registries must not accept Web-only aliases, and Web registries must not accept Android-only aliases.
+- `launchApp`/`killApp` and `startBrowser`/`closeBrowser` are treated as setup and teardown step kinds for strict-core execution. A trailing `closeBrowser` command should be passed to `StepSequenceRunner` as teardown so it still executes after an earlier normal-step failure.
 - Commands marked `optional: true` are still converted into executable steps; optional/non-blocking execution semantics do not belong to this adapter.
 - Parsed FSQ cases are not converted into LLM `Task` descriptions. For normal LLM `run --case-yaml` and `run --case-dir`, the CLI reads raw file text and builds goal/reference tasks without calling this module.
 - `FsqExecutableStepAdapter` must not import or call `core`; it produces shared model contracts only. Higher-level entry code is responsible for passing those steps into core runners.

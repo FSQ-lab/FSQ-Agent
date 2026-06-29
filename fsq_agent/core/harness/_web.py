@@ -101,6 +101,9 @@ class WebHarness:
     ) -> None:
         return None
 
+    def screenshot(self, params: WebTakeScreenshotParams | None = None) -> bytes:
+        return self.driver.screenshot(params or WebTakeScreenshotParams())
+
     def capture_artifact(
         self,
         kind: str,
@@ -111,6 +114,21 @@ class WebHarness:
     ) -> HarnessArtifactRef:
         if self.artifact_store is None:
             raise RuntimeError("Artifact capture requires an ArtifactStore.")
+        if self._browser_not_started(context):
+            return self._to_harness_artifact_ref(
+                self.artifact_store.write_json(
+                    kind="json",
+                    step_id=step_id,
+                    phase=phase,
+                    name=f"{reason}-{kind}-unavailable",
+                    payload={
+                        "status": "unavailable",
+                        "reason": "browser_not_started",
+                        "message": "Browser is not started. Call startBrowser before Web page actions.",
+                        "requested_artifact_kind": kind,
+                    },
+                )
+            )
         if kind == "screenshot":
             return self._to_harness_artifact_ref(
                 self.artifact_store.write_bytes(
@@ -118,7 +136,7 @@ class WebHarness:
                     step_id=step_id,
                     phase=phase,
                     name=reason,
-                    data=self.driver.screenshot(WebTakeScreenshotParams()),
+                    data=self.screenshot(WebTakeScreenshotParams()),
                 )
             )
         if kind == "page_snapshot":
@@ -342,6 +360,9 @@ class WebHarness:
 
     def _dict_value(self, value: object) -> dict[str, object]:
         return value if isinstance(value, dict) else {}
+
+    def _browser_not_started(self, context: HarnessContext) -> bool:
+        return context.metadata.get("browser_started") is False
 
     def _metadata_str(self, metadata: dict[str, object], key: str) -> str | None:
         value = metadata.get(key)
