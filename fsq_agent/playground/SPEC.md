@@ -40,6 +40,7 @@ Initial HTTP API:
 | `POST /execute` | Start one dynamic goal, raw YAML-reference, or strict YAML execution and return a request id immediately. |
 | `POST /cancel/{request_id}` | Request cooperative cancellation for the currently running task and return the updated task state. |
 | `GET /task-progress/{request_id}` | Return progress and final result metadata for one request id. Without query parameters it returns accumulated events for compatibility; with `after_sequence` it returns only events whose sequence is greater than the supplied value so browser polling can append new progress without re-rendering history. |
+| `GET /task-stream/{request_id}` | Server-Sent Events stream of the same progress payloads. Emits a `data:` event whenever new progress is available and closes once the task leaves `running`. Honors `after_sequence` to resume. Polling `/task-progress` remains the fallback. |
 | `GET /screenshot` | Return an active-platform base64 screenshot and timestamp when available, or a structured unavailable/error response. |
 | `GET /replay/{request_or_run_id}` | Return persisted timestamped screenshot frames for one playground request id or run id, including the frame index, source path when available, and base64 screenshot bytes used by browser replay-video generation. |
 | `GET /replay-video/{request_or_run_id}` | Return metadata for a stored run-local replay video when available. |
@@ -95,6 +96,7 @@ The playground returns JSON errors for API failures and does not expose tracebac
 - Capability declaration is a bootstrap concern outside playground routes. Playground strict and dynamic execution consume validated registry metadata and normalized runner results rather than decorated methods or platform action catalogs.
 - Playground records completed dynamic runs using the post-run recorder with `allow_failure=True`.
 - Browser progress polling is incremental: the server may project only events after the caller's last rendered sequence, and the static UI appends those events to the existing progress list instead of clearing and rebuilding the entire history on every tick.
+- Browser progress prefers a Server-Sent Events long connection (`/task-stream/{request_id}`) that pushes incremental progress payloads and falls back to `/task-progress` interval polling when `EventSource` is unavailable or the stream errors. Cancellation continues to use `POST /cancel/{request_id}`; the cancelled status arrives through the same progress stream.
 - After execution completes, the browser loads the replay frames used for replay-video generation and displays that screenshot set in the Progress pane. When a replay video is available or generated, the Preview pane displays that video directly.
 - The replay video preview uses the browser's native video controls for playback progress, seeking, and pause/resume controls.
 - The static UI does not expose a manual replay button; replay frames remain an internal source for browser-side replay video generation.

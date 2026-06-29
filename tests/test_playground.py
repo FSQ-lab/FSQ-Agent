@@ -488,7 +488,7 @@ def test_playground_server_stores_uploaded_replay_video(tmp_path: Path) -> None:
         f"/replay-video/{request_id}",
         {"mimeType": "video/webm", "videoBase64": base64.b64encode(b"webm").decode("ascii")},
     )
-    video_status, video_bytes, content_type = server.handle_replay_video_file(f"/replay-video-file/{request_id}")
+    video_status, video_bytes, content_type, _extra_headers = server.handle_replay_video_file(f"/replay-video-file/{request_id}")
 
     assert status == 200
     assert payload["videoUrl"] == "/replay-video-file/run-1"
@@ -1020,7 +1020,7 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "progress-run-id" in html
     assert "progressSequence" in script
     assert "lastProgressSequence" in script
-    assert "const PROGRESS_POLL_INTERVAL_MS = 500;" in script
+    assert "const PROGRESS_POLL_INTERVAL_MS = 750;" in script
     assert "window.setInterval(refreshProgress, PROGRESS_POLL_INTERVAL_MS)" in script
     assert "after_sequence=${state.lastProgressSequence}" in script
     assert "function updateLastProgressSequence" in script
@@ -1036,12 +1036,11 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "previewToken" in script
     assert "pendingReplayVideoCleanup" in script
     assert "replayVideoInFlight" in script
-    assert "replayDurationFixing" in script
-    assert "const REPLAY_FAST_ACTION_DELAY_MS = 800;" in script
-    assert "const REPLAY_FAST_MAX_DELAY_MS = 1600;" in script
-    assert "const REPLAY_FAST_FALLBACK_DELAY_MS = 800;" in script
-    assert "const REPLAY_FAST_FINAL_FRAME_HOLD_MS = 1000;" in script
-    assert "const REPLAY_FAST_TIME_SCALE = 6;" in script
+    assert "const REPLAY_FAST_ACTION_DELAY_MS = 900;" in script
+    assert "const REPLAY_FAST_MAX_DELAY_MS = 1500;" in script
+    assert "const REPLAY_FAST_FALLBACK_DELAY_MS = 500;" in script
+    assert "const REPLAY_FAST_FINAL_FRAME_HOLD_MS = 700;" in script
+    assert "const REPLAY_FAST_TIME_SCALE = 10;" in script
     assert "REPLAY_FAST_FINAL_FRAME_HOLD_MS" in script
     assert "requestCanvasFrame();" in script
     assert "await waitMs(REPLAY_FAST_FINAL_FRAME_HOLD_MS);" in script
@@ -1114,7 +1113,7 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "replayVideoEnded" not in script
     assert "replayVideoStarted" not in script
     assert "replayVideoPaused" not in script
-    assert "normalizeReplayVideoDuration" in script
+    assert "normalizeReplayVideoDuration" not in script
     assert "generateReplayVideo" in script
     assert "recordLiveReplayFrame" not in script
     assert "finalizeLiveReplayVideo" not in script
@@ -1130,16 +1129,11 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "MediaRecorder.isTypeSupported" in script
     assert "uploadReplayVideo" in script
     assert "blobToBase64" in script
-    assert "await normalizeReplayVideoDuration()" in script
-    assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" not in script
-    assert "els.replayVideo.addEventListener('durationchange', finishDurationFix" in script
-    assert "els.replayVideo.addEventListener('seeked', finishDurationFix" in script
-    assert "els.replayVideo.currentTime = 1e101" in script
     assert "await showReplayVideoPreview(replayVideo.videoUrl)" in script
     assert "showRightTab('preview')" in script
     assert "api(`/replay-video/${encodeURIComponent(requestId)}`)" in script
     assert "method: 'POST'" in script
-    assert "recorder.start(1000)" in script
+    assert "recorder.start()" in script
     assert "replayVideo.videoUrl" in script
     assert "replayFrameDelay" in script
     assert "[replay-video] draw screenshot" in script
@@ -1185,3 +1179,15 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "report-content" in styles
     assert "tab-button.active" in styles
     assert "[hidden]" in styles
+
+
+def test_playground_progress_prefers_sse_with_polling_fallback() -> None:
+    static_dir = Path(__file__).parents[1] / "fsq_agent" / "playground" / "static"
+    script = (static_dir / "playground.js").read_text(encoding="utf-8")
+    assert "window.EventSource" in script
+    assert "new EventSource(`/task-stream/${encodeURIComponent(requestId)}`)" in script
+    assert "state.progressStream" in script
+    assert "stream.onmessage" in script
+    assert "function applyProgress(progress)" in script
+    assert "function stopProgressUpdates()" in script
+    assert "window.setInterval(refreshProgress, PROGRESS_POLL_INTERVAL_MS)" in script
