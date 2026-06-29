@@ -1174,6 +1174,7 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "replayVideoEnded" not in script
     assert "replayVideoStarted" not in script
     assert "replayVideoPaused" not in script
+    assert "normalizeReplayVideoDuration" not in script
     assert "generateReplayVideo" in script
     assert "recordLiveReplayFrame" not in script
     assert "finalizeLiveReplayVideo" not in script
@@ -1245,3 +1246,15 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "report-content" in styles
     assert "tab-button.active" in styles
     assert "[hidden]" in styles
+
+
+def test_playground_progress_prefers_sse_with_polling_fallback() -> None:
+    static_dir = Path(__file__).parents[1] / "fsq_agent" / "playground" / "static"
+    script = (static_dir / "playground.js").read_text(encoding="utf-8")
+    assert "window.EventSource" in script
+    assert "new EventSource(`/task-stream/${encodeURIComponent(requestId)}`)" in script
+    assert "state.progressStream" in script
+    assert "stream.onmessage" in script
+    assert "function applyProgress(progress)" in script
+    assert "function stopProgressUpdates()" in script
+    assert "window.setInterval(refreshProgress, PROGRESS_POLL_INTERVAL_MS)" in script
