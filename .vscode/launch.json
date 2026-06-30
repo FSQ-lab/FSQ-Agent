@@ -11,7 +11,7 @@
       "args": [
         "init",
         "--config",
-        "config.local.yaml"
+        "config.local.android.yaml"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -27,7 +27,7 @@
       "args": [
         "run",
         "--config",
-        "config.local.yaml",
+        "config.local.android.yaml",
         "--goal",
         "${input:goal}",
         "--record",
@@ -71,7 +71,7 @@
       "args": [
         "run",
         "--config",
-        "config.local.yaml",
+        "config.local.android.yaml",
         "--case-yaml",
         "${input:caseYaml}",
         "--record",
@@ -93,7 +93,7 @@
       "args": [
         "run",
         "--config",
-        "config.local.yaml",
+        "config.local.android.yaml",
         "--case-dir",
         "${input:caseDir}",
         "--record",
@@ -115,7 +115,7 @@
       "args": [
         "run",
         "--config",
-        "config.local.yaml",
+        "config.local.android.yaml",
         "--strict",
         "--case-yaml",
         "${input:strictCaseYaml}"
@@ -134,7 +134,7 @@
       "args": [
         "run",
         "--config",
-        "config.local.yaml",
+        "config.local.android.yaml",
         "--strict",
         "--case-dir",
         "${input:caseDir}"
@@ -153,7 +153,7 @@
       "args": [
         "report",
         "--config",
-        "config.local.yaml",
+        "config.local.android.yaml",
         "--run-id",
         "${input:runId}",
         "--format",
