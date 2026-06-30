@@ -56,7 +56,7 @@ def init(config_path: str | None, workspace_path: str | None) -> None:
 @click.option("--case-yaml", "case_yaml_path", type=click.Path(exists=False, dir_okay=False), default=None)
 @click.option("--case-dir", "case_dir_path", type=click.Path(exists=False, file_okay=False), default=None)
 @click.option("--stream/--no-stream", "stream", default=True, show_default=True)
-@click.option("--stream-format", type=click.Choice(["rich", "jsonl"]), default="rich", show_default=True)
+@click.option("--stream-format", type=click.Choice(["concise", "jsonl"]), default="concise", show_default=True)
 @click.option("--record", is_flag=True, default=False, show_default=True)
 @click.option("--record-on-failure", is_flag=True, default=False, show_default=True)
 @click.option("--tracing/--no-tracing", "tracing", default=None)

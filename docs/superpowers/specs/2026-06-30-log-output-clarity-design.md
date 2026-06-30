@@ -7,11 +7,11 @@ Status: Confirmed design
 
 Make fsq-agent's human-facing logs easy to scan during dynamic runs. Operators should be able to tell at a glance which phase the run is in, which tool is being called, whether that call succeeded or failed, and what safe model reasoning summary or failure reason matters.
 
-The motivating problem is that current rich streaming logs print large `tool_output_preview` values inline. Platform capability outputs can contain detailed runner JSON, artifact references, phase reports, and nested metadata. That information is useful for reports, recording, and persisted timelines, but it overwhelms terminal logs and hides the important operational story.
+The motivating problem is that current human-readable streaming logs print large `tool_output_preview` values inline. Platform capability outputs can contain detailed runner JSON, artifact references, phase reports, and nested metadata. That information is useful for reports, recording, and persisted timelines, but it overwhelms terminal logs and hides the important operational story.
 
 ## Scope
 
-This design covers only Python logging presentation for human-readable log output, especially the existing CLI rich stream rendered through `log.info`, `log.error`, and related logging calls.
+This design covers only Python logging presentation for human-readable log output, especially the CLI concise stream rendered through `log.info`, `log.error`, and related logging calls.
 
 The intended implementation changes are limited to CLI log rendering helpers and focused tests. The primary implementation surface is `fsq_agent/cli/_formatting.py`; `fsq_agent/cli/_logging.py` may remain a thin base formatter unless the later SPEC phase identifies a small formatting need there.
 
@@ -33,7 +33,7 @@ This design does not expose hidden model chain-of-thought. It may display only s
 
 Use formatter-only log cleanup.
 
-The CLI rich stream should render concise, phase-tagged operational summaries from existing `RunEvent` data. It should not require runtime event schema changes or persisted payload changes. `--stream-format jsonl` should continue to emit the raw serialized `RunEvent` without prefixes or display compaction so machine consumers remain compatible.
+The CLI concise stream should render phase-tagged operational summaries from existing `RunEvent` data. It should not require runtime event schema changes or persisted payload changes. `--stream-format jsonl` should continue to emit the raw serialized `RunEvent` without prefixes or display compaction so machine consumers remain compatible.
 
 ### Alternatives Considered
 
@@ -57,7 +57,7 @@ Trade-off: This may be useful later, but it is intentionally out of scope for a 
 
 ## Public Behavior
 
-Human-readable rich logs should become phase-oriented and concise. A dynamic run should read as a timeline of phase transitions and tool outcomes rather than a stream of nested JSON.
+Human-readable concise logs should become phase-oriented. A dynamic run should read as a timeline of phase transitions and tool outcomes rather than a stream of nested JSON.
 
 Each rich log entry should prioritize:
 
@@ -84,7 +84,7 @@ Exact wording can be adjusted during implementation, but the logs must keep the 
 
 ## Log Rendering Rules
 
-The rich formatter should derive a display phase from existing event data:
+The concise formatter should derive a display phase from existing event data:
 
 - `PRE-PLAN` for pre-plan events such as `Pre-plan started`, knowledge-page planning tool calls, and `Goal pre-plan injected`.
 - `STARTUP` for provider, harness, tool setup, and SDK agent readiness events.
@@ -104,19 +104,23 @@ The formatter should derive tool identity from:
 1. `event.tool_name`.
 2. `event.payload["tool_name"]`.
 3. `event.payload["capability_name"]`.
-4. `unknown` only when no safe name exists.
+4. The matching started event for the same tool call id, when a completed event omits its own tool name.
+5. Safe metadata in the output preview, when available.
+6. `unknown` only when no safe name exists.
 
-Arguments should be shown only through the existing redacted `event.tool_arguments` value and should remain compact. Multi-line or long argument payloads should be flattened and truncated.
+Arguments should be shown only through the existing redacted `event.tool_arguments` value and should remain compact and faithful to the event value, including explicit `null` values. Multi-line or long argument payloads should be flattened and truncated.
 
-Large tool outputs should not be printed inline by default. For `tool_call_completed`, the formatter should summarize known safe fields such as status, failure category, error message, duration, and artifact refs. It should omit verbose JSON output previews unless the output is short and no better summary exists.
+Large tool outputs should not be printed inline by default. For `tool_call_completed`, the formatter should summarize known safe fields such as status, failure category, error message, duration, safe result hints, and artifact refs. It should omit verbose JSON output previews unless the output is short and no better summary exists.
 
 When verbose output is omitted, the log should say where to look when possible, using existing `payload.artifact_path`, `payload.artifact_refs`, report path, or generic run artifacts wording. It should not invent new files or artifact records.
 
 Failures should remain explicit. For `tool_call_failed`, `run_failed`, and completed tool calls whose payload status is failed, logs should include the error message and failure category when available, even if the output preview is otherwise suppressed.
 
-`reasoning_summary` events should remain visible as safe model reason summaries. They should be phase-tagged and truncated to a readable single-line summary. The formatter must not label these as hidden chain-of-thought.
+`reasoning_summary` events with meaningful model-readable content should remain visible as safe model reason summaries. They should be phase-tagged and truncated to a readable single-line summary. Generic empty-summary notices should be suppressed in concise mode. The formatter must not label these as hidden chain-of-thought.
 
-`jsonl` stream format must bypass all rich display behavior and keep emitting one raw serialized event per log message.
+Structured SDK agent messages should be summarized from safe fields such as schema version, status, and summary. Concise logs should not print raw `ResponseOutputMessage(...)` representations.
+
+`jsonl` stream format must bypass all concise display behavior and keep emitting one raw serialized event per log message.
 
 ## Module Ownership
 
@@ -171,7 +175,7 @@ Focused tests should cover the CLI formatting behavior with constructed `RunEven
 - successful tool completed logs include status, tool name, duration, and artifact hints without dumping large JSON,
 - failed tool completed or failed tool events include failure category and error message,
 - `reasoning_summary` logs preserve a safe single-line model reason summary,
-- long `tool_output_preview` content is omitted or tightly truncated in rich logs,
+- long `tool_output_preview` content is omitted or tightly truncated in concise logs,
 - `stream_format="jsonl"` still writes the raw event JSON without rich prefixes or display compaction.
 
 Expected focused verification command:

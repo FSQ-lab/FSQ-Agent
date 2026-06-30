@@ -79,6 +79,15 @@ def test_run_rejects_missing_or_conflicting_sources(tmp_path: Path) -> None:
     assert strict_record.exit_code != 0
 
 
+def test_run_help_stream_format_defaults_to_concise_without_rich_alias() -> None:
+    result = CliRunner().invoke(main, ["run", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "[default: concise]" in result.output
+    assert "[concise|jsonl]" in result.output
+    assert "rich" not in result.output
+
+
 def test_run_case_yaml_uses_raw_file_content_without_fsq_parsing(tmp_path: Path, monkeypatch) -> None:
     config_path = _config(tmp_path)
     case_path = tmp_path / "cases" / "raw.codex.yaml"

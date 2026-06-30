@@ -2,6 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -770,6 +771,62 @@ def test_runtime_tool_output_payload_preserves_runner_evidence_fields() -> None:
     assert payload["runner_step_id"] == "agent-tap_on-1"
     assert payload["runner_result"] == {"step_id": "agent-tap_on-1", "status": "passed"}
     assert payload["artifact_refs"] == [{"kind": "screenshot", "path": "artifacts/screenshots/before.png"}]
+
+
+def test_runtime_stream_tool_output_preserves_tool_name_from_started_event() -> None:
+    runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory())
+    started = SimpleNamespace(
+        type="run_item_stream_event",
+        name="tool_called",
+        item=SimpleNamespace(
+            raw_item=SimpleNamespace(
+                name="read_knowledge_page",
+                call_id="call-1",
+                arguments='{"page_id":"edge_android_new_tab_page","file":null}',
+            )
+        ),
+    )
+    completed = SimpleNamespace(
+        type="run_item_stream_event",
+        name="tool_output",
+        item=SimpleNamespace(raw_item=SimpleNamespace(call_id="call-1"), output='{"ok":true,"page_id":"edge_android_new_tab_page","duration_ms":123}'),
+    )
+
+    start_event = runtime._map_stream_event(started, "run-1", "pre-plan")
+    completed_event = runtime._map_stream_event(completed, "run-1", "pre-plan")
+
+    assert start_event is not None
+    assert completed_event is not None
+    assert completed_event.tool_name == "read_knowledge_page"
+    assert completed_event.tool_call_id == "call-1"
+    assert completed_event.duration_ms == 123
+
+
+def test_runtime_stream_message_output_uses_text_not_sdk_object_repr() -> None:
+    runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory())
+    event = SimpleNamespace(
+        type="run_item_stream_event",
+        name="message_output_created",
+        item=SimpleNamespace(
+            raw_item=SimpleNamespace(content=[SimpleNamespace(text='{"schema_version":"task_run_v1","status":"success"}')])
+        ),
+    )
+
+    run_event = runtime._map_stream_event(event, "run-1", "task")
+
+    assert run_event is not None
+    assert run_event.message == '{"schema_version":"task_run_v1","status":"success"}'
+
+
+def test_runtime_stream_omits_empty_reasoning_summary() -> None:
+    runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory())
+    event = SimpleNamespace(
+        type="run_item_stream_event",
+        name="reasoning_item_created",
+        item=SimpleNamespace(raw_item=SimpleNamespace(summary=[])),
+    )
+
+    assert runtime._map_stream_event(event, "run-1", "task") is None
 
 
 def test_verification_evidence_builder_uses_text_only_after_runner_visual_assertion(tmp_path: Path) -> None:

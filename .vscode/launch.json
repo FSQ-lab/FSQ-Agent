@@ -31,9 +31,7 @@
         "--goal",
         "${input:goal}",
         "--record",
-        "--record-on-failure",
-        "--stream-format",
-        "jsonl"
+        "--record-on-failure"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -53,9 +51,7 @@
         "--goal",
         "${input:webGoal}",
         "--record",
-        "--record-on-failure",
-        "--stream-format",
-        "jsonl"
+        "--record-on-failure"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -75,9 +71,7 @@
         "--case-yaml",
         "${input:caseYaml}",
         "--record",
-        "--record-on-failure",
-        "--stream-format",
-        "jsonl"
+        "--record-on-failure"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,
@@ -97,9 +91,7 @@
         "--case-dir",
         "${input:caseDir}",
         "--record",
-        "--record-on-failure",
-        "--stream-format",
-        "jsonl"
+        "--record-on-failure"
       ],
       "console": "integratedTerminal",
       "justMyCode": false,

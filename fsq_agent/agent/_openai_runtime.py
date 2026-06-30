@@ -155,6 +155,7 @@ class OpenAIAgentsRuntime:
         self._agent_tool_names = self._discover_agent_tool_names(tool_factory)
         self._harness_tool_names: set[str] = set()
         self._harness_tool_schemas: dict[str, Any] = {}
+        self._stream_tool_calls: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     def _discover_agent_tool_names(self, tool_factory: AgentToolAdapter) -> set[str]:
         registry = getattr(tool_factory, "registry", None)
@@ -824,6 +825,13 @@ class OpenAIAgentsRuntime:
         item = getattr(event, "item", None)
         if name == "tool_called":
             tool_name = self._tool_name(item)
+            tool_call_id = self._tool_call_id(item)
+            tool_arguments = self._tool_arguments(item)
+            if tool_call_id:
+                self._stream_tool_calls[(run_id, task_id, tool_call_id)] = {
+                    "tool_name": tool_name,
+                    "tool_arguments": tool_arguments,
+                }
             payload = {"tool_origin": self._tool_origin(tool_name)}
             schema = self._harness_tool_schemas.get(tool_name or "")
             if schema is not None:
@@ -842,33 +850,42 @@ class OpenAIAgentsRuntime:
                 title="Tool call started",
                 message=self._tool_call_message(item),
                 tool_name=tool_name,
-                tool_call_id=self._tool_call_id(item),
-                tool_arguments=self._tool_arguments(item),
+                tool_call_id=tool_call_id,
+                tool_arguments=tool_arguments,
                 payload=payload,
             )
         if name == "tool_output":
             output = getattr(item, "output", None)
             payload = self._tool_output_payload(output)
+            tool_call_id = self._tool_call_id(item)
+            remembered = self._stream_tool_calls.pop((run_id, task_id, tool_call_id or ""), {})
+            tool_name = payload.get("tool_name") or remembered.get("tool_name") or self._tool_name(item)
+            duration_ms = payload.get("duration_ms")
             return RunEvent(
                 run_id=run_id,
                 task_id=task_id,
                 type="tool_call_completed",
                 title="Tool call completed",
                 message=self._tool_output_message(item),
-                tool_call_id=self._tool_call_id(item),
+                tool_name=str(tool_name) if tool_name else None,
+                tool_call_id=tool_call_id,
+                duration_ms=duration_ms if isinstance(duration_ms, int) and duration_ms >= 0 else None,
                 tool_output_preview=self._preview(output),
                 payload=payload,
             )
         if name == "reasoning_item_created":
             summary = self._reasoning_summary(item)
+            if not summary:
+                return None
             return RunEvent(run_id=run_id, task_id=task_id, type="reasoning_summary", title="Reasoning summary", message=summary)
         if name == "message_output_created":
+            message = self._message_output_text(item)
             return RunEvent(
                 run_id=run_id,
                 task_id=task_id,
                 type="planning_update",
                 title="Agent message",
-                message=self._preview(getattr(item, "raw_item", item)),
+                message=self._preview(message if message is not None else getattr(item, "raw_item", item)),
             )
         return None
 
@@ -904,14 +921,39 @@ class OpenAIAgentsRuntime:
     def _tool_output_message(self, item: Any) -> str:
         return "Tool returned output."
 
-    def _reasoning_summary(self, item: Any) -> str:
+    def _reasoning_summary(self, item: Any) -> str | None:
         raw_item = getattr(item, "raw_item", None)
         summary = getattr(raw_item, "summary", None)
         if isinstance(summary, list) and summary:
             return self._preview(summary)
         if isinstance(summary, str) and summary:
             return self._preview(summary)
-        return "The model produced a reasoning summary."
+        return None
+
+    def _message_output_text(self, item: Any) -> str | None:
+        raw_item = getattr(item, "raw_item", None)
+        candidates = [raw_item, item]
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                text = candidate.get("text")
+                if isinstance(text, str):
+                    return text
+                content = candidate.get("content")
+                if isinstance(content, list):
+                    text_parts = [part.get("text") for part in content if isinstance(part, dict) and isinstance(part.get("text"), str)]
+                    if text_parts:
+                        return "\n".join(text_parts)
+                continue
+            text = getattr(candidate, "text", None)
+            if isinstance(text, str):
+                return text
+            content = getattr(candidate, "content", None)
+            if isinstance(content, list):
+                parts = [getattr(part, "text", None) for part in content]
+                text_parts = [part for part in parts if isinstance(part, str)]
+                if text_parts:
+                    return "\n".join(text_parts)
+        return None
 
     def _preview(self, value: Any, limit: int = 1000) -> str:
         text = value if isinstance(value, str) else repr(value)

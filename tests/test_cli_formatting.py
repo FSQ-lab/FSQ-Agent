@@ -45,13 +45,13 @@ def _messages(records: list[logging.LogRecord]) -> list[str]:
         (RunEvent(run_id="run-1", task_id="task", type="run_completed", title="Run completed", sequence=5), "RUN"),
     ],
 )
-def test_log_run_event_rich_renders_phase_labels(captured_format_logs: list[logging.LogRecord], event: RunEvent, phase: str) -> None:
+def test_log_run_event_concise_renders_phase_labels(captured_format_logs: list[logging.LogRecord], event: RunEvent, phase: str) -> None:
     log_run_event(event)
 
     assert _messages(captured_format_logs)[0].startswith(f"[{phase} #{event.sequence}]")
 
 
-def test_log_run_event_rich_summarizes_tool_calls_without_verbose_output(captured_format_logs: list[logging.LogRecord]) -> None:
+def test_log_run_event_concise_summarizes_tool_calls_without_verbose_output(captured_format_logs: list[logging.LogRecord]) -> None:
     verbose_output = json.dumps(
         {
             "status": "passed",
@@ -101,7 +101,84 @@ def test_log_run_event_rich_summarizes_tool_calls_without_verbose_output(capture
     assert "yyyy" not in rendered
 
 
-def test_log_run_event_rich_surfaces_failed_tool_payload_as_error(captured_format_logs: list[logging.LogRecord]) -> None:
+def test_log_run_event_concise_preserves_null_arguments_and_pairs_completed_tool_name(
+    captured_format_logs: list[logging.LogRecord],
+) -> None:
+    log_run_event(
+        RunEvent(
+            run_id="run-1",
+            task_id="pre-plan",
+            type="tool_call_started",
+            title="Tool call started",
+            sequence=6,
+            tool_name="read_knowledge_page",
+            tool_call_id="call-knowledge",
+            tool_arguments='{"page_id":"edge_android_new_tab_page","file":null,"reason":"Need NTP actions."}',
+        )
+    )
+    log_run_event(
+        RunEvent(
+            run_id="run-1",
+            task_id="pre-plan",
+            type="tool_call_completed",
+            title="Tool call completed",
+            sequence=10,
+            tool_call_id="call-knowledge",
+            tool_output_preview=json.dumps(
+                {
+                    "ok": True,
+                    "page_id": "edge_android_new_tab_page",
+                    "path": "pages/edge_android_new_tab_page.md",
+                    "content": "# New Tab Page\n" + ("large " * 1000),
+                }
+            ),
+        )
+    )
+
+    assert _messages(captured_format_logs) == [
+        '[PRE-PLAN #6] tool started: read_knowledge_page args={"page_id":"edge_android_new_tab_page","file":null,"reason":"Need NTP actions."}',
+        "[PRE-PLAN #10] tool passed: read_knowledge_page result=page=edge_android_new_tab_page path=pages/edge_android_new_tab_page.md",
+    ]
+
+
+def test_log_run_event_concise_preserves_explicit_null_tool_arguments(captured_format_logs: list[logging.LogRecord]) -> None:
+    log_run_event(
+        RunEvent(
+            run_id="run-1",
+            task_id="task",
+            type="tool_call_started",
+            title="Tool call started",
+            sequence=28,
+            tool_name="launch_app",
+            tool_arguments='{"app_id":null}',
+            payload={"tool_origin": "platform"},
+        )
+    )
+    log_run_event(
+        RunEvent(
+            run_id="run-1",
+            task_id="task",
+            type="tool_call_completed",
+            title="Tool call completed",
+            sequence=30,
+            tool_output_preview=json.dumps({"result": {"output": {"app_id": "com.microsoft.emmx"}}, "large": "x" * 1000}),
+            payload={
+                "tool_name": "launch_app",
+                "status": "passed",
+                "duration_ms": 2417,
+                "artifact_refs": [{"kind": "screenshot", "path": "artifacts/screenshots/before.png"}],
+                "runner_result": {"output": {"app_id": "com.microsoft.emmx"}},
+            },
+        )
+    )
+
+    assert _messages(captured_format_logs) == [
+        '[EXECUTION #28] tool started: launch_app args={"app_id":null}',
+        "[EXECUTION #30] tool passed: launch_app duration=2417ms result=app_id=com.microsoft.emmx artifacts=screenshot",
+    ]
+
+
+def test_log_run_event_concise_surfaces_failed_tool_payload_as_error(captured_format_logs: list[logging.LogRecord]) -> None:
     log_run_event(
         RunEvent(
             run_id="run-1",
@@ -125,7 +202,7 @@ def test_log_run_event_rich_surfaces_failed_tool_payload_as_error(captured_forma
     assert captured_format_logs[0].levelno == logging.ERROR
 
 
-def test_log_run_event_rich_keeps_reasoning_summary_concise(captured_format_logs: list[logging.LogRecord]) -> None:
+def test_log_run_event_concise_keeps_reasoning_summary_concise(captured_format_logs: list[logging.LogRecord]) -> None:
     message = "Need to verify the current page before final output.\n" + ("detail " * 200)
 
     log_run_event(
@@ -145,7 +222,43 @@ def test_log_run_event_rich_keeps_reasoning_summary_concise(captured_format_logs
     assert len(rendered) < 500
 
 
-def test_log_run_event_rich_surfaces_existing_report_path_hint(captured_format_logs: list[logging.LogRecord]) -> None:
+def test_log_run_event_concise_suppresses_generic_reasoning_summary(captured_format_logs: list[logging.LogRecord]) -> None:
+    log_run_event(
+        RunEvent(
+            run_id="run-1",
+            task_id="task",
+            type="reasoning_summary",
+            title="Reasoning summary",
+            sequence=19,
+            message="The model produced a reasoning summary.",
+        )
+    )
+
+    assert _messages(captured_format_logs) == []
+
+
+def test_log_run_event_concise_summarizes_structured_agent_messages(captured_format_logs: list[logging.LogRecord]) -> None:
+    log_run_event(
+        RunEvent(
+            run_id="run-1",
+            task_id="task",
+            type="planning_update",
+            title="Agent message",
+            sequence=102,
+            message=(
+                "ResponseOutputMessage(id='abc', content=[ResponseOutputText(annotations=[], "
+                "text='{\"schema_version\":\"task_run_v1\",\"status\":\"success\","
+                "\"summary\":\"The verification goal is satisfied.\",\"pre_plan\":[]}', type='output_text')])"
+            ),
+        )
+    )
+
+    assert _messages(captured_format_logs) == [
+        "[VERIFICATION #102] update: agent message schema=task_run_v1 status=success summary=The verification goal is satisfied."
+    ]
+
+
+def test_log_run_event_concise_surfaces_existing_report_path_hint(captured_format_logs: list[logging.LogRecord]) -> None:
     log_run_event(
         RunEvent(
             run_id="run-1",
