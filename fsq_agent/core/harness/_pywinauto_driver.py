@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 import subprocess
 import time
@@ -24,6 +25,10 @@ from fsq_agent.models import (
 
 DEFAULT_WINDOWS_WAIT_TIMEOUT_SECONDS = 10.0
 WINDOW_READY_TIMEOUT_SECONDS = 30.0
+UI_SNAPSHOT_MAX_DEPTH = 12
+UI_SNAPSHOT_MAX_NODES = 1200
+UI_SNAPSHOT_MAX_CHILDREN = 60
+UI_SNAPSHOT_MAX_BYTES = 800000
 _T = TypeVar("_T")
 
 
@@ -194,9 +199,87 @@ class PywinautoWindowsDriver:
 
     def _ui_snapshot(self) -> dict[str, object]:
         window = self._require_window()
-        texts = getattr(window, "texts", None)
-        title = texts()[0] if callable(texts) else None
-        return {"title": title if isinstance(title, str) else None, "snapshot_type": "control_tree"}
+        state = {"count": 0, "bytes": 0, "truncated": False}
+        root = self._extract_element(window, depth=0, seen=set(), state=state)
+        return {
+            "snapshot_type": "control_tree",
+            "node_count": state["count"],
+            "byte_size": state["bytes"],
+            "truncated": state["truncated"],
+            "root": root,
+        }
+
+    def _extract_element(self, element: Any, *, depth: int, seen: set, state: dict[str, Any]) -> dict[str, Any] | None:
+        if state["count"] >= UI_SNAPSHOT_MAX_NODES or state["bytes"] >= UI_SNAPSHOT_MAX_BYTES:
+            state["truncated"] = True
+            return None
+        runtime_id = self._element_runtime_id(element)
+        if runtime_id is not None and runtime_id in seen:
+            return None
+        control_type = self._element_attr(element, "control_type")
+        info: dict[str, Any] = {
+            "title": self._safe_call(getattr(element, "window_text", None)),
+            "control_type": control_type,
+            "automation_id": self._element_attr(element, "automation_id"),
+            "class_name": self._element_attr(element, "class_name"),
+            "rectangle": self._element_rectangle(element),
+        }
+        value = self._safe_call(getattr(element, "get_value", None))
+        if isinstance(value, str) and value:
+            info["value"] = value
+        if control_type == "CheckBox":
+            toggle = self._safe_call(getattr(element, "get_toggle_state", None))
+            if isinstance(toggle, int):
+                info["is_checked"] = toggle == 1
+        node_bytes = len(json.dumps(info, ensure_ascii=False, default=str))
+        if state["bytes"] + node_bytes > UI_SNAPSHOT_MAX_BYTES:
+            state["truncated"] = True
+            return None
+        if runtime_id is not None:
+            seen.add(runtime_id)
+        state["count"] += 1
+        state["bytes"] += node_bytes
+        children: list[dict[str, Any]] = []
+        if depth < UI_SNAPSHOT_MAX_DEPTH:
+            child_elements = self._safe_call(getattr(element, "children", None)) or []
+            for child in list(child_elements)[:UI_SNAPSHOT_MAX_CHILDREN]:
+                if state["count"] >= UI_SNAPSHOT_MAX_NODES or state["bytes"] >= UI_SNAPSHOT_MAX_BYTES:
+                    state["truncated"] = True
+                    break
+                child_info = self._extract_element(child, depth=depth + 1, seen=seen, state=state)
+                if child_info is not None:
+                    children.append(child_info)
+        info["children"] = children
+        return info
+
+    def _safe_call(self, func: Any) -> Any:
+        if not callable(func):
+            return None
+        try:
+            return func()
+        except Exception:
+            return None
+
+    def _element_attr(self, element: Any, name: str) -> str | None:
+        info = getattr(element, "element_info", None)
+        value = getattr(info, name, None)
+        return value if isinstance(value, str) and value else None
+
+    def _element_rectangle(self, element: Any) -> dict[str, int] | None:
+        rect = self._safe_call(getattr(element, "rectangle", None))
+        if rect is None:
+            return None
+        try:
+            return {"left": int(rect.left), "top": int(rect.top), "right": int(rect.right), "bottom": int(rect.bottom)}
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    def _element_runtime_id(self, element: Any) -> tuple | None:
+        info = getattr(element, "element_info", None)
+        runtime_id = getattr(info, "runtime_id", None)
+        if isinstance(runtime_id, (list, tuple)) and runtime_id:
+            return tuple(runtime_id)
+        return None
 
     def screenshot(self, params: object | None = None) -> bytes:
         return self._run_sync(self._screenshot)
