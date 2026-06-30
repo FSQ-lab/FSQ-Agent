@@ -14,7 +14,7 @@ const state = {
   platformLabel: null,
 };
 
-const REPLAY_FAST_SAME_EVENT_DELAY_MS = 180;
+const REPLAY_FAST_SAME_EVENT_DELAY_MS = 250;
 const REPLAY_FAST_ACTION_DELAY_MS = 900;
 const REPLAY_FAST_MAX_DELAY_MS = 1500;
 const REPLAY_FAST_FALLBACK_DELAY_MS = 500;
@@ -990,8 +990,9 @@ function buildCuesFromClusters(elements, trackNumber) {
     }
     if (cueTime === null) continue;
     cues.push({
+      CueTrack: trackNumber,
+      CueClusterPosition: clusterPosition,
       CueTime: cueTime,
-      CueTrackPositions: [{ CueTrack: trackNumber, CueClusterPosition: clusterPosition }],
     });
   }
   return cues;
