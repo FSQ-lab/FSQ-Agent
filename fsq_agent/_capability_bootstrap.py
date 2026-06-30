@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fsq_agent.core import CapabilityRegistry, CommonPlatformTools, android_capability_definitions, web_capability_definitions
+from fsq_agent.core import CapabilityRegistry, CommonPlatformTools, android_capability_definitions, web_capability_definitions, windows_capability_definitions
 from fsq_agent.models import CapabilityDefinition, ConfigurationError, HarnessPlatform
 from fsq_agent.tools import DefaultAgentToolProvider, FileOps
 
@@ -26,7 +26,9 @@ def _platform_capability_definitions(platform: HarnessPlatform, *, include_ai_as
         return android_capability_definitions(include_ai_assertion=include_ai_assertion)
     if platform == "web":
         return web_capability_definitions(include_ai_assertion=include_ai_assertion)
-    raise ConfigurationError("Unsupported harness platform.", context={"platform": platform, "supported": ["android", "web"]})
+    if platform == "windows":
+        return windows_capability_definitions(include_ai_assertion=include_ai_assertion)
+    raise ConfigurationError("Unsupported harness platform.", context={"platform": platform, "supported": ["android", "web", "windows"]})
 
 
 def build_agent_tool_provider(

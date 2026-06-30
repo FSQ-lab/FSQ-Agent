@@ -288,6 +288,24 @@ class PlaygroundServer:
                     "lastRun": self.state.last_run,
                 },
             }
+        if self.settings.harness.platform == "windows":
+            windows = self.settings.harness.windows
+            return {
+                "platformId": "windows",
+                "title": "FSQ-Agent Windows Playground",
+                "interface": {"type": "Windows", "description": "FSQ-Agent Windows harness"},
+                "preview": {"kind": "screenshot", "screenshotPath": "/screenshot", "live": False},
+                "session": self._android_unavailable("Android session selection is unavailable for the active Windows platform."),
+                "metadata": {
+                    "backend": windows.backend,
+                    "backendKind": windows.backend_kind,
+                    "appPathConfigured": windows.app_path is not None,
+                    "windowTitleRePresent": bool(windows.window_title_re),
+                    "launchArgsCount": len(windows.launch_args),
+                    "busy": self.state.current_request_id is not None,
+                    "lastRun": self.state.last_run,
+                },
+            }
         return {
             "platformId": "android",
             "title": "FSQ-Agent Android Playground",

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fsq_agent.config import Settings, validate_runtime_settings
-from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, PlaywrightWebDriver, UiAutomator2AndroidDriver, WebHarness
+from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, PlaywrightWebDriver, PywinautoWindowsDriver, UiAutomator2AndroidDriver, WebHarness, WindowsHarness
 from fsq_agent.agent._harness_tools import HarnessToolAdapter
 from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, KnowledgeBundle, PlanningError, RunEvent, RunEventSink, SkillBundle, StepResult, Task
 from fsq_agent.providers import build_ai_assertion_evaluator, build_model_provider_session
@@ -468,6 +468,16 @@ class OpenAIAgentsRuntime:
                     "viewport_configured": web.viewport_width is not None and web.viewport_height is not None,
                 }
             )
+        if self.settings.harness.platform == "windows":
+            windows = self.settings.harness.windows
+            payload.update(
+                {
+                    "backend": windows.backend,
+                    "backend_kind": windows.backend_kind,
+                    "app_path_configured": windows.app_path is not None,
+                    "window_title_re_configured": windows.window_title_re is not None,
+                }
+            )
         if harness is not None:
             payload["harness_class"] = type(harness).__name__
             driver = getattr(harness, "driver", None)
@@ -778,6 +788,22 @@ class OpenAIAgentsRuntime:
                 viewport=viewport,
             )
             return WebHarness(
+                driver=driver,
+                artifact_store=ArtifactStore(self.settings.output.runs_dir / run_id),
+                ai_assertion_evaluator=build_ai_assertion_evaluator(self.settings),
+                runtime_secret_settings=self.settings.runtime_secrets,
+            )
+        if self.settings.harness.platform == "windows":
+            windows = self.settings.harness.windows
+            if windows.backend != "pywinauto":
+                raise ConfigurationError("Unsupported Windows harness backend.", context={"backend": windows.backend})
+            driver = PywinautoWindowsDriver(
+                app_path=str(windows.app_path) if windows.app_path else None,
+                backend_kind=windows.backend_kind,
+                window_title_re=windows.window_title_re,
+                launch_args=windows.launch_args,
+            )
+            return WindowsHarness(
                 driver=driver,
                 artifact_store=ArtifactStore(self.settings.output.runs_dir / run_id),
                 ai_assertion_evaluator=build_ai_assertion_evaluator(self.settings),
