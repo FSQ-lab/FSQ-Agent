@@ -63,7 +63,12 @@ class PywinautoWindowsDriver:
             },
         }
 
-    @_windows_driver_tool("launchApp", description="Launch the configured Windows desktop application.")
+    @_windows_driver_tool(
+        "launchApp",
+        description="Launch the configured Windows desktop application.",
+        capture_evidence=True,
+        metadata={"evidence_capture_before": False, "evidence_capture_on_failure": False},
+    )
     def launch_app(self, params: WindowsLaunchAppParams) -> dict[str, object]:
         return self._run_sync(lambda: self._launch_app(params))
 

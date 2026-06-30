@@ -682,7 +682,7 @@ class WindowsActionDefinition:
 
 
 WINDOWS_ACTION_DEFINITIONS: tuple[WindowsActionDefinition, ...] = (
-    WindowsActionDefinition("launchApp", "launch_app", WindowsLaunchAppParams, "setup"),
+    WindowsActionDefinition("launchApp", "launch_app", WindowsLaunchAppParams, "setup", capture_evidence=True),
     WindowsActionDefinition("killApp", "kill_app", WindowsKillAppParams, "teardown"),
     WindowsActionDefinition("clickOn", "click_on", WindowsClickOnParams, "action", capture_evidence=True),
     WindowsActionDefinition("doubleClickOn", "double_click_on", WindowsDoubleClickOnParams, "action", capture_evidence=True),
