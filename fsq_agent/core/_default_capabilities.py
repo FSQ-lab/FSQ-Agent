@@ -1,5 +1,6 @@
 from fsq_agent.core.harness._driver_tools import _discover_driver_capability_definitions
 from fsq_agent.core.harness._playwright_driver import PlaywrightWebDriver
+from fsq_agent.core.harness._pywinauto_driver import PywinautoWindowsDriver
 from fsq_agent.core.harness._uiautomator2_driver import UiAutomator2AndroidDriver
 from fsq_agent.models import CapabilityDefinition
 
@@ -21,6 +22,18 @@ def web_capability_definitions(*, include_ai_assertion: bool = True) -> list[Cap
     definitions = _discover_driver_capability_definitions(
         PlaywrightWebDriver,
         platform="web",
+        metadata=metadata,
+    )
+    if not include_ai_assertion:
+        definitions = [definition for definition in definitions if definition.name != "assert_with_ai"]
+    return definitions
+
+
+def windows_capability_definitions(*, include_ai_assertion: bool = True) -> list[CapabilityDefinition]:
+    metadata: dict[str, object] = {"driver_class": PywinautoWindowsDriver.__name__, "backend": PywinautoWindowsDriver.backend}
+    definitions = _discover_driver_capability_definitions(
+        PywinautoWindowsDriver,
+        platform="windows",
         metadata=metadata,
     )
     if not include_ai_assertion:

@@ -1,0 +1,44 @@
+openai_agents:
+  provider: github_copilot
+  tracing_enabled: true
+
+harness:
+  platform: windows
+  windows:
+    backend: pywinauto
+    backend_kind: uia
+    app_path: "C:/Program Files (x86)/Microsoft/Edge Beta/Application/msedge.exe"
+    window_title_re: ".*Microsoft.*Edge Beta"
+    launch_args:
+      - "--no-first-run"
+      - "--disable-features=msImplicitSignin"
+      - "--force-device-scale-factor=0.8"
+      - "--force-local-ntp"
+      - "--window-size=1280,920"
+
+execution:
+  post_action_delay_seconds:
+    platform: 1.0
+    common: 0.0
+
+runtime_secrets:
+  allowed_env_names:
+    - TEST_ACCOUNT_EMAIL
+    - TEST_ACCOUNT_PASSWORD
+
+agent_context:
+  knowledge:
+    root_dir: ./knowledge
+    skills:
+      dir: skills
+      items:
+        - name: automation-basics
+          description: Semantic action and evidence guidance for local runs.
+          kind: markdown
+          path: automation-basics.md
+          required: true
+        - name: windows-harness
+          description: Windows harness action selection and recovery guidance.
+          kind: markdown
+          path: windows-harness.md
+          required: true

@@ -10,6 +10,8 @@ const state = {
   progressSequence: 0,
   lastProgressSequence: 0,
   progressDetailOpenState: new Map(),
+  platformId: null,
+  platformLabel: null,
 };
 
 const REPLAY_FAST_SAME_EVENT_DELAY_MS = 180;
@@ -57,11 +59,13 @@ async function api(path, options = {}) {
 }
 
 async function refreshAll() {
-  await refreshStatus();
-  await refreshSetup();
-  await autoCreateSessionIfPossible({ silent: true });
-  await refreshStatus();
   await refreshRuntime();
+  await refreshStatus();
+  if (platformRequiresSession()) {
+    await refreshSetup();
+    await autoCreateSessionIfPossible({ silent: true });
+    await refreshStatus();
+  }
 }
 
 function clearPage() {
@@ -97,7 +101,9 @@ async function refreshStatus() {
     } else {
       setRunButtonIdle({ disabled: Boolean(status.busy) });
     }
-    if (status.session?.connected) {
+    if (!platformRequiresSession()) {
+      setNoSessionPlatformMessage();
+    } else if (status.session?.connected) {
       els.sessionMessage.textContent = `Connected to ${status.session.displayName || status.session.deviceId}`;
     } else {
       els.sessionMessage.textContent = 'No active session.';
@@ -134,10 +140,30 @@ async function refreshSetup() {
 
 async function refreshRuntime() {
   try {
-    await api('/runtime-info');
+    const runtime = await api('/runtime-info');
+    state.platformId = runtime.platformId || null;
+    state.platformLabel = runtime.interface?.type || (runtime.platformId ? capitalize(runtime.platformId) : null);
+    if (!platformRequiresSession()) {
+      setNoSessionPlatformMessage();
+    }
+    return runtime;
   } catch (error) {
     setServerStatus(error.message, 'error');
+    return null;
   }
+}
+
+function platformRequiresSession() {
+  return state.platformId === 'android';
+}
+
+function setNoSessionPlatformMessage() {
+  const label = state.platformLabel || (state.platformId ? capitalize(state.platformId) : 'This');
+  els.sessionMessage.textContent = `${label} harness — no device session required.`;
+}
+
+function capitalize(value) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
 async function autoCreateSessionIfPossible({ silent = false } = {}) {
@@ -160,6 +186,7 @@ async function autoCreateSessionIfPossible({ silent = false } = {}) {
 }
 
 async function ensureSession() {
+  if (!platformRequiresSession()) return true;
   try {
     const session = await api('/session');
     if (session.connected) return true;

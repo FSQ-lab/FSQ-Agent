@@ -84,11 +84,14 @@ class StepRunner:
         return policy.model_dump(mode="python") == EvidencePolicy().model_dump(mode="python")
 
     def _standard_capture_evidence_policy(self, capability: CapabilityDefinition) -> EvidencePolicy:
-        observation_kind = "page_snapshot" if capability.platform == "web" else "ui_tree"
+        observation_kind = {"web": "page_snapshot", "windows": "ui_snapshot"}.get(capability.platform or "", "ui_tree")
+        metadata = capability.metadata or {}
+        capture_before = bool(metadata.get("evidence_capture_before", True))
+        capture_on_failure = bool(metadata.get("evidence_capture_on_failure", True))
         return EvidencePolicy(
-            capture_before=True,
+            capture_before=capture_before,
             capture_after=True,
-            capture_on_failure=True,
+            capture_on_failure=capture_on_failure,
             artifact_kinds=["screenshot", observation_kind],
         )
 
