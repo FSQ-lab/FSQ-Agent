@@ -7,7 +7,7 @@ import types
 import pytest
 
 from fsq_agent.core.harness._playwright_driver import PlaywrightWebDriver
-from fsq_agent.models import ConfigurationError, WebNavigateToParams, WebPageSnapshotParams
+from fsq_agent.models import ConfigurationError, WebCloseBrowserParams, WebNavigateToParams, WebPageSnapshotParams, WebStartBrowserParams
 
 
 class _FakeResponse:
@@ -116,6 +116,7 @@ class _LaunchFakeSyncPlaywright:
 
 def test_playwright_web_driver_runs_page_operations_on_one_worker_thread() -> None:
     driver = _ThreadedFakePlaywrightDriver()
+    start = driver.start_browser(WebStartBrowserParams())
     external_thread_ids: set[int] = set()
 
     def navigate(url: str) -> dict[str, object]:
@@ -134,6 +135,7 @@ def test_playwright_web_driver_runs_page_operations_on_one_worker_thread() -> No
     context = driver.context()
     driver.close()
 
+    assert start == {"status": "passed", "output": {"already_started": False, "url": "about:blank"}}
     assert [result["status"] for result in results] == ["passed", "passed"]
     assert snapshot == {
         "url": "https://example.com/two",
@@ -173,10 +175,12 @@ def test_playwright_web_driver_launches_configured_chrome_executable(monkeypatch
 
     driver = PlaywrightWebDriver(channel="chrome", executable_path="C:/Chrome/chrome.exe", headless=False, viewport=(1024, 768))
     try:
+        start = driver.start_browser(WebStartBrowserParams())
         context = driver.context()
     finally:
         driver.close()
 
+    assert start == {"status": "passed", "output": {"already_started": False, "url": "about:blank"}}
     assert browser_type.launch_kwargs == {"headless": False, "executable_path": str(Path("C:/Chrome/chrome.exe"))}
     assert browser.context_kwargs == {"viewport": {"width": 1024, "height": 768}}
     assert context["metadata"]["channel"] == "chrome"
@@ -189,3 +193,54 @@ def test_playwright_web_driver_launches_configured_chrome_executable(monkeypatch
 def test_playwright_web_driver_rejects_unsupported_channel() -> None:
     with pytest.raises(ConfigurationError, match="Unsupported Playwright browser channel"):
         PlaywrightWebDriver(channel="firefox", page=_FakePage())
+
+
+def test_playwright_web_driver_does_not_launch_until_start_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    sync_api = types.ModuleType("playwright.sync_api")
+    sync_api.sync_playwright = lambda: pytest.fail("Playwright must not be imported or started during construction")
+    playwright_package = types.ModuleType("playwright")
+    playwright_package.sync_api = sync_api
+    monkeypatch.setitem(sys.modules, "playwright", playwright_package)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
+
+    driver = PlaywrightWebDriver(channel="chrome", executable_path="C:/Chrome/chrome.exe")
+
+    try:
+        context = driver.context()
+        result = driver.navigate_to(WebNavigateToParams(url="https://example.com"))
+    finally:
+        driver.close()
+
+    assert context["current_url"] is None
+    assert context["metadata"]["browser_started"] is False
+    assert result["status"] == "failed"
+    assert result["failure_category"] == "context_error"
+    assert result["error_message"] == "Browser is not started. Call startBrowser before Web page actions."
+
+
+def test_playwright_web_driver_start_and_close_browser_are_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = _FakePage()
+    browser = _LaunchFakeBrowser(page)
+    browser_type = _LaunchFakeBrowserType(browser)
+    playwright = _LaunchFakePlaywright(browser_type)
+    sync_api = types.ModuleType("playwright.sync_api")
+    sync_api.sync_playwright = lambda: _LaunchFakeSyncPlaywright(playwright)
+    playwright_package = types.ModuleType("playwright")
+    playwright_package.sync_api = sync_api
+    monkeypatch.setitem(sys.modules, "playwright", playwright_package)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
+
+    driver = PlaywrightWebDriver(channel="chrome", executable_path="C:/Chrome/chrome.exe")
+    first_start = driver.start_browser(WebStartBrowserParams())
+    second_start = driver.start_browser(WebStartBrowserParams())
+    first_close = driver.close_browser(WebCloseBrowserParams())
+    second_close = driver.close_browser(WebCloseBrowserParams())
+    driver.close()
+
+    assert first_start == {"status": "passed", "output": {"already_started": False, "url": "about:blank"}}
+    assert second_start == {"status": "passed", "output": {"already_started": True, "url": "about:blank"}}
+    assert first_close == {"status": "passed", "output": {"already_closed": False}}
+    assert second_close == {"status": "passed", "output": {"already_closed": True}}
+    assert browser.context.closed is True
+    assert browser.closed is True
+    assert playwright.stopped is True

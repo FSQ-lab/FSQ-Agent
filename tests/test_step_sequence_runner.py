@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent._capability_bootstrap import build_capability_registry
 from fsq_agent.core import EvidenceRecorder, StepRunner, StepSequenceRunner
 import fsq_agent.core.runner._runner as runner_module
 from fsq_agent.models import (
@@ -67,7 +67,6 @@ def _runner(harness: SequenceHarness, recorder: EvidenceRecorder) -> StepSequenc
         step_runner=StepRunner(
             harness=harness,
             capability_registry=build_capability_registry(),
-            executor_bindings=build_capability_executor_bindings(),
         ),
         evidence_recorder=recorder,
     )

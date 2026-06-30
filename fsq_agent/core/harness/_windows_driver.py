@@ -1,6 +1,7 @@
 from typing import Protocol, runtime_checkable
 
 from fsq_agent.models import (
+    WindowsAssertWithAIParams,
     WindowsAssertVisibleParams,
     WindowsClickOnParams,
     WindowsDoubleClickOnParams,
@@ -40,6 +41,9 @@ class WindowsDriverInterface(Protocol):
         ...
 
     def assert_visible(self, params: WindowsAssertVisibleParams) -> dict[str, object]:
+        ...
+
+    def assert_with_ai(self, params: WindowsAssertWithAIParams) -> dict[str, object]:
         ...
 
     def ui_snapshot(self, params: WindowsUiSnapshotParams) -> dict[str, object]:

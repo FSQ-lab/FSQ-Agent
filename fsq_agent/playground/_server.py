@@ -96,11 +96,7 @@ class PlaygroundServer:
             return 200, self._runtime_info()
         if path == "/screenshot":
             if self.settings.harness.platform != "android":
-                return 200, {
-                    "available": False,
-                    "platform": self.settings.harness.platform,
-                    "error": "Live screenshot preview is not available before Web harness execution.",
-                }
+                return self._web_screenshot_response()
             if not self.state.session.connected:
                 return 200, {"available": False, "error": "No active session."}
             try:
@@ -333,6 +329,43 @@ class PlaygroundServer:
             "connected": False,
             "message": message,
         }
+
+    def _web_screenshot_response(self) -> tuple[int, object]:
+        request_id = self.state.current_request_id
+        if not request_id:
+            return 200, {
+                "available": False,
+                "platform": self.settings.harness.platform,
+                "error": "No active Web harness execution.",
+            }
+        handle = self._execution_handles.get(request_id)
+        harness = handle.current_harness() if handle is not None else None
+        if harness is None:
+            return 200, {
+                "available": False,
+                "platform": self.settings.harness.platform,
+                "error": "Live screenshot preview is not available before Web harness execution.",
+            }
+        try:
+            context = harness.get_context()
+            metadata = getattr(context, "metadata", {})
+            if isinstance(metadata, dict) and metadata.get("browser_started") is False:
+                return 200, {
+                    "available": False,
+                    "platform": self.settings.harness.platform,
+                    "error": "Browser is not started. Call startBrowser before Web page actions.",
+                }
+            screenshot = harness.screenshot()
+            payload = {
+                "available": True,
+                "platform": self.settings.harness.platform,
+                "screenshot": base64.b64encode(screenshot).decode("ascii"),
+                "timestamp": int(time.time() * 1000),
+            }
+            self._record_replay_frame(request_id, payload)
+            return 200, payload
+        except Exception as exc:  # noqa: BLE001 - API returns structured errors.
+            return 500, {"available": False, "platform": self.settings.harness.platform, "error": str(exc) or exc.__class__.__name__}
 
     def _report_response(self, path: str, query: dict[str, list[str]]) -> tuple[int, object]:
         run_id = unquote(path.removeprefix("/reports/")).strip()

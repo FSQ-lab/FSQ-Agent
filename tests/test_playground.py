@@ -5,9 +5,9 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from fsq_agent.config import Settings
-from fsq_agent.models import ReportArtifact, RunEvent, TaskResult, VerificationResult
+from fsq_agent.models import HarnessContext, ReportArtifact, RunEvent, TaskResult, VerificationResult
 from fsq_agent.playground._android import AndroidTarget, parse_adb_devices, resolve_auto_session
-from fsq_agent.playground._execution import _event_sink, _run_dynamic_task, task_from_case_yaml, task_from_goal
+from fsq_agent.playground._execution import PlaygroundExecutionHandle, _event_sink, _run_dynamic_task, task_from_case_yaml, task_from_goal
 from fsq_agent.playground._server import PlaygroundServer, PlaygroundServerOptions
 from fsq_agent.playground._state import BusyError, PlaygroundState
 
@@ -488,7 +488,7 @@ def test_playground_server_stores_uploaded_replay_video(tmp_path: Path) -> None:
         f"/replay-video/{request_id}",
         {"mimeType": "video/webm", "videoBase64": base64.b64encode(b"webm").decode("ascii")},
     )
-    video_status, video_bytes, content_type, _extra_headers = server.handle_replay_video_file(f"/replay-video-file/{request_id}")
+    video_status, video_bytes, content_type, headers = server.handle_replay_video_file(f"/replay-video-file/{request_id}")
 
     assert status == 200
     assert payload["videoUrl"] == "/replay-video-file/run-1"
@@ -496,6 +496,7 @@ def test_playground_server_stores_uploaded_replay_video(tmp_path: Path) -> None:
     assert video_status == 200
     assert video_bytes == b"webm"
     assert content_type == "video/webm"
+    assert headers == {"Accept-Ranges": "bytes"}
 
 
 def test_playground_server_accepts_webm_upload_with_codecs(tmp_path: Path) -> None:
@@ -570,7 +571,6 @@ def test_playground_web_platform_session_endpoints_are_unavailable() -> None:
     assert runtime_payload["metadata"]["headless"] is False
     assert runtime_payload["metadata"]["baseUrlPresent"] is True
 
-
 def test_playground_windows_platform_does_not_require_android_session(monkeypatch) -> None:
     settings = Settings(harness={"platform": "windows", "windows": {"app_path": "C:/App/app.exe"}})
     captured = {}
@@ -610,6 +610,60 @@ def test_playground_windows_platform_runtime_info_and_session_endpoints() -> Non
     assert runtime_payload["metadata"]["appPathConfigured"] is True
     assert runtime_payload["metadata"]["windowTitleRePresent"] is True
     assert runtime_payload["metadata"]["launchArgsCount"] == 1
+
+
+def test_playground_web_screenshot_uses_active_harness(tmp_path: Path) -> None:
+    class FakeWebHarness:
+        def get_context(self) -> HarnessContext:
+            return HarnessContext(platform="web", metadata={"browser_started": True})
+
+        def screenshot(self) -> bytes:
+            return b"png"
+
+    settings = Settings(harness={"platform": "web"})
+    settings.output.runs_dir = tmp_path / "runs"
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Web preview")
+    server.state.add_event(request_id, RunEvent(run_id="run-1", task_id="task", type="run_started", title="Run started"))
+    handle = PlaygroundExecutionHandle(request_id=request_id)
+    handle.bind_harness(FakeWebHarness())
+    server._execution_handles[request_id] = handle
+
+    status, payload = server.handle_get("/screenshot", {})
+
+    assert status == 200
+    assert payload["available"] is True
+    assert payload["platform"] == "web"
+    assert base64.b64decode(payload["screenshot"]) == b"png"
+    frames = sorted((settings.output.runs_dir / "run-1" / "playground-replay").glob("frame-*.png"))
+    assert len(frames) == 1
+    assert frames[0].read_bytes() == b"png"
+
+
+def test_playground_web_screenshot_reports_not_started(tmp_path: Path) -> None:
+    class FakeWebHarness:
+        def get_context(self) -> HarnessContext:
+            return HarnessContext(platform="web", metadata={"browser_started": False})
+
+        def screenshot(self) -> bytes:
+            raise AssertionError("screenshot should not be called before startBrowser")
+
+    settings = Settings(harness={"platform": "web"})
+    settings.output.runs_dir = tmp_path / "runs"
+    server = PlaygroundServer(settings, PlaygroundServerOptions(static_path=tmp_path))
+    request_id = server.state.start_task("Web preview")
+    handle = PlaygroundExecutionHandle(request_id=request_id)
+    handle.bind_harness(FakeWebHarness())
+    server._execution_handles[request_id] = handle
+
+    status, payload = server.handle_get("/screenshot", {})
+
+    assert status == 200
+    assert payload == {
+        "available": False,
+        "platform": "web",
+        "error": "Browser is not started. Call startBrowser before Web page actions.",
+    }
 
 
 def test_playground_execute_requires_exactly_one_source() -> None:
@@ -884,10 +938,12 @@ schemaVersion: fsq.ai-test/v1
 name: Strict Web Case
 platform: web
 ---
+- startBrowser
 - navigateTo:
     url: /search
 - clickOn:
     target: Search
+- closeBrowser
 """,
         encoding="utf-8",
     )
@@ -938,9 +994,11 @@ platform: web
         "viewport": (1280, 720),
     }
     assert captured["registry"].resolve("pageSnapshot") is not None
+    assert captured["registry"].resolve("startBrowser") is not None
     assert captured["registry"].resolve("tapOn") is None
-    assert captured["steps"][0].action_name == "navigate_to"
-    assert captured["steps"][0].metadata["authored_action_name"] == "navigateTo"
+    assert [step.action_name for step in captured["steps"]] == ["start_browser", "navigate_to", "click_on", "close_browser"]
+    assert captured["steps"][0].metadata["authored_action_name"] == "startBrowser"
+    assert captured["steps"][-1].metadata["authored_action_name"] == "closeBrowser"
 
 
 def test_playground_strict_yaml_runs_outside_async_event_loop(monkeypatch) -> None:
@@ -1077,6 +1135,8 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "previewToken" in script
     assert "pendingReplayVideoCleanup" in script
     assert "replayVideoInFlight" in script
+    assert "function makeReplaySeekable" in script
+    assert "makeMetadataSeekable" in script
     assert "const REPLAY_FAST_ACTION_DELAY_MS = 900;" in script
     assert "const REPLAY_FAST_MAX_DELAY_MS = 1500;" in script
     assert "const REPLAY_FAST_FALLBACK_DELAY_MS = 500;" in script
@@ -1170,11 +1230,17 @@ def test_playground_static_progress_is_first_section_and_numbered() -> None:
     assert "MediaRecorder.isTypeSupported" in script
     assert "uploadReplayVideo" in script
     assert "blobToBase64" in script
+    assert "const seekable = await makeReplaySeekable(videoBlob, durationMs);" in script
+    assert "Replay video is not seekable" in script
+    assert "Failed to rewrite WebM index" in script
+    assert "els.replayVideo.addEventListener('loadedmetadata', normalizeReplayVideoDuration)" not in script
+    assert "finishDurationFix" not in script
+    assert "els.replayVideo.currentTime = 1e101" not in script
     assert "await showReplayVideoPreview(replayVideo.videoUrl)" in script
     assert "showRightTab('preview')" in script
     assert "api(`/replay-video/${encodeURIComponent(requestId)}`)" in script
     assert "method: 'POST'" in script
-    assert "recorder.start()" in script
+    assert "recorder.start();" in script
     assert "replayVideo.videoUrl" in script
     assert "replayFrameDelay" in script
     assert "[replay-video] draw screenshot" in script

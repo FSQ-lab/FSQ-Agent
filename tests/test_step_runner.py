@@ -3,8 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
-from fsq_agent.core import CapabilityExecutorBindings, CapabilityRegistry, StepRunner
+from fsq_agent._capability_bootstrap import build_capability_registry
+from fsq_agent.core import CapabilityRegistry, StepRunner
 from fsq_agent.models import (
     CapabilityDefinition,
     CapabilityExecutionResult,
@@ -165,7 +165,6 @@ def _runner(harness: Any, post_action_delay_seconds: PostActionDelaySettings | N
     return StepRunner(
         harness=harness,
         capability_registry=build_capability_registry(),
-        executor_bindings=build_capability_executor_bindings(),
         post_action_delay_seconds=post_action_delay_seconds,
     )
 
@@ -174,7 +173,6 @@ def _web_runner(harness: Any) -> StepRunner:
     return StepRunner(
         harness=harness,
         capability_registry=build_capability_registry(platform="web"),
-        executor_bindings=build_capability_executor_bindings(),
     )
 
 
@@ -208,15 +206,37 @@ def test_step_runner_runs_successful_step_through_three_phases() -> None:
     ]
 
 
-def test_step_runner_executes_wait_ms_without_harness_calls() -> None:
-    harness = SuccessfulHarness()
+def test_step_runner_executes_wait_ms_through_harness_invoke_action() -> None:
+    class CommonHarness(SuccessfulHarness):
+        def invoke_action(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
+            self.calls.append(f"invoke:{step.action_name}:{context.session_id}")
+            return HarnessActionResult(
+                status="passed",
+                action_name=step.action_name,
+                output={"type": "wait_completed", "duration_ms": 1, "elapsed_ms": 1, "reason": "settle"},
+                metadata={
+                    "capability_name": "wait_ms",
+                    "executor_kind": "common",
+                    "duration_ms": 1,
+                    "reason": "settle",
+                    "replay": {"kind": "fsq_command", "alias": "waitMs"},
+                    "common_output": {"type": "wait_completed", "duration_ms": 1, "elapsed_ms": 1, "reason": "settle"},
+                },
+            )
+
+    harness = CommonHarness()
     runner = _runner(harness)
     step = ExecutableStep(step_id="wait-1", kind="action", action_name="waitMs", params={"duration_ms": 1, "reason": "settle"})
 
     result = runner.run_step(run_id="run-1", step=step)
 
     assert result.status == "passed"
-    assert harness.calls == []
+    assert harness.calls == [
+        "get_context",
+        "before:wait_ms:session-1",
+        "invoke:wait_ms:session-1",
+        "after:wait_ms:passed",
+    ]
     assert [phase.phase for phase in result.phase_reports] == ["prepare", "invoke", "finalize"]
     metadata = result.phase_reports[1].metadata
     assert metadata["capability_name"] == "wait_ms"
@@ -225,7 +245,7 @@ def test_step_runner_executes_wait_ms_without_harness_calls() -> None:
     assert metadata["reason"] == "settle"
     assert metadata["replay"] == {"kind": "fsq_command", "alias": "waitMs"}
     assert metadata["common_output"]["type"] == "wait_completed"
-    assert "harness_call_start" not in [event.event_type for event in runner.events]
+    assert "harness_call_start" in [event.event_type for event in runner.events]
 
 
 def test_step_runner_applies_platform_delay_after_invoke_before_finalize(monkeypatch) -> None:
@@ -259,15 +279,9 @@ def test_step_runner_uses_common_delay_and_skips_zero_sleep(monkeypatch) -> None
     registry = CapabilityRegistry.from_definitions(
         [CapabilityDefinition(name="custom_common", executor_kind="common", params_model=NoParams)]
     )
-    bindings = CapabilityExecutorBindings()
-    bindings.bind_common(
-        "custom_common",
-        lambda step: CapabilityExecutionResult(capability_name=step.action_name, executor_kind="common", status="passed"),
-    )
     runner = StepRunner(
         harness=SuccessfulHarness(),
         capability_registry=registry,
-        executor_bindings=bindings,
         post_action_delay_seconds=PostActionDelaySettings(platform=0.0, common=0.1),
     )
 
@@ -281,15 +295,9 @@ def test_step_runner_uses_common_delay_and_skips_zero_sleep(monkeypatch) -> None
     zero_delay_registry = CapabilityRegistry.from_definitions(
         [CapabilityDefinition(name="zero_common", executor_kind="common", params_model=NoParams, post_action_delay_seconds=0)]
     )
-    zero_delay_bindings = CapabilityExecutorBindings()
-    zero_delay_bindings.bind_common(
-        "zero_common",
-        lambda step: CapabilityExecutionResult(capability_name=step.action_name, executor_kind="common", status="passed"),
-    )
     zero_delay_runner = StepRunner(
         harness=SuccessfulHarness(),
         capability_registry=zero_delay_registry,
-        executor_bindings=zero_delay_bindings,
         post_action_delay_seconds=PostActionDelaySettings(platform=0.0, common=0.1),
     )
 

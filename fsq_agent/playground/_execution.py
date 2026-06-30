@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
-from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent._capability_bootstrap import build_capability_registry
 from fsq_agent.agent import FsqAgent
 from fsq_agent.config import Settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, PlaywrightWebDriver, StepRunner, StepSequenceRunner, UiAutomator2AndroidDriver, WebHarness
@@ -34,6 +34,7 @@ class PlaygroundExecutionHandle:
 	_lock: threading.Lock = field(default_factory=threading.Lock)
 	_loop: asyncio.AbstractEventLoop | None = None
 	_task: asyncio.Task[None] | None = None
+	_harness: Any | None = None
 	_cancel_requested: bool = False
 
 	def attach(self, loop: asyncio.AbstractEventLoop, task: asyncio.Task[None]) -> None:
@@ -51,6 +52,18 @@ class PlaygroundExecutionHandle:
 			task = self._task
 		if loop is not None and task is not None and not task.done():
 			loop.call_soon_threadsafe(task.cancel)
+
+	def bind_harness(self, harness: Any) -> None:
+		with self._lock:
+			self._harness = harness
+
+	def clear_harness(self) -> None:
+		with self._lock:
+			self._harness = None
+
+	def current_harness(self) -> Any | None:
+		with self._lock:
+			return self._harness
 
 
 def start_dynamic_goal_execution(
@@ -79,6 +92,7 @@ def start_dynamic_goal_execution(
 		"device_id": device_id,
 		"record": record,
 		"record_on_failure": record_on_failure,
+		"handle": handle,
 		},
 		name=f"fsq-playground-{request_id}",
 		daemon=True,
@@ -150,6 +164,7 @@ def _run_dynamic_task(
 	device_id: str | None,
 	record: bool,
 	record_on_failure: bool,
+	handle: PlaygroundExecutionHandle | None = None,
 ) -> None:
 	asyncio.run(
 		_run_dynamic_task_async(
@@ -162,6 +177,7 @@ def _run_dynamic_task(
 			device_id=device_id,
 			record=record,
 			record_on_failure=record_on_failure,
+			handle=handle,
 		)
 	)
 
@@ -192,6 +208,7 @@ def _run_dynamic_task_thread(
 			device_id=device_id,
 			record=record,
 			record_on_failure=record_on_failure,
+			handle=handle,
 		)
 	)
 	handle.attach(loop, task)
@@ -215,6 +232,7 @@ async def _run_dynamic_task_async(
 	device_id: str | None,
 	record: bool,
 	record_on_failure: bool,
+	handle: PlaygroundExecutionHandle | None,
 ) -> None:
 	run_settings = settings.model_copy(deep=True)
 	if device_id and run_settings.harness.platform == "android":
@@ -224,13 +242,16 @@ async def _run_dynamic_task_async(
 		if goal:
 			validate_runtime_settings(run_settings)
 			task = task_from_goal(goal)
-			result = await _run_agent_task_async(run_settings, state, request_id, task)
+			result = await _run_agent_task_async(run_settings, state, request_id, task, handle)
 		elif case_yaml_path:
 			validate_runtime_settings(run_settings)
 			task = task_from_case_yaml(case_yaml_path, run_settings)
-			result = await _run_agent_task_async(run_settings, state, request_id, task)
+			result = await _run_agent_task_async(run_settings, state, request_id, task, handle)
 		elif strict_case_yaml_path:
-			result = await asyncio.to_thread(_run_strict_case_yaml, run_settings, state, request_id, strict_case_yaml_path)
+			if handle is None:
+				result = await asyncio.to_thread(_run_strict_case_yaml, run_settings, state, request_id, strict_case_yaml_path)
+			else:
+				result = await asyncio.to_thread(_run_strict_case_yaml, run_settings, state, request_id, strict_case_yaml_path, handle)
 		else:
 			raise ValueError("goal, case_yaml_path, or strict_case_yaml_path is required")
 		if state.is_cancel_requested(request_id):
@@ -246,6 +267,9 @@ async def _run_dynamic_task_async(
 		state.request_cancel(request_id)
 	except BaseException as exc:  # noqa: BLE001 - background failures must be visible through progress state.
 		state.fail_task(request_id, exc)
+	finally:
+		if handle is not None:
+			handle.clear_harness()
 
 
 def _run_agent_task(settings: Settings, state: PlaygroundState, request_id: str, task: Task) -> TaskResult:
@@ -254,8 +278,16 @@ def _run_agent_task(settings: Settings, state: PlaygroundState, request_id: str,
 	)
 
 
-async def _run_agent_task_async(settings: Settings, state: PlaygroundState, request_id: str, task: Task) -> TaskResult:
-	return await FsqAgent.from_settings(settings).run(
+async def _run_agent_task_async(
+	settings: Settings,
+	state: PlaygroundState,
+	request_id: str,
+	task: Task,
+	handle: PlaygroundExecutionHandle | None = None,
+) -> TaskResult:
+	harness_factory = _web_preview_harness_factory(settings, handle) if handle is not None and settings.harness.platform == "web" else None
+	agent = FsqAgent.from_settings(settings, harness_factory=harness_factory) if harness_factory is not None else FsqAgent.from_settings(settings)
+	return await agent.run(
 		task,
 		event_sink=_event_sink(state, request_id),
 	)
@@ -266,12 +298,17 @@ def _raise_if_cancelled(state: PlaygroundState, request_id: str) -> None:
 		raise PlaygroundTaskCancelled("Cancelled by user.")
 
 
-def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id: str, path_text: str) -> TaskResult:
+def _run_strict_case_yaml(
+	settings: Settings,
+	state: PlaygroundState,
+	request_id: str,
+	path_text: str,
+	handle: PlaygroundExecutionHandle | None = None,
+) -> TaskResult:
 	case_path = _resolve_case_yaml_path(path_text, settings)
 	case = FsqCaseLoader().load_case(case_path)
 	_validate_strict_case_platform(settings, case)
 	registry = build_capability_registry(platform=settings.harness.platform)
-	executors = build_capability_executor_bindings()
 	registry_snapshot = registry.snapshot()
 	requires_ai_assertion = _case_requires_ai_assertion(case, registry_snapshot)
 	validate_strict_core_settings(settings, requires_ai_assertion=requires_ai_assertion)
@@ -287,6 +324,8 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		registry_snapshot,
 	)
 	harness = _build_strict_harness(settings, case, run_dir, requires_ai_assertion)
+	if handle is not None and settings.harness.platform == "web":
+		handle.bind_harness(harness)
 	cancellable_harness = _CancellableHarness(harness, state, request_id)
 	artifact = _run_strict_core_steps(
 		case_path=case_path,
@@ -295,7 +334,6 @@ def _run_strict_case_yaml(settings: Settings, state: PlaygroundState, request_id
 		run_id=run_id,
 		steps=steps,
 		registry=registry,
-		executors=executors,
 		post_action_delay_seconds=settings.execution.post_action_delay_seconds,
 		state=state,
 		request_id=request_id,
@@ -374,7 +412,6 @@ def _run_strict_core_steps(
 	run_id: str,
 	steps: list[ExecutableStep],
 	registry,
-	executors,
 	post_action_delay_seconds: PostActionDelaySettings,
 	state: PlaygroundState,
 	request_id: str,
@@ -385,7 +422,6 @@ def _run_strict_core_steps(
 		step_runner=StepRunner(
 			harness=harness,
 			capability_registry=registry,
-			executor_bindings=executors,
 			post_action_delay_seconds=post_action_delay_seconds,
 		),
 		evidence_recorder=recorder,
@@ -511,22 +547,41 @@ def _build_strict_harness(settings: Settings, case, run_dir: Path, requires_ai_a
 			driver=UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial),
 			artifact_store=ArtifactStore(run_dir=run_dir),
 			ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
+			runtime_secret_settings=settings.runtime_secrets,
 		)
 	if settings.harness.platform == "web":
-		web = settings.harness.web
-		viewport = (web.viewport_width, web.viewport_height) if web.viewport_width is not None and web.viewport_height is not None else None
-		return WebHarness(
-			driver=PlaywrightWebDriver(
-				channel=web.channel,
-				executable_path=web.browser_executable_path,
-				headless=web.headless,
-				base_url=web.base_url,
-				viewport=viewport,
-			),
-			artifact_store=ArtifactStore(run_dir=run_dir),
-			ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
-		)
+		return _build_web_harness(settings, run_dir, requires_ai_assertion=requires_ai_assertion)
 	raise ValueError(f"Unsupported harness platform: {settings.harness.platform}")
+
+
+def _web_preview_harness_factory(settings: Settings, handle: PlaygroundExecutionHandle):
+	def factory(run_id: str):
+		harness = _build_web_harness(
+			settings,
+			Path(settings.output.runs_dir) / run_id,
+			requires_ai_assertion=True,
+		)
+		handle.bind_harness(harness)
+		return harness
+
+	return factory
+
+
+def _build_web_harness(settings: Settings, run_dir: Path, *, requires_ai_assertion: bool) -> WebHarness:
+	web = settings.harness.web
+	viewport = (web.viewport_width, web.viewport_height) if web.viewport_width is not None and web.viewport_height is not None else None
+	return WebHarness(
+		driver=PlaywrightWebDriver(
+			channel=web.channel,
+			executable_path=web.browser_executable_path,
+			headless=web.headless,
+			base_url=web.base_url,
+			viewport=viewport,
+		),
+		artifact_store=ArtifactStore(run_dir=run_dir),
+		ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
+		runtime_secret_settings=settings.runtime_secrets,
+	)
 
 
 def _event_sink(state: PlaygroundState, request_id: str) -> Callable[[RunEvent], None]:

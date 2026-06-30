@@ -7,16 +7,16 @@ from collections.abc import Callable
 from typing import Any
 
 from fsq_agent.models import (
+    AgentToolCall,
+    AgentToolResult,
     CapabilityExecutionResult,
-    CommonToolCall,
-    CommonToolResult,
     ExecutableStep,
     LocalToolOutputSettings,
     RunEvent,
     RunEventSink,
     RunnerStepResult,
 )
-from fsq_agent.tools._common import CommonToolExecutor, CommonToolRegistry, DefaultCommonToolProvider
+from fsq_agent.tools._agent_tools import AgentToolExecutor, AgentToolRegistry, DefaultAgentToolProvider
 
 
 RunnerInvoker = Callable[
@@ -25,15 +25,15 @@ RunnerInvoker = Callable[
 ]
 
 
-class AgentsCommonToolAdapter:
+class AgentToolAdapter:
     def __init__(
         self,
-        registry: CommonToolRegistry,
+        registry: AgentToolRegistry,
         *,
         local_tool_output_settings: LocalToolOutputSettings | None = None,
     ) -> None:
         self.registry = registry
-        self.executor = CommonToolExecutor(registry)
+        self.executor = AgentToolExecutor(registry)
         self.local_tool_output_settings = local_tool_output_settings or LocalToolOutputSettings()
         self.run_id = ""
         self.task_id = ""
@@ -73,33 +73,33 @@ class AgentsCommonToolAdapter:
             try:
                 arguments = self._parse_args(args)
                 await self._emit_tool_started(tool_name, arguments)
-                if self.runner_invoker is not None:
+                if self.runner_invoker is not None and self._recordable_capability(tool_name) is not None:
                     result = await self._execute_through_runner(tool_name, arguments)
                 else:
-                    result = await self.executor.execute(CommonToolCall(tool_name=tool_name, arguments=arguments))
+                    result = await self.executor.execute(AgentToolCall(tool_name=tool_name, arguments=arguments))
             except Exception as exc:
-                result = CommonToolResult(
+                result = AgentToolResult(
                     tool_name=tool_name,
                     status="failed",
                     error=str(exc) or exc.__class__.__name__,
                     duration_ms=int((time.perf_counter() - started) * 1000),
                 )
                 output = self._format_tool_response(result)
-                await self._emit_tool_failed(tool_name, result.error or "CommonTool failed.", started, arguments)
+                await self._emit_tool_failed(tool_name, result.error or "AgentTool failed.", started, arguments)
                 return output
             output = self._format_tool_response(result)
             if result.status == "failed":
-                await self._emit_tool_failed(tool_name, result.error or "CommonTool failed.", started, arguments)
+                await self._emit_tool_failed(tool_name, result.error or "AgentTool failed.", started, arguments)
             else:
                 await self._emit_tool_completed(tool_name, arguments, output, started, result)
             return output
 
         return invoke
 
-    async def _execute_through_runner(self, tool_name: str, arguments: dict[str, Any]) -> CommonToolResult:
+    async def _execute_through_runner(self, tool_name: str, arguments: dict[str, Any]) -> AgentToolResult:
         if self.runner_invoker is None:
-            raise RuntimeError("No StepRunner invoker is configured for CommonTool execution.")
-        capability = self.registry.capability_for(tool_name)
+            raise RuntimeError("No StepRunner invoker is configured for AgentTool execution.")
+        capability = self._recordable_capability(tool_name)
         step = ExecutableStep(
             step_id=f"agent-{tool_name}-{next(self._counter)}",
             kind=capability.step_kind if capability is not None else "action",
@@ -111,10 +111,10 @@ class AgentsCommonToolAdapter:
         return self._common_result_from_runner(tool_name, runner_response)
 
     def _step_metadata(self, tool_name: str) -> dict[str, Any]:
-        capability = self.registry.capability_for(tool_name)
+        capability = self._recordable_capability(tool_name)
         payload: dict[str, Any] = {
             "run_id": self.run_id,
-            "tool_origin": "common",
+            "tool_origin": "common" if capability is not None and capability.executor_kind == "common" else "agent_tool",
             "tool_name": tool_name,
             "capability_name": capability.name if capability is not None else tool_name,
             "executor_kind": capability.executor_kind if capability is not None else "common",
@@ -133,7 +133,7 @@ class AgentsCommonToolAdapter:
         self,
         tool_name: str,
         runner_response: RunnerStepResult | tuple[RunnerStepResult, CapabilityExecutionResult | None],
-    ) -> CommonToolResult:
+    ) -> AgentToolResult:
         runner_result, capability_result = self._unpack_runner_response(runner_response)
         invoke_metadata = self._invoke_metadata(runner_result)
         output = capability_result.output if capability_result is not None else invoke_metadata.get("common_output")
@@ -151,7 +151,7 @@ class AgentsCommonToolAdapter:
         )
         metadata["runner_step_id"] = runner_result.step_id
         metadata["runner_result"] = runner_result.model_dump(mode="json")
-        return CommonToolResult(
+        return AgentToolResult(
             tool_name=tool_name,
             status=self._common_status(runner_result),
             output=output,
@@ -214,10 +214,10 @@ class AgentsCommonToolAdapter:
             return {}
         payload = json.loads(args)
         if not isinstance(payload, dict):
-            raise ValueError("CommonTool arguments must be a JSON object.")
+            raise ValueError("AgentTool arguments must be a JSON object.")
         return payload
 
-    def _format_tool_response(self, result: CommonToolResult) -> str:
+    def _format_tool_response(self, result: AgentToolResult) -> str:
         payload = result.model_dump(mode="json")
         metadata = self._response_metadata(result)
         if result.sensitive:
@@ -270,13 +270,13 @@ class AgentsCommonToolAdapter:
         response["preview"] = ""
         return json.dumps(response, ensure_ascii=False, default=str)
 
-    def _artifact_payload(self, result: CommonToolResult) -> dict[str, Any]:
+    def _artifact_payload(self, result: AgentToolResult) -> dict[str, Any]:
         return {
             "path": str(result.artifact_path) if result.artifact_path else None,
             "content_chars": result.artifact_content_chars,
         }
 
-    def _response_metadata(self, result: CommonToolResult) -> dict[str, Any]:
+    def _response_metadata(self, result: AgentToolResult) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         for key in {
             "capability_name",
@@ -338,7 +338,7 @@ class AgentsCommonToolAdapter:
         arguments: dict[str, Any],
         output: str,
         started: float,
-        result: CommonToolResult,
+        result: AgentToolResult,
     ) -> None:
         preview_output = self._redact_sensitive_response(output) if result.sensitive else output
         payload = self._event_payload(tool_name, arguments, result=result)
@@ -376,13 +376,14 @@ class AgentsCommonToolAdapter:
         tool_name: str,
         arguments: dict[str, Any],
         *,
-        result: CommonToolResult | None = None,
+        result: AgentToolResult | None = None,
     ) -> dict[str, Any]:
-        capability = self.registry.capability_for(tool_name)
+        capability = self._recordable_capability(tool_name)
+        tool_origin = "common" if capability is not None and capability.executor_kind == "common" else "agent_tool"
         payload: dict[str, Any] = {
-            "tool_origin": "common",
+            "tool_origin": tool_origin,
             "capability_name": capability.name if capability is not None else tool_name,
-            "executor_kind": capability.executor_kind if capability is not None else "common",
+            "executor_kind": capability.executor_kind if capability is not None else "agent_tool",
         }
         if capability is not None:
             payload.update(
@@ -426,5 +427,14 @@ class AgentsCommonToolAdapter:
 
     def _configure_provider_runs(self, run_id: str) -> None:
         for provider in self.registry.list_providers():
-            if isinstance(provider, DefaultCommonToolProvider):
+            if isinstance(provider, DefaultAgentToolProvider):
                 provider.configure_run(run_id)
+
+    def _recordable_capability(self, tool_name: str):
+        capability_for = getattr(self.registry, "capability_for", None)
+        if not callable(capability_for):
+            return None
+        return capability_for(tool_name)
+
+
+AgentsCommonToolAdapter = AgentToolAdapter

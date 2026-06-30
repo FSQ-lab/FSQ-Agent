@@ -616,7 +616,7 @@ async def test_harness_tool_adapter_applies_evidence_policy_to_mutating_action()
 
     payload = json.loads(output)
     assert tools[0].name == "tap_on"
-    assert payload["tool_origin"] == "harness"
+    assert payload["tool_origin"] == "platform"
     assert payload["status"] == "passed"
     assert payload["driver_method"] == "tap_on"
     assert payload["fsq_action_name"] == "tapOn"
@@ -738,12 +738,13 @@ async def test_harness_tool_adapter_surfaces_artifact_capture_failure() -> None:
     assert "capture failed" in payload["error_message"]
 
 
-def test_runtime_tool_origin_recognizes_harness_tools() -> None:
+def test_runtime_tool_origin_recognizes_platform_tools() -> None:
     runtime = OpenAIAgentsRuntime(Settings(openai_agents=OpenAIAgentsSettings()), _EmptyToolFactory(), _fake_harness_factory)
+    runtime._agent_tool_names = {"read_file"}
     runtime._harness_tool_names = {"tap_on"}
 
-    assert runtime._tool_origin("tap_on") == "harness"
-    assert runtime._tool_origin("read_file") == "common"
+    assert runtime._tool_origin("tap_on") == "platform"
+    assert runtime._tool_origin("read_file") == "agent_tool"
     assert runtime._tool_origin("read_knowledge_index") == "runtime"
     assert runtime._tool_origin("unexpected_tool") == "unknown"
 

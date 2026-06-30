@@ -4,6 +4,8 @@ from fsq_agent.models import (
     WebAssertNotVisibleParams,
     WebAssertTextParams,
     WebAssertVisibleParams,
+    WebAssertWithAIParams,
+    WebCloseBrowserParams,
     WebClickOnParams,
     WebHoverOnParams,
     WebNavigateBackParams,
@@ -11,6 +13,7 @@ from fsq_agent.models import (
     WebPageSnapshotParams,
     WebPressKeyParams,
     WebSelectOptionParams,
+    WebStartBrowserParams,
     WebTakeScreenshotParams,
     WebTypeTextParams,
     WebWaitForParams,
@@ -20,6 +23,12 @@ from fsq_agent.models import (
 @runtime_checkable
 class WebDriverInterface(Protocol):
     def context(self) -> dict[str, object]:
+        ...
+
+    def start_browser(self, params: WebStartBrowserParams) -> dict[str, object]:
+        ...
+
+    def close_browser(self, params: WebCloseBrowserParams) -> dict[str, object]:
         ...
 
     def navigate_to(self, params: WebNavigateToParams) -> dict[str, object]:
@@ -59,6 +68,9 @@ class WebDriverInterface(Protocol):
         ...
 
     def assert_text(self, params: WebAssertTextParams) -> dict[str, object]:
+        ...
+
+    def assert_with_ai(self, params: WebAssertWithAIParams) -> dict[str, object]:
         ...
 
     def screenshot(self, params: WebTakeScreenshotParams | None = None) -> bytes:

@@ -1,8 +1,10 @@
 import time
 import os
 import inspect
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from fsq_agent.config import Settings, load_settings
 from fsq_agent.knowledge import PrivateKnowledgeLoader
@@ -10,7 +12,7 @@ from fsq_agent.models import KnowledgeBundle, PlanningError, RunEvent, RunEventS
 from fsq_agent.observation import ExecutionLogger
 from fsq_agent.report import ReportGenerator
 from fsq_agent.skills import SkillLoader
-from fsq_agent.tools import AgentsCommonToolAdapter, CommonToolRegistry, DefaultCommonToolProvider, FileOps
+from fsq_agent.tools import AgentToolAdapter, AgentToolRegistry, DefaultAgentToolProvider, FileOps
 
 from fsq_agent.agent._openai_runtime import OpenAIAgentsRuntime
 from fsq_agent.agent._events import RunEventEmitter
@@ -41,7 +43,7 @@ class FsqAgent:
         return cls.from_settings(load_settings(path, workspace))
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "FsqAgent":
+    def from_settings(cls, settings: Settings, harness_factory: Callable[[str], Any] | None = None) -> "FsqAgent":
         output_root = settings.output.root_dir
         knowledge = settings.agent_context.knowledge
         knowledge_root = knowledge.root_dir
@@ -51,14 +53,14 @@ class FsqAgent:
             read_roots=[settings.cases.dir, knowledge_root, skills_dir, pre_plan_knowledge_dir, output_root],
             write_root=output_root / "artifacts",
         )
-        common_tool_provider = DefaultCommonToolProvider(
+        agent_tool_provider = DefaultAgentToolProvider(
             file_ops,
             runtime_secret_settings=settings.runtime_secrets,
             local_tool_output_settings=settings.openai_agents.local_tool_output,
             runs_dir=settings.output.runs_dir,
         )
-        common_tool_adapter = AgentsCommonToolAdapter(
-            CommonToolRegistry.from_providers([common_tool_provider]),
+        agent_tool_adapter = AgentToolAdapter(
+            AgentToolRegistry.from_providers([agent_tool_provider]),
             local_tool_output_settings=settings.openai_agents.local_tool_output,
         )
         knowledge_loader = PrivateKnowledgeLoader(knowledge_root)
@@ -71,7 +73,7 @@ class FsqAgent:
             reporter,
             knowledge_loader,
             skill_loader,
-            OpenAIAgentsRuntime(settings, common_tool_adapter),
+            OpenAIAgentsRuntime(settings, agent_tool_adapter, harness_factory=harness_factory),
             event_logger,
         )
 

@@ -3,12 +3,14 @@ from typing import Any
 import pytest
 
 from fsq_agent.core import ArtifactStore, HarnessInterface, WindowsHarness
+from fsq_agent.core.harness._ai_assertion_tool import AIAssertionBackendToolMixin
 from fsq_agent.core.harness._driver_tools import _windows_driver_tool
 from fsq_agent.models import (
     AIAssertionRequest,
     AIAssertionResult,
     ExecutableStep,
     HarnessContext,
+    WindowsAssertWithAIParams,
     WindowsAssertVisibleParams,
     WindowsClickOnParams,
     WindowsDoubleClickOnParams,
@@ -21,7 +23,7 @@ from fsq_agent.models import (
 )
 
 
-class FakeWindowsDriver:
+class FakeWindowsDriver(AIAssertionBackendToolMixin):
     backend = "fake-pywinauto"
 
     def __init__(self) -> None:
@@ -80,6 +82,10 @@ class FakeWindowsDriver:
     @_windows_driver_tool("assertVisible", description="Assert that a Windows control is visible.")
     def assert_visible(self, params: WindowsAssertVisibleParams) -> dict[str, object]:
         return self._record("assert_visible", params)
+
+    @_windows_driver_tool("assertWithAI", description="Evaluate an explicit Windows visual assertion with AI.")
+    def assert_with_ai(self, params: WindowsAssertWithAIParams) -> dict[str, object]:
+        return self._run_ai_assertion_tool(params)
 
     @_windows_driver_tool("uiSnapshot", description="Return the current Windows window control tree snapshot.")
     def ui_snapshot(self, params: WindowsUiSnapshotParams) -> dict[str, object]:

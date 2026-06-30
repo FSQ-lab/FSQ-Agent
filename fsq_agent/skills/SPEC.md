@@ -31,7 +31,7 @@ Shared skill guidance belongs in `automation-basics.md`.
 
 Android runs should configure `android-harness.md` alongside shared automation guidance. The Android harness skill describes Android action selection, locators, assertions, UI-tree usage, waits, and recovery.
 
-Web runs should configure `web-harness.md` alongside shared automation guidance. The Web harness skill should mirror Playwright's LLM-facing guidance: prefer `page_snapshot` over screenshots for target selection, use exact snapshot target references or stable selectors, use `navigate_to`, `navigate_back`, `click_on`, `type_text`, `select_option`, `hover_on`, `press_key`, `wait_for`, `take_screenshot`, assertion tools, and `assert_with_ai` according to active schemas, and reserve unsupported Playwright MCP capability families for future SPEC-reviewed opt-in tools.
+Web runs should configure `web-harness.md` alongside shared automation guidance. The Web harness skill should mirror Playwright's LLM-facing guidance: start browser-owned workflows with `start_browser`, close them with `close_browser`, prefer `page_snapshot` over screenshots for target selection, use replayable semantic locators or stable selectors, use `navigate_to`, `navigate_back`, `click_on`, `type_text`, `select_option`, `hover_on`, `press_key`, `wait_for`, `take_screenshot`, assertion tools, and `assert_with_ai` according to active schemas, avoid `Alt+F4`/`Control+W` as browser lifecycle controls, and reserve unsupported Playwright MCP capability families for future SPEC-reviewed opt-in tools.
 
 Future platform skills must be separate platform-specific Markdown bundles instead of expanding Android or Web skill files with unrelated platform rules.
 
@@ -39,7 +39,7 @@ Future platform skills must be separate platform-specific Markdown bundles inste
 
 - Skills are advisory context, not executable authority.
 - Local Markdown skills are rendered into instructions/context only when successfully loaded.
-- Harness- or platform-specific skills should describe scope, action selection, argument rules, tool usage error recovery, semantic fidelity rules, and evidence rules. They guide the generic agent for the configured runtime without turning the agent runtime into a platform-specific implementation.
+- Platform-specific skills should describe scope, AgentTool/CommonTool/PlatformTool selection, argument rules, tool usage error recovery, semantic fidelity rules, and evidence rules. They guide the generic agent for the configured runtime without turning the agent runtime into a platform-specific implementation.
 - Skills do not attach command execution tools. Any future command capability requires its own SPEC update outside the skills module.
 - Skill models remain centralized in `models` so runtime, tools, and configuration share the same serializable contracts.
 - Skill loader diagnostics are operational metadata for logs or runtime events, not prompt content. The LLM should see complete skill instructions or no skill block.

@@ -152,7 +152,7 @@ class _RecordingCollector:
             start = starts_by_call_id.get(event.tool_call_id or "") if event.tool_call_id else self._pop_unpaired_start(unpaired_starts, event)
             if start is None:
                 continue
-            if self._origin(start, event) != "harness":
+            if self._origin(start, event) not in {"platform", "harness"}:
                 continue
             self._collect_harness(start, event, commands)
         return commands
@@ -185,14 +185,14 @@ class _RecordingCollector:
         replay = self._replay_policy(payload) or self._replay_policy(start.payload)
         fsq_action_name = replay.get("alias") or payload.get("fsq_action_name") or start.payload.get("fsq_action_name")
         if not isinstance(fsq_action_name, str) or not fsq_action_name:
-            self._skip(start.tool_name, "harness tool did not include fsq_action_name")
+            self._skip(start.tool_name, "platform tool did not include fsq_action_name")
             return
         if event.type != "tool_call_completed" or payload.get("status") not in {"passed", "success", None}:
-            self._skip(start.tool_name, f"harness action status was {payload.get('status') or event.type}")
+            self._skip(start.tool_name, f"platform action status was {payload.get('status') or event.type}")
             return
         args = _event_arguments(start.tool_arguments)
         if args is None:
-            self._skip(start.tool_name, "harness tool arguments were not a JSON object")
+            self._skip(start.tool_name, "platform tool arguments were not a JSON object")
             return
         try:
             self._active_runtime_secret_name = None

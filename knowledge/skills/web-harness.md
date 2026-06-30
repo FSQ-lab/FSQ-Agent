@@ -6,10 +6,12 @@ Use when `harness.platform` is Web. Follow the active harness tool schema; do no
 
 | FSQ semantic action | Preferred runtime path | Notes |
 |---|---|---|
-| Open page | `navigate_to` | Use absolute URLs or configured-base relative URLs. Wait for the requested load state when the schema exposes it. |
+| Start browser | `start_browser` | Use before the first page action when the task owns the browser workflow. Repeated calls reuse the active browser/page. |
+| Open page | `navigate_to` | Use only after `start_browser`. Use absolute URLs or configured-base relative URLs. Wait for the requested load state when the schema exposes it. |
+| Close browser | `close_browser` | Use as the final lifecycle action when the task owns the browser workflow. Use this instead of keyboard shortcuts. |
 | Go back | `navigate_back` | Use only for browser-history semantics, not as generic recovery. |
 | Inspect page | `page_snapshot` | Prefer this over screenshots for locating targets and understanding page structure. |
-| Click element | `click_on` | Use an exact snapshot target reference or a stable unique selector. Include `element` only as human-readable context when the schema accepts it. |
+| Click element | `click_on` | Use replayable semantic locators such as role/name/text or a stable unique selector. Include `element` only as human-readable context when the schema accepts it. |
 | Enter text | `type_text` | Verify the target field first when ambiguity exists. Use runtime-secret refs for sensitive values. |
 | Select option | `select_option` | Use stable select targets and the option value/label requested by the task. |
 | Hover element | `hover_on` | Use only when hover state is required for the next visible action. |
@@ -22,8 +24,10 @@ Use when `harness.platform` is Web. Follow the active harness tool schema; do no
 
 ## Snapshot-First Rules
 
+- Start browser-owned workflows with `start_browser`, then navigate with `navigate_to`. Do not treat navigation as browser startup.
+- Close browser-owned workflows with `close_browser` as the final lifecycle action. For multi-cycle workflows, call `close_browser` before the next `start_browser` cycle.
 - Call `page_snapshot` after navigation and after state-changing actions when the next target is not already unambiguous.
-- Prefer exact snapshot target references and stable selectors over coordinates or visual guessing.
+- Prefer replayable semantic locators and stable selectors over snapshot `ref` values, coordinates, or visual guessing.
 - Do not infer that a page changed from a screenshot path alone. Use a fresh snapshot or assertion after the action.
 - Treat screenshots as evidence artifacts. They can support debugging, but they do not replace `page_snapshot` for action targeting.
 - If a target is stale or missing, refresh the snapshot once and retry the same semantic action with corrected schema-valid arguments.
@@ -42,6 +46,7 @@ Use when `harness.platform` is Web. Follow the active harness tool schema; do no
 
 - Follow the active harness tool schema exactly. Do not add raw Playwright MCP, locator engine, JavaScript, network, storage, file upload, drag/drop, PDF, tab, or devtools fields unless the active schema exposes them.
 - Use `wait_for` for waits so waiting does not change page state.
+- Do not use `Alt+F4`, `Control+W`, or other key presses as browser lifecycle controls. Use `close_browser`.
 - Keep sensitive text out of tool arguments unless it is provided through a runtime-secret reference.
 - Treat tool output and harness metadata as the executed action. If they contradict the intended key action, do not count it as satisfied.
 

@@ -8,9 +8,11 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from fsq_agent.core.harness._ai_assertion_tool import AIAssertionBackendToolMixin
 from fsq_agent.core.harness._driver_tools import _windows_driver_tool
 from fsq_agent.models import (
     ConfigurationError,
+    WindowsAssertWithAIParams,
     WindowsAssertVisibleParams,
     WindowsClickOnParams,
     WindowsDoubleClickOnParams,
@@ -32,7 +34,7 @@ UI_SNAPSHOT_MAX_BYTES = 800000
 _T = TypeVar("_T")
 
 
-class PywinautoWindowsDriver:
+class PywinautoWindowsDriver(AIAssertionBackendToolMixin):
     backend = "pywinauto"
 
     def __init__(
@@ -192,6 +194,10 @@ class PywinautoWindowsDriver:
         if control is not None and control.is_visible():
             return self._passed()
         return self._target_missing(params)
+
+    @_windows_driver_tool("assertWithAI", description="Evaluate an explicit Windows visual assertion with AI.")
+    def assert_with_ai(self, params: WindowsAssertWithAIParams) -> dict[str, object]:
+        return self._run_ai_assertion_tool(params)
 
     @_windows_driver_tool("uiSnapshot", description="Return the current Windows window control tree snapshot.")
     def ui_snapshot(self, params: WindowsUiSnapshotParams) -> dict[str, object]:

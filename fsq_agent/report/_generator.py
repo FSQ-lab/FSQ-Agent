@@ -162,7 +162,7 @@ class ReportGenerator:
         return starts.pop(0) if starts else {}
 
     def _tool_origin(self, tool_name: str, explicit_origin: Any) -> str:
-        if explicit_origin in {"harness", "common", "runtime", "unknown"}:
+        if explicit_origin in {"agent_tool", "common", "platform", "harness", "runtime", "unknown"}:
             return str(explicit_origin)
         if tool_name == "unknown":
             return "unknown"

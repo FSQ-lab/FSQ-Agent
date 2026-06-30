@@ -4,6 +4,7 @@ from fsq_agent.models import (
     AndroidAssertNotVisibleParams,
     AndroidAssertStateParams,
     AndroidAssertVisibleParams,
+    AndroidAssertWithAIParams,
     AndroidInputTextParams,
     AndroidKillAppParams,
     AndroidLaunchAppParams,
@@ -52,6 +53,9 @@ class AndroidDriverInterface(Protocol):
         ...
 
     def assert_state(self, params: AndroidAssertStateParams) -> dict[str, object]:
+        ...
+
+    def assert_with_ai(self, params: AndroidAssertWithAIParams) -> dict[str, object]:
         ...
 
     def screenshot(self) -> bytes:

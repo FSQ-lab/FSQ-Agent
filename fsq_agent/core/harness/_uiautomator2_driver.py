@@ -3,8 +3,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from fsq_agent.core.harness._ai_assertion_tool import AIAssertionBackendToolMixin
 from fsq_agent.core.harness._driver_tools import _android_driver_tool
 from fsq_agent.models import (
+    AndroidAssertWithAIParams,
     AndroidAssertNotVisibleParams,
     AndroidAssertStateParams,
     AndroidAssertVisibleParams,
@@ -26,7 +28,7 @@ ANDROID_STATE_ASSERTION_FIELDS = ("enabled", "checked", "selected", "clickable",
 ANDROID_LOCATOR_FIELDS = ("resourceId", "accessibilityId", "text", "className", "xpath")
 
 
-class UiAutomator2AndroidDriver:
+class UiAutomator2AndroidDriver(AIAssertionBackendToolMixin):
     backend = "uiautomator2"
 
     def __init__(self, *, app_id: str, serial: str | None = None, device: object | None = None) -> None:
@@ -164,6 +166,10 @@ class UiAutomator2AndroidDriver:
             if self._has_locator(element):
                 return self._passed({"exists": True})
         return self._configuration_error("assert requires a text or supported element state assertion.")
+
+    @_android_driver_tool("assertWithAI", description="Evaluate an explicit Android visual assertion with AI.")
+    def assert_with_ai(self, params: AndroidAssertWithAIParams) -> dict[str, object]:
+        return self._run_ai_assertion_tool(params)
 
     def screenshot(self) -> bytes:
         image = self.device.screenshot(format="pillow")

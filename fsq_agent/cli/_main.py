@@ -8,7 +8,7 @@ import time
 import click
 
 from fsq_agent.agent import FsqAgent
-from fsq_agent.cli._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent.cli._capability_bootstrap import build_capability_registry
 from fsq_agent.cli._core_execution import run_strict_fsq_core_case
 from fsq_agent.cli._formatting import log_result, log_run_event
 from fsq_agent.cli._logging import configure_cli_logging
@@ -271,7 +271,6 @@ def _run_strict(settings: Settings, *, case_yaml_path: str | None, case_dir_path
 def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id: str):
     run_dir = Path(settings.output.runs_dir) / run_id
     registry = build_capability_registry(platform=settings.harness.platform)
-    executors = build_capability_executor_bindings()
     registry_snapshot = registry.snapshot()
     steps = resolve_strict_replay_steps(
         FsqExecutableStepAdapter(registry_snapshot=registry_snapshot).to_executable_steps(case),
@@ -285,7 +284,6 @@ def _run_strict_case(settings: Settings, case_path: Path, case: FsqCase, run_id:
         output_dir=run_dir,
         run_id=run_id,
         registry=registry,
-        executors=executors,
         steps=steps,
         post_action_delay_seconds=settings.execution.post_action_delay_seconds,
     )
@@ -391,7 +389,12 @@ def _build_strict_harness(settings: Settings, case: FsqCase, run_dir: Path, requ
 def _build_strict_android_harness(settings: Settings, app_id: str, run_dir: Path, requires_ai_assertion: bool = False) -> AndroidHarness:
     driver = UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial)
     evaluator = build_ai_assertion_evaluator(settings) if requires_ai_assertion else None
-    return AndroidHarness(driver=driver, artifact_store=ArtifactStore(run_dir=run_dir), ai_assertion_evaluator=evaluator)
+    return AndroidHarness(
+        driver=driver,
+        artifact_store=ArtifactStore(run_dir=run_dir),
+        ai_assertion_evaluator=evaluator,
+        runtime_secret_settings=settings.runtime_secrets,
+    )
 
 
 def _build_strict_web_harness(settings: Settings, run_dir: Path, requires_ai_assertion: bool = False) -> WebHarness:
@@ -405,7 +408,12 @@ def _build_strict_web_harness(settings: Settings, run_dir: Path, requires_ai_ass
         viewport=viewport,
     )
     evaluator = build_ai_assertion_evaluator(settings) if requires_ai_assertion else None
-    return WebHarness(driver=driver, artifact_store=ArtifactStore(run_dir=run_dir), ai_assertion_evaluator=evaluator)
+    return WebHarness(
+        driver=driver,
+        artifact_store=ArtifactStore(run_dir=run_dir),
+        ai_assertion_evaluator=evaluator,
+        runtime_secret_settings=settings.runtime_secrets,
+    )
 
 
 def _case_requires_ai_assertion(settings: Settings, case: FsqCase, registry_snapshot=None) -> bool:

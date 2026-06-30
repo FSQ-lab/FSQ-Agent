@@ -1,11 +1,4 @@
-from collections.abc import Awaitable, Callable
-
-from fsq_agent.models import CapabilityDefinition, CapabilityExecutionResult, CapabilityRegistrySnapshot, ConfigurationError, ExecutableStep
-
-
-CommonCapabilityExecutor = Callable[[ExecutableStep], CapabilityExecutionResult | Awaitable[CapabilityExecutionResult]]
-DriverCapabilityExecutor = Callable[[ExecutableStep, object], CapabilityExecutionResult]
-HarnessCapabilityExecutor = Callable[[ExecutableStep, object], CapabilityExecutionResult]
+from fsq_agent.models import CapabilityDefinition, CapabilityRegistrySnapshot, ConfigurationError
 
 
 class CapabilityRegistry:
@@ -59,28 +52,3 @@ class CapabilityRegistry:
 
     def snapshot(self) -> CapabilityRegistrySnapshot:
         return CapabilityRegistrySnapshot(capabilities=self.list_capabilities())
-
-
-class CapabilityExecutorBindings:
-    def __init__(self) -> None:
-        self._common: dict[str, CommonCapabilityExecutor] = {}
-        self._driver: dict[str, DriverCapabilityExecutor] = {}
-        self._harness: dict[str, HarnessCapabilityExecutor] = {}
-
-    def bind_common(self, name: str, executor: CommonCapabilityExecutor) -> None:
-        self._common[name] = executor
-
-    def bind_driver(self, name: str, executor: DriverCapabilityExecutor) -> None:
-        self._driver[name] = executor
-
-    def bind_harness(self, name: str, executor: HarnessCapabilityExecutor) -> None:
-        self._harness[name] = executor
-
-    def common_executor(self, name: str) -> CommonCapabilityExecutor | None:
-        return self._common.get(name)
-
-    def driver_executor(self, name: str) -> DriverCapabilityExecutor | None:
-        return self._driver.get(name)
-
-    def harness_executor(self, name: str) -> HarnessCapabilityExecutor | None:
-        return self._harness.get(name)

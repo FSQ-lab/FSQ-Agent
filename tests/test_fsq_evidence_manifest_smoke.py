@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent._capability_bootstrap import build_capability_registry
 from fsq_agent.core import EvidenceRecorder, StepRunner, StepSequenceRunner
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import (
@@ -90,7 +90,6 @@ def test_fsq_steps_sequence_runner_and_recorder_write_evidence_manifest(tmp_path
         step_runner=StepRunner(
             harness=SmokeHarness(),
             capability_registry=registry,
-            executor_bindings=build_capability_executor_bindings(),
         ),
         evidence_recorder=recorder,
     ).run_steps(

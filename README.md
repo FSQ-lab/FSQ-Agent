@@ -87,7 +87,21 @@ execution:
     common: 0.0
 ```
 
-  `channel: chrome` is the Web browser selector. fsq-agent launches Playwright's Chromium engine with `FSQ_WEB_BROWSER_EXECUTABLE_PATH`, so Web runs use the user's configured local Chrome and do not require `python -m playwright install chromium`.
+  `channel: chrome` is the Web browser selector. When a Web task executes `startBrowser`, fsq-agent launches Playwright's Chromium engine with `FSQ_WEB_BROWSER_EXECUTABLE_PATH`, so Web runs use the user's configured local Chrome and do not require `python -m playwright install chromium`.
+
+Web FSQ cases should model browser lifecycle explicitly:
+
+```yaml
+schemaVersion: fsq.ai-test/v1
+name: Web Example
+platform: web
+---
+- startBrowser
+- navigateTo:
+    url: https://www.bing.com
+- pageSnapshot
+- closeBrowser
+```
 
 For account-dependent cases, put secret values in `.env` and allow only those names in config:
 

@@ -3,15 +3,18 @@ from typing import Any
 import pytest
 
 from fsq_agent.core import ArtifactStore, HarnessInterface, WebHarness
+from fsq_agent.core.harness._ai_assertion_tool import AIAssertionBackendToolMixin
 from fsq_agent.core.harness._driver_tools import _web_driver_tool
 from fsq_agent.models import (
     AIAssertionRequest,
     AIAssertionResult,
     ExecutableStep,
     HarnessContext,
+    WebAssertWithAIParams,
     WebAssertNotVisibleParams,
     WebAssertTextParams,
     WebAssertVisibleParams,
+    WebCloseBrowserParams,
     WebClickOnParams,
     WebHoverOnParams,
     WebNavigateBackParams,
@@ -19,13 +22,14 @@ from fsq_agent.models import (
     WebPageSnapshotParams,
     WebPressKeyParams,
     WebSelectOptionParams,
+    WebStartBrowserParams,
     WebTakeScreenshotParams,
     WebTypeTextParams,
     WebWaitForParams,
 )
 
 
-class FakeWebDriver:
+class FakeWebDriver(AIAssertionBackendToolMixin):
     backend = "fake-playwright"
 
     def __init__(self) -> None:
@@ -47,6 +51,14 @@ class FakeWebDriver:
             recorded = params
         self.calls.append((method_name, recorded))
         return {method_name: True}
+
+    @_web_driver_tool("startBrowser", description="Start or reuse the configured Web browser.")
+    def start_browser(self, params: WebStartBrowserParams) -> dict[str, object]:
+        return self._record("start_browser", params)
+
+    @_web_driver_tool("closeBrowser", description="Close the active Web browser.")
+    def close_browser(self, params: WebCloseBrowserParams) -> dict[str, object]:
+        return self._record("close_browser", params)
 
     @_web_driver_tool("navigateTo", description="Navigate the current Web page to a URL.")
     def navigate_to(self, params: WebNavigateToParams) -> dict[str, object]:
@@ -105,6 +117,10 @@ class FakeWebDriver:
     def assert_text(self, params: WebAssertTextParams) -> dict[str, object]:
         return self._record("assert_text", params)
 
+    @_web_driver_tool("assertWithAI", description="Evaluate an explicit Web visual assertion with AI.")
+    def assert_with_ai(self, params: WebAssertWithAIParams) -> dict[str, object]:
+        return self._run_ai_assertion_tool(params)
+
     def screenshot(self, params: object | None = None) -> bytes:
         self.calls.append(("screenshot", params.model_dump(mode="json", exclude_none=True) if hasattr(params, "model_dump") else params))
         return b"fake-png"
@@ -121,6 +137,7 @@ def test_web_harness_dispatches_fsq_action_names_to_driver() -> None:
     context = harness.get_context()
 
     cases = [
+        ("startBrowser", {}, "start_browser"),
         ("navigateTo", {"url": "https://www.bing.com"}, "navigate_to"),
         ("navigateBack", {}, "navigate_back"),
         ("clickOn", {"target": "Search box"}, "click_on"),
@@ -134,6 +151,7 @@ def test_web_harness_dispatches_fsq_action_names_to_driver() -> None:
         ("assertVisible", {"target": "Results"}, "assert_visible"),
         ("assertNotVisible", {"target": "Dialog"}, "assert_not_visible"),
         ("assertText", {"target": "Results", "text": {"contains": "playwright"}}, "assert_text"),
+        ("closeBrowser", {}, "close_browser"),
     ]
 
     for action_name, params, _method_name in cases:
@@ -156,10 +174,20 @@ def test_web_harness_action_space_returns_catalog_backed_schemas() -> None:
     harness = WebHarness(driver=FakeWebDriver())
 
     schemas = {schema.name: schema for schema in harness.action_space()}
+    click_locator_schema = schemas["click_on"].params_json_schema["$defs"]["WebLocator"]
 
     assert "click_on" in schemas
+    assert "start_browser" in schemas
+    assert "close_browser" in schemas
     assert "page_snapshot" in schemas
     assert "assert_with_ai" not in schemas
+    assert schemas["start_browser"].driver_method == "start_browser"
+    assert schemas["start_browser"].fsq_action_name == "startBrowser"
+    assert schemas["start_browser"].capture_evidence is False
+    assert schemas["start_browser"].metadata["replay"] == {"kind": "fsq_command", "alias": "startBrowser"}
+    assert schemas["close_browser"].driver_method == "close_browser"
+    assert schemas["close_browser"].fsq_action_name == "closeBrowser"
+    assert schemas["close_browser"].capture_evidence is False
     assert schemas["click_on"].driver_method == "click_on"
     assert schemas["click_on"].fsq_action_name == "clickOn"
     assert schemas["click_on"].platform == "web"
@@ -168,6 +196,7 @@ def test_web_harness_action_space_returns_catalog_backed_schemas() -> None:
     assert schemas["click_on"].metadata["backend"] == "fake-playwright"
     assert schemas["click_on"].metadata["replay"] == {"kind": "fsq_command", "alias": "clickOn"}
     assert "target" in schemas["click_on"].params_json_schema["properties"]
+    assert "ref" not in click_locator_schema["properties"]
     assert schemas["page_snapshot"].driver_method == "page_snapshot"
     assert schemas["page_snapshot"].fsq_action_name == "pageSnapshot"
     assert schemas["page_snapshot"].capture_evidence is False
@@ -239,7 +268,7 @@ def test_web_harness_assert_with_ai_uses_injected_evaluator(tmp_path) -> None:
     result = harness.invoke_action(_step("assertWithAI", {"prompt": "Verify Bing homepage"}), context)
 
     assert "assert_with_ai" in schemas
-    assert schemas["assert_with_ai"].metadata["owner"] == "harness"
+    assert schemas["assert_with_ai"].metadata["owner"] == "driver"
     assert result.status == "passed"
     assert result.output["passed"] is True
     assert result.metadata["ai_assertion"]["provider"] == "fake"

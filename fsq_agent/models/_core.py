@@ -327,7 +327,6 @@ class AndroidAssertWithAIParams(BaseModel):
 class WebLocator(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    ref: str | None = None
     role: str | None = None
     name: str | None = None
     text: str | None = None
@@ -359,6 +358,14 @@ class _WebTargetParams(BaseModel):
         if isinstance(self.target, str) and self.target.strip():
             return True
         return self.locator is not None and self.locator.has_value()
+
+
+class WebStartBrowserParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class WebCloseBrowserParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class WebNavigateToParams(BaseModel):
@@ -509,7 +516,7 @@ class AndroidActionDefinition:
     driver_method: str
     params_model: type[BaseModel]
     step_kind: ExecutableStepKind
-    owner: Literal["driver", "harness"] = "driver"
+    owner: Literal["driver", "platform", "harness"] = "driver"
     strict: bool = True
 
 
@@ -526,7 +533,7 @@ ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
     AndroidActionDefinition("longPressOn", "long_press_on", AndroidLongPressOnParams, "action"),
     AndroidActionDefinition("swipe", "swipe", AndroidSwipeParams, "action"),
     AndroidActionDefinition("uiTree", "ui_tree", AndroidUiTreeParams, "observation"),
-    AndroidActionDefinition("assertWithAI", "assert_with_ai", AndroidAssertWithAIParams, "assertion", "harness"),
+    AndroidActionDefinition("assertWithAI", "assert_with_ai", AndroidAssertWithAIParams, "assertion"),
 )
 ANDROID_ACTION_DEFINITIONS_BY_NAME: dict[str, AndroidActionDefinition] = {
     definition.fsq_action_name: definition for definition in ANDROID_ACTION_DEFINITIONS
@@ -539,12 +546,14 @@ class WebActionDefinition:
     driver_method: str
     params_model: type[BaseModel]
     step_kind: ExecutableStepKind
-    owner: Literal["driver", "harness"] = "driver"
+    owner: Literal["driver", "platform", "harness"] = "driver"
     strict: bool = True
     capture_evidence: bool = False
 
 
 WEB_ACTION_DEFINITIONS: tuple[WebActionDefinition, ...] = (
+    WebActionDefinition("startBrowser", "start_browser", WebStartBrowserParams, "setup"),
+    WebActionDefinition("closeBrowser", "close_browser", WebCloseBrowserParams, "teardown"),
     WebActionDefinition("navigateTo", "navigate_to", WebNavigateToParams, "action", capture_evidence=True),
     WebActionDefinition("navigateBack", "navigate_back", WebNavigateBackParams, "action", capture_evidence=True),
     WebActionDefinition("clickOn", "click_on", WebClickOnParams, "action", capture_evidence=True),
@@ -558,7 +567,7 @@ WEB_ACTION_DEFINITIONS: tuple[WebActionDefinition, ...] = (
     WebActionDefinition("assertVisible", "assert_visible", WebAssertVisibleParams, "assertion"),
     WebActionDefinition("assertNotVisible", "assert_not_visible", WebAssertNotVisibleParams, "assertion"),
     WebActionDefinition("assertText", "assert_text", WebAssertTextParams, "assertion"),
-    WebActionDefinition("assertWithAI", "assert_with_ai", WebAssertWithAIParams, "assertion", "harness"),
+    WebActionDefinition("assertWithAI", "assert_with_ai", WebAssertWithAIParams, "assertion"),
 )
 WEB_ACTION_DEFINITIONS_BY_NAME: dict[str, WebActionDefinition] = {
     definition.fsq_action_name: definition for definition in WEB_ACTION_DEFINITIONS
@@ -676,7 +685,7 @@ class WindowsActionDefinition:
     driver_method: str
     params_model: type[BaseModel]
     step_kind: ExecutableStepKind
-    owner: Literal["driver", "harness"] = "driver"
+    owner: Literal["driver", "platform", "harness"] = "driver"
     strict: bool = True
     capture_evidence: bool = False
 
@@ -691,7 +700,7 @@ WINDOWS_ACTION_DEFINITIONS: tuple[WindowsActionDefinition, ...] = (
     WindowsActionDefinition("pressKey", "press_key", WindowsPressKeyParams, "action", capture_evidence=True),
     WindowsActionDefinition("assertVisible", "assert_visible", WindowsAssertVisibleParams, "assertion"),
     WindowsActionDefinition("uiSnapshot", "ui_snapshot", WindowsUiSnapshotParams, "observation"),
-    WindowsActionDefinition("assertWithAI", "assert_with_ai", WindowsAssertWithAIParams, "assertion", "harness"),
+    WindowsActionDefinition("assertWithAI", "assert_with_ai", WindowsAssertWithAIParams, "assertion"),
 )
 WINDOWS_ACTION_DEFINITIONS_BY_NAME: dict[str, WindowsActionDefinition] = {
     definition.fsq_action_name: definition for definition in WINDOWS_ACTION_DEFINITIONS
