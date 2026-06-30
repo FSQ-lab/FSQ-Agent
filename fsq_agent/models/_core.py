@@ -34,12 +34,13 @@ RunnerEventType: TypeAlias = Literal[
     "step_error",
     "step_finish",
 ]
-EvidenceArtifactKind: TypeAlias = Literal["screenshot", "ui_tree", "page_snapshot", "tool_call", "log", "json", "text", "other"]
+EvidenceArtifactKind: TypeAlias = Literal["screenshot", "ui_tree", "page_snapshot", "ui_snapshot", "tool_call", "log", "json", "text", "other"]
 HarnessPlatform: TypeAlias = Literal["android", "ios", "macos", "windows", "web"]
 AndroidSwipeDirection: TypeAlias = Literal["up", "down", "left", "right"]
 WebMouseButton: TypeAlias = Literal["left", "right", "middle"]
 WebWaitUntil: TypeAlias = Literal["commit", "domcontentloaded", "load", "networkidle"]
 WebWaitForState: TypeAlias = Literal["visible", "hidden", "attached", "detached"]
+WindowsMouseButton: TypeAlias = Literal["left", "right", "middle"]
 
 
 class SourceRef(BaseModel):
@@ -561,6 +562,139 @@ WEB_ACTION_DEFINITIONS: tuple[WebActionDefinition, ...] = (
 )
 WEB_ACTION_DEFINITIONS_BY_NAME: dict[str, WebActionDefinition] = {
     definition.fsq_action_name: definition for definition in WEB_ACTION_DEFINITIONS
+}
+
+
+class WindowsLocator(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    control_type: str | None = None
+    automation_id: str | None = None
+    class_name: str | None = None
+    index: int | None = Field(default=None, ge=1)
+    parent_title: str | None = None
+    parent_control_type: str | None = None
+    parent_automation_id: str | None = None
+
+    def has_value(self) -> bool:
+        return any(
+            isinstance(value, str) and value.strip()
+            for value in (self.title, self.control_type, self.automation_id, self.class_name)
+        )
+
+
+class _WindowsTargetParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str | None = None
+    locator: WindowsLocator | None = None
+
+    @model_validator(mode="after")
+    def _require_target(self) -> "_WindowsTargetParams":
+        if self._has_target_value():
+            return self
+        raise ValueError("requires target or non-empty locator")
+
+    def _has_target_value(self) -> bool:
+        if isinstance(self.target, str) and self.target.strip():
+            return True
+        return self.locator is not None and self.locator.has_value()
+
+
+class WindowsLaunchAppParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    app_path: str | None = None
+    extra_args: list[str] | None = None
+
+
+class WindowsKillAppParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class WindowsClickOnParams(_WindowsTargetParams):
+    button: WindowsMouseButton | None = None
+    double: bool | None = None
+
+
+class WindowsDoubleClickOnParams(_WindowsTargetParams):
+    button: WindowsMouseButton | None = None
+
+
+class WindowsRightClickOnParams(_WindowsTargetParams):
+    pass
+
+
+class WindowsTypeTextParams(_WindowsTargetParams):
+    text: str
+    clear: bool | None = None
+
+    @model_validator(mode="after")
+    def _require_text(self) -> "WindowsTypeTextParams":
+        if isinstance(self.text, str):
+            return self
+        raise ValueError("requires text")
+
+
+class WindowsPressKeyParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+
+    @model_validator(mode="after")
+    def _require_key(self) -> "WindowsPressKeyParams":
+        if self.key.strip():
+            return self
+        raise ValueError("requires non-empty key")
+
+
+class WindowsAssertVisibleParams(_WindowsTargetParams):
+    optional: bool | None = None
+
+
+class WindowsUiSnapshotParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class WindowsAssertWithAIParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str
+    optional: bool | None = None
+
+    @model_validator(mode="after")
+    def _require_prompt(self) -> "WindowsAssertWithAIParams":
+        if self.prompt.strip():
+            return self
+        raise ValueError("requires non-empty prompt")
+
+
+@dataclass(frozen=True)
+class WindowsActionDefinition:
+    fsq_action_name: str
+    driver_method: str
+    params_model: type[BaseModel]
+    step_kind: ExecutableStepKind
+    owner: Literal["driver", "harness"] = "driver"
+    strict: bool = True
+    capture_evidence: bool = False
+
+
+WINDOWS_ACTION_DEFINITIONS: tuple[WindowsActionDefinition, ...] = (
+    WindowsActionDefinition("launchApp", "launch_app", WindowsLaunchAppParams, "setup"),
+    WindowsActionDefinition("killApp", "kill_app", WindowsKillAppParams, "teardown"),
+    WindowsActionDefinition("clickOn", "click_on", WindowsClickOnParams, "action", capture_evidence=True),
+    WindowsActionDefinition("doubleClickOn", "double_click_on", WindowsDoubleClickOnParams, "action", capture_evidence=True),
+    WindowsActionDefinition("rightClickOn", "right_click_on", WindowsRightClickOnParams, "action", capture_evidence=True),
+    WindowsActionDefinition("typeText", "type_text", WindowsTypeTextParams, "action", capture_evidence=True),
+    WindowsActionDefinition("pressKey", "press_key", WindowsPressKeyParams, "action", capture_evidence=True),
+    WindowsActionDefinition("assertVisible", "assert_visible", WindowsAssertVisibleParams, "assertion"),
+    WindowsActionDefinition("uiSnapshot", "ui_snapshot", WindowsUiSnapshotParams, "observation"),
+    WindowsActionDefinition("assertWithAI", "assert_with_ai", WindowsAssertWithAIParams, "assertion", "harness"),
+)
+WINDOWS_ACTION_DEFINITIONS_BY_NAME: dict[str, WindowsActionDefinition] = {
+    definition.fsq_action_name: definition for definition in WINDOWS_ACTION_DEFINITIONS
 }
 
 

@@ -33,6 +33,9 @@ Target `__init__.py` exports via `__all__`:
 - `WebDriverInterface`: Protocol describing typed Web backend driver methods that Web driver capabilities may call.
 - `WebHarness`: Built-in Web runner-facing harness that satisfies `HarnessInterface`, hosts harness-owned capabilities such as `assert_with_ai`, routes driver capabilities to `WebDriverInterface`, validates action payloads with shared Pydantic models, converts driver/evaluator output into `HarnessActionResult`, and owns Web artifact capture integration.
 - `PlaywrightWebDriver`: Optional Web backend driver that satisfies `WebDriverInterface` using Playwright sync APIs when the `web` extra is installed and a configured local browser executable path is available for the selected Web channel.
+- `WindowsDriverInterface`: Protocol describing typed Windows desktop backend driver methods that Windows driver capabilities may call.
+- `WindowsHarness`: Built-in Windows runner-facing harness that satisfies `HarnessInterface`, hosts harness-owned capabilities such as `assert_with_ai`, routes driver capabilities to `WindowsDriverInterface`, validates action payloads with shared Pydantic models, converts driver/evaluator output into `HarnessActionResult`, and owns Windows artifact capture integration.
+- `PywinautoWindowsDriver`: Optional Windows backend driver that satisfies `WindowsDriverInterface` using pywinauto when the `windows` extra is installed and a configured local application executable path is available.
 - `driver_tool` compatibility helper and catalog-backed platform driver declaration helpers: Decorate concrete backend methods with capability metadata using the shared `capabilities` declaration layer; they do not execute or register capabilities by themselves. Android-specific behavior is represented by Android action catalog entries rather than a unique decorator implementation.
 
 Planned subpackage exports:
@@ -62,7 +65,7 @@ For each invocation, `StepRunner` must:
 1. Resolve the canonical capability from the registry.
 2. Validate params with `capability.params_model`.
 3. Build safe invocation context containing run id, step id, source ref, authored action metadata, and capability metadata.
-4. Derive the effective evidence policy from capability metadata and any explicit step policy. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True` and the default `EvidencePolicy()`, the effective policy must capture `screenshot` plus the active platform observation artifact before the action, after the action, and on failure. Android captures `ui_tree`; Web captures `page_snapshot`. A non-default `ExecutableStep.evidence_policy` is explicit and must not be overwritten by capability metadata.
+4. Derive the effective evidence policy from capability metadata and any explicit step policy. For harness and driver capabilities with `CapabilityDefinition.capture_evidence=True` and the default `EvidencePolicy()`, the effective policy must capture `screenshot` plus the active platform observation artifact before the action, after the action, and on failure. Android captures `ui_tree`; Web captures `page_snapshot`; Windows captures `ui_snapshot`. A non-default `ExecutableStep.evidence_policy` is explicit and must not be overwritten by capability metadata.
 5. Resolve the effective post-action delay from `CapabilityDefinition.post_action_delay_seconds` when it is not `None`; otherwise use configured `execution.post_action_delay_seconds.common` for `common` capabilities and `execution.post_action_delay_seconds.platform` for `harness` and `driver` capabilities.
 6. Route by `executor_kind`: `common` to the CommonTool executor binding, `harness` to a harness-owned handler, and `driver` through the active harness to the platform driver/backend.
 7. Normalize backend output into the shared runner result contract.
@@ -96,6 +99,12 @@ Web LLM-exposed Playwright capabilities in this SPEC cycle are inspired by Playw
 
 Web owns `WebHarness`, `WebDriverInterface`, `PlaywrightWebDriver`, Web catalog-backed driver declarations, and Web default capability definitions. Web artifact capture supports `screenshot` and `page_snapshot`. Playwright import and configured channel/executable launch are lazy runtime/backend concerns, not registry-bootstrap concerns.
 
+### Windows Platform Block
+
+Windows LLM-exposed pywinauto capabilities in this SPEC cycle include canonical names `launch_app`, `kill_app`, `click_on`, `double_click_on`, `right_click_on`, `type_text`, `press_key`, `assert_visible`, `ui_snapshot`, and harness-owned `assert_with_ai`. Authored FSQ aliases include `launchApp`, `killApp`, `clickOn`, `doubleClickOn`, `rightClickOn`, `typeText`, `pressKey`, `assertVisible`, `uiSnapshot`, and `assertWithAI`. Windows observation uses `ui_snapshot`/`uiSnapshot` and must not reuse Android `ui_tree`/`uiTree` or Web `page_snapshot`/`pageSnapshot` naming. Windows element resolution uses a control locator built from `title`, `control_type`, `automation_id`, `class_name`, `index`, and optional parent fields.
+
+Windows owns `WindowsHarness`, `WindowsDriverInterface`, `PywinautoWindowsDriver`, Windows catalog-backed driver declarations, and Windows default capability definitions. Windows artifact capture supports `screenshot` and `ui_snapshot`. pywinauto import and application launch are lazy runtime/backend concerns, not registry-bootstrap concerns. An optional configured window title regex resolves the launched application main window by title instead of the process top window.
+
 ### Future Platform Block
 
 Future Web-adjacent capability groups and future platforms must add their own platform block, parameter models, default capability definitions, harness/driver contracts, and verification expectations before implementation. New platform blocks must keep `StepRunner` and `StepSequenceRunner` platform-neutral.
@@ -116,9 +125,12 @@ Capability metadata, not a static Android action table, is the runtime source of
 - `harness/_android_driver.py`: `AndroidDriverInterface` protocol and driver-owned contracts.
 - `harness/_web.py`: Built-in `WebHarness` implementation and Web harness-owned capability declarations.
 - `harness/_web_driver.py`: `WebDriverInterface` protocol and driver-owned contracts.
+- `harness/_windows.py`: Built-in `WindowsHarness` implementation and Windows harness-owned capability declarations.
+- `harness/_windows_driver.py`: `WindowsDriverInterface` protocol and driver-owned contracts.
 - `harness/_driver_tools.py`: Thin driver declaration compatibility helpers, Android/Web action catalog wiring, and function schema/capability discovery wrappers backed by `capabilities`.
 - `harness/_uiautomator2_driver.py`: Optional uiautomator2 backend implementation with lazy dependency import and fake-device injection for tests.
 - `harness/_playwright_driver.py`: Optional Playwright backend implementation with lazy dependency import, browser/page lifecycle management, and fake-page injection for tests.
+- `harness/_pywinauto_driver.py`: Optional pywinauto backend implementation with lazy dependency import, application/window lifecycle management, and fake-window injection for tests.
 - `evidence/__init__.py`: Evidence subpackage exports only.
 - `evidence/_recorder.py`: `EvidenceRecorder` implementation.
 - `evidence/_artifact_store.py`: `ArtifactStore` implementation for run-local artifact paths and file writing.
@@ -155,7 +167,7 @@ Sensitive capabilities must return values in the standard normalized shape `outp
 - Unit tests: registry validation, alias resolution, duplicate/ambiguous failures, StepRunner routing by executor kind, capability-derived evidence policy application, explicit evidence policy preservation, post-action delay resolution and ordering, sensitivity redaction, structured event payloads, sequence teardown behavior, Android harness dispatch, and Web harness dispatch.
 - Integration-style tests with fakes: strict `waitMs` alias resolves to canonical `wait_ms`; dynamic and strict `wait_ms` reach the same decorated implementation; Android aliases resolve to canonical driver capabilities; Web aliases resolve to canonical driver capabilities; registry bootstrap does not connect to real Android devices or launch Playwright browsers.
 - Regression tests: no `waitMs` action-name special branch in StepRunner, no static Android action registry dependency in FSQ parsing, no name-based CommonTool replay/sensitivity/delay branches, no synthetic `waitMs` or evidence steps from post-action delay, no StepSequenceRunner configured inter-step sleep, and no dynamic/strict drift for `capture_evidence=True` harness or driver capabilities.
-- Verification commands: `./.venv/Scripts/python.exe -m pytest tests/test_core_contracts.py tests/test_step_runner.py tests/test_android_harness.py tests/test_web_harness.py` plus broader tests when implementation touches CLI/agent/report paths.
+- Verification commands: `./.venv/Scripts/python.exe -m pytest tests/test_core_contracts.py tests/test_step_runner.py tests/test_android_harness.py tests/test_web_harness.py tests/test_windows_harness.py` plus broader tests when implementation touches CLI/agent/report paths.
 
 ## Design Decisions
 

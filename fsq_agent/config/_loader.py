@@ -208,9 +208,12 @@ def _validate_harness_settings(settings: Settings) -> None:
     if settings.harness.platform == "web":
         _validate_web_harness_settings(settings)
         return
+    if settings.harness.platform == "windows":
+        _validate_windows_harness_settings(settings)
+        return
     raise ConfigurationError(
         "Unsupported harness platform.",
-        context={"platform": settings.harness.platform, "supported": ["android", "web"]},
+        context={"platform": settings.harness.platform, "supported": ["android", "web", "windows"]},
     )
 
 
@@ -262,4 +265,28 @@ def _validate_web_browser_executable_path(settings: Settings) -> None:
         raise ConfigurationError(
             "Configured Web browser executable path is not executable.",
             context={"executable_path_env": WEB_BROWSER_EXECUTABLE_PATH_ENV, "path": str(browser_path)},
+        )
+
+
+def _validate_windows_harness_settings(settings: Settings) -> None:
+    if settings.harness.windows.backend != "pywinauto":
+        raise ConfigurationError(
+            "Unsupported Windows harness backend.",
+            context={"backend": settings.harness.windows.backend, "supported": ["pywinauto"]},
+        )
+    app_path = settings.harness.windows.app_path
+    if app_path is None:
+        raise ConfigurationError(
+            "Windows app path is not configured.",
+            context={"config_key": "harness.windows.app_path"},
+        )
+    if not app_path.exists():
+        raise ConfigurationError(
+            "Configured Windows app path does not exist.",
+            context={"config_key": "harness.windows.app_path", "path": str(app_path)},
+        )
+    if not app_path.is_file():
+        raise ConfigurationError(
+            "Configured Windows app path must point to the application executable file.",
+            context={"config_key": "harness.windows.app_path", "path": str(app_path)},
         )

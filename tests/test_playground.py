@@ -571,6 +571,47 @@ def test_playground_web_platform_session_endpoints_are_unavailable() -> None:
     assert runtime_payload["metadata"]["baseUrlPresent"] is True
 
 
+def test_playground_windows_platform_does_not_require_android_session(monkeypatch) -> None:
+    settings = Settings(harness={"platform": "windows", "windows": {"app_path": "C:/App/app.exe"}})
+    captured = {}
+
+    def fake_start_dynamic_goal_execution(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("fsq_agent.playground._server.start_dynamic_goal_execution", fake_start_dynamic_goal_execution)
+    server = PlaygroundServer(settings)
+
+    status, payload = server.handle_post("/execute", {"goal": "Do it"})
+
+    assert status == 202
+    assert payload["requestId"]
+    assert captured["device_id"] is None
+
+
+def test_playground_windows_platform_runtime_info_and_session_endpoints() -> None:
+    settings = Settings(
+        harness={
+            "platform": "windows",
+            "windows": {"app_path": "C:/App/app.exe", "window_title_re": ".*Edge Beta", "launch_args": ["--x"]},
+        }
+    )
+    server = PlaygroundServer(settings)
+
+    session_status, session_payload = server.handle_get("/session", {})
+    auto_status, _auto_payload = server.handle_post("/session/auto", {})
+    runtime_status, runtime_payload = server.handle_get("/runtime-info", {})
+
+    assert session_status == 200
+    assert session_payload["available"] is False
+    assert auto_status == 409
+    assert runtime_status == 200
+    assert runtime_payload["platformId"] == "windows"
+    assert runtime_payload["metadata"]["backend"] == "pywinauto"
+    assert runtime_payload["metadata"]["appPathConfigured"] is True
+    assert runtime_payload["metadata"]["windowTitleRePresent"] is True
+    assert runtime_payload["metadata"]["launchArgsCount"] == 1
+
+
 def test_playground_execute_requires_exactly_one_source() -> None:
     server = PlaygroundServer(Settings())
     server.state.create_session("device-1")

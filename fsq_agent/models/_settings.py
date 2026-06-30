@@ -135,12 +135,31 @@ class WebHarnessSettings(BaseModel):
         raise ValueError("viewport_width and viewport_height must be configured together")
 
 
+class WindowsHarnessSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backend: Literal["pywinauto"] = "pywinauto"
+    backend_kind: Literal["uia", "win32"] = "uia"
+    launch_args: list[str] = Field(default_factory=list)
+    app_path: Path | None = None
+    window_title_re: str | None = None
+
+    @field_validator("window_title_re")
+    @classmethod
+    def _normalize_window_title_re(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
 class HarnessSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    platform: Literal["android", "web"] = "android"
+    platform: Literal["android", "web", "windows"] = "android"
     android: AndroidHarnessSettings = Field(default_factory=AndroidHarnessSettings)
     web: WebHarnessSettings = Field(default_factory=WebHarnessSettings)
+    windows: WindowsHarnessSettings = Field(default_factory=WindowsHarnessSettings)
 
 
 class PostActionDelaySettings(BaseModel):
