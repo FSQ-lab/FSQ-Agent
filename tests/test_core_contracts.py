@@ -169,7 +169,7 @@ def test_web_action_definitions_are_single_source_for_web_contract() -> None:
     assert WEB_ACTION_DEFINITIONS_BY_NAME["pageSnapshot"].params_model is WebPageSnapshotParams
     assert WEB_ACTION_DEFINITIONS_BY_NAME["pageSnapshot"].step_kind == "observation"
     assert WEB_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].driver_method == "assert_with_ai"
-    assert WEB_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].owner == "harness"
+    assert WEB_ACTION_DEFINITIONS_BY_NAME["assertWithAI"].owner == "driver"
 
 
 def test_web_parameter_models_produce_canonical_dumps_and_reject_extra_fields() -> None:

@@ -3,12 +3,14 @@ from typing import Any
 import pytest
 
 from fsq_agent.core import ArtifactStore, HarnessInterface, WebHarness
+from fsq_agent.core.harness._ai_assertion_tool import AIAssertionBackendToolMixin
 from fsq_agent.core.harness._driver_tools import _web_driver_tool
 from fsq_agent.models import (
     AIAssertionRequest,
     AIAssertionResult,
     ExecutableStep,
     HarnessContext,
+    WebAssertWithAIParams,
     WebAssertNotVisibleParams,
     WebAssertTextParams,
     WebAssertVisibleParams,
@@ -27,7 +29,7 @@ from fsq_agent.models import (
 )
 
 
-class FakeWebDriver:
+class FakeWebDriver(AIAssertionBackendToolMixin):
     backend = "fake-playwright"
 
     def __init__(self) -> None:
@@ -114,6 +116,10 @@ class FakeWebDriver:
     @_web_driver_tool("assertText", description="Assert text on a Web page target.")
     def assert_text(self, params: WebAssertTextParams) -> dict[str, object]:
         return self._record("assert_text", params)
+
+    @_web_driver_tool("assertWithAI", description="Evaluate an explicit Web visual assertion with AI.")
+    def assert_with_ai(self, params: WebAssertWithAIParams) -> dict[str, object]:
+        return self._run_ai_assertion_tool(params)
 
     def screenshot(self, params: object | None = None) -> bytes:
         self.calls.append(("screenshot", params.model_dump(mode="json", exclude_none=True) if hasattr(params, "model_dump") else params))
@@ -262,7 +268,7 @@ def test_web_harness_assert_with_ai_uses_injected_evaluator(tmp_path) -> None:
     result = harness.invoke_action(_step("assertWithAI", {"prompt": "Verify Bing homepage"}), context)
 
     assert "assert_with_ai" in schemas
-    assert schemas["assert_with_ai"].metadata["owner"] == "harness"
+    assert schemas["assert_with_ai"].metadata["owner"] == "driver"
     assert result.status == "passed"
     assert result.output["passed"] is True
     assert result.metadata["ai_assertion"]["provider"] == "fake"

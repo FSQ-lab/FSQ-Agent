@@ -13,7 +13,7 @@ from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, Play
 from fsq_agent.agent._harness_tools import HarnessToolAdapter
 from fsq_agent.models import AgentFinalOutput, ConfigurationError, GoalPrePlan, KnowledgeBundle, PlanningError, RunEvent, RunEventSink, SkillBundle, StepResult, Task
 from fsq_agent.providers import build_ai_assertion_evaluator, build_model_provider_session
-from fsq_agent.tools import AgentsCommonToolAdapter, ToolArtifactStore
+from fsq_agent.tools import AgentToolAdapter, ToolArtifactStore
 
 from fsq_agent.agent._prompt import PromptModelBuilder, PromptRenderer
 from fsq_agent.agent._pre_plan import (
@@ -146,26 +146,24 @@ class OpenAIAgentsRuntime:
     def __init__(
         self,
         settings: Settings,
-        tool_factory: AgentsCommonToolAdapter,
+        tool_factory: AgentToolAdapter,
         harness_factory: Callable[[str], HarnessInterface] | None = None,
     ) -> None:
         self.settings = settings
         self.tool_factory = tool_factory
         self.harness_factory = harness_factory
-        self._common_tool_names = self._discover_common_tool_names(tool_factory)
+        self._agent_tool_names = self._discover_agent_tool_names(tool_factory)
         self._harness_tool_names: set[str] = set()
         self._harness_tool_schemas: dict[str, Any] = {}
 
-    def _discover_common_tool_names(self, tool_factory: AgentsCommonToolAdapter) -> set[str]:
+    def _discover_agent_tool_names(self, tool_factory: AgentToolAdapter) -> set[str]:
         registry = getattr(tool_factory, "registry", None)
         list_tools = getattr(registry, "list_tools", None)
         if callable(list_tools):
             return {definition.name for definition in list_tools()}
-        from fsq_agent._capability_bootstrap import common_capability_definitions
+        return set()
 
-        return {definition.name for definition in common_capability_definitions()}
-
-    def _common_tool_providers(self) -> list[Any] | None:
+    def _agent_tool_providers(self) -> list[Any] | None:
         registry = getattr(self.tool_factory, "registry", None)
         list_providers = getattr(registry, "list_providers", None)
         if callable(list_providers):
@@ -259,20 +257,19 @@ class OpenAIAgentsRuntime:
                         task_id=task.id,
                         type="planning_update",
                         title="Tool setup started",
-                        message="Building CommonTool and platform harness tools for the SDK agent.",
+                        message="Building AgentTools and platform tools for the SDK agent.",
                     ),
                 )
                 harness_adapter = HarnessToolAdapter(
                     harness,
                     run_id=run_id,
-                    reserved_tool_names={*self._common_tool_names, *_RUNTIME_TOOL_NAMES},
-                    common_tool_providers=self._common_tool_providers(),
+                    reserved_tool_names={*self._agent_tool_names, *_RUNTIME_TOOL_NAMES},
                     post_action_delay_seconds=self.settings.execution.post_action_delay_seconds,
                     platform=self.settings.harness.platform,
                 )
                 self._harness_tool_names = harness_adapter.tool_names
                 self._harness_tool_schemas = harness_adapter.schemas_by_name
-                common_tools = self.tool_factory.build_tools(
+                agent_tools = self.tool_factory.build_tools(
                     FunctionTool,
                     run_id=run_id,
                     task_id=task.id,
@@ -288,14 +285,14 @@ class OpenAIAgentsRuntime:
                         type="planning_update",
                         title="Tool setup completed",
                         message="SDK tools are ready for main execution.",
-                        payload={"common_tool_count": len(common_tools), "harness_tool_count": len(harness_tools)},
+                        payload={"agent_tool_count": len(agent_tools), "platform_tool_count": len(harness_tools)},
                     ),
                 )
                 agent = Agent(
                     name=self.settings.agent.name,
                     model=self.settings.openai_agents.model,
                     instructions=self._build_instructions(knowledge, skills),
-                    tools=[*common_tools, *harness_tools],
+                    tools=[*agent_tools, *harness_tools],
                     output_type=AgentFinalOutput,
                 )
                 await self._emit(
@@ -306,7 +303,7 @@ class OpenAIAgentsRuntime:
                         type="planning_update",
                         title="SDK agent ready",
                         message="Main execution agent is ready to start streamed planning.",
-                        payload={"tool_count": len(common_tools) + len(harness_tools)},
+                        payload={"tool_count": len(agent_tools) + len(harness_tools)},
                     ),
                 )
                 await self._emit(
@@ -766,6 +763,7 @@ class OpenAIAgentsRuntime:
                 driver=driver,
                 artifact_store=ArtifactStore(self.settings.output.runs_dir / run_id),
                 ai_assertion_evaluator=build_ai_assertion_evaluator(self.settings),
+                runtime_secret_settings=self.settings.runtime_secrets,
             )
         if self.settings.harness.platform == "web":
             web = self.settings.harness.web
@@ -783,6 +781,7 @@ class OpenAIAgentsRuntime:
                 driver=driver,
                 artifact_store=ArtifactStore(self.settings.output.runs_dir / run_id),
                 ai_assertion_evaluator=build_ai_assertion_evaluator(self.settings),
+                runtime_secret_settings=self.settings.runtime_secrets,
             )
         raise ConfigurationError("Unsupported harness platform.", context={"platform": self.settings.harness.platform})
 
@@ -1030,12 +1029,15 @@ class OpenAIAgentsRuntime:
     def _tool_origin(self, tool_name: str | None) -> str:
         if not tool_name:
             return "unknown"
-        if tool_name in self._common_tool_names:
-            return "common"
+        if tool_name in self._agent_tool_names:
+            return "agent_tool"
         if tool_name in _RUNTIME_TOOL_NAMES:
             return "runtime"
         if tool_name in self._harness_tool_names:
-            return "harness"
+            schema = self._harness_tool_schemas.get(tool_name)
+            if schema is not None and schema.metadata.get("executor_kind") == "common":
+                return "common"
+            return "platform"
         return "unknown"
 
     def _artifact_path_from_output(self, output: Any) -> str | None:

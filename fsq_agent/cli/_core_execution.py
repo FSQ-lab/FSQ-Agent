@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from fsq_agent.cli._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
-from fsq_agent.core import CapabilityExecutorBindings, CapabilityRegistry, EvidenceRecorder, HarnessInterface, StepRunner, StepSequenceRunner
+from fsq_agent.cli._capability_bootstrap import build_capability_registry
+from fsq_agent.core import CapabilityRegistry, EvidenceRecorder, HarnessInterface, StepRunner, StepSequenceRunner
 from fsq_agent.fsq import FsqCaseLoader, FsqExecutableStepAdapter
 from fsq_agent.models import EvidenceBundle, ExecutableStep, PostActionDelaySettings, ReportArtifact, ReportGenerationError
 from fsq_agent.report import CoreEvidenceReportGenerator
@@ -14,12 +14,10 @@ def run_fsq_core_case(
     output_dir: str | Path,
     run_id: str,
     registry: CapabilityRegistry | None = None,
-    executors: CapabilityExecutorBindings | None = None,
     steps: list[ExecutableStep] | None = None,
     post_action_delay_seconds: PostActionDelaySettings | None = None,
 ) -> EvidenceBundle:
     registry = registry or build_capability_registry()
-    executors = executors or build_capability_executor_bindings()
     if steps is None:
         case = FsqCaseLoader().load_case(Path(case_path))
         steps = FsqExecutableStepAdapter(registry_snapshot=registry.snapshot()).to_executable_steps(case)
@@ -29,7 +27,6 @@ def run_fsq_core_case(
         step_runner=StepRunner(
             harness=harness,
             capability_registry=registry,
-            executor_bindings=executors,
             post_action_delay_seconds=post_action_delay_seconds,
         ),
         evidence_recorder=recorder,
@@ -56,7 +53,6 @@ def run_strict_fsq_core_case(
     output_dir: str | Path,
     run_id: str,
     registry: CapabilityRegistry | None = None,
-    executors: CapabilityExecutorBindings | None = None,
     steps: list[ExecutableStep] | None = None,
     post_action_delay_seconds: PostActionDelaySettings | None = None,
 ) -> ReportArtifact:
@@ -66,7 +62,6 @@ def run_strict_fsq_core_case(
         output_dir=output_dir,
         run_id=run_id,
         registry=registry,
-        executors=executors,
         steps=steps,
         post_action_delay_seconds=post_action_delay_seconds,
     )

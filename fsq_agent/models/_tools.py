@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from fsq_agent.models._core import ExecutableStepKind, FailureCategory, HarnessArtifactRef, HarnessPlatform, RunnerStatus
 
 
-CommonToolStatus = Literal["success", "failed", "skipped"]
+AgentToolStatus = Literal["success", "failed", "skipped"]
+CommonToolStatus = AgentToolStatus
 CapabilityExecutorKind = Literal["common", "harness", "driver"]
 ReplayKind = Literal["fsq_command", "dependency"]
 ToolKind = Literal["common", "cli", "file", "harness", "shell"]
@@ -105,7 +106,7 @@ class CapabilityExecutionResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class CommonToolDefinition(BaseModel):
+class AgentToolDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -115,7 +116,7 @@ class CommonToolDefinition(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class CommonToolCall(BaseModel):
+class AgentToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool_name: str
@@ -124,11 +125,11 @@ class CommonToolCall(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class CommonToolResult(BaseModel):
+class AgentToolResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool_name: str
-    status: CommonToolStatus
+    status: AgentToolStatus
     output: Any = None
     artifact_path: Path | str | None = None
     artifact_content_chars: int | None = Field(default=None, ge=0)
@@ -138,6 +139,18 @@ class CommonToolResult(BaseModel):
     duration_ms: int = Field(default=0, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
     raw: Any = None
+
+
+class CommonToolDefinition(AgentToolDefinition):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CommonToolCall(AgentToolCall):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CommonToolResult(AgentToolResult):
+    model_config = ConfigDict(extra="forbid")
 
 
 class ToolDefinition(CommonToolDefinition):

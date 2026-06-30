@@ -39,7 +39,7 @@ Future platform skills must be separate platform-specific Markdown bundles inste
 
 - Skills are advisory context, not executable authority.
 - Local Markdown skills are rendered into instructions/context only when successfully loaded.
-- Harness- or platform-specific skills should describe scope, action selection, argument rules, tool usage error recovery, semantic fidelity rules, and evidence rules. They guide the generic agent for the configured runtime without turning the agent runtime into a platform-specific implementation.
+- Platform-specific skills should describe scope, AgentTool/CommonTool/PlatformTool selection, argument rules, tool usage error recovery, semantic fidelity rules, and evidence rules. They guide the generic agent for the configured runtime without turning the agent runtime into a platform-specific implementation.
 - Skills do not attach command execution tools. Any future command capability requires its own SPEC update outside the skills module.
 - Skill models remain centralized in `models` so runtime, tools, and configuration share the same serializable contracts.
 - Skill loader diagnostics are operational metadata for logs or runtime events, not prompt content. The LLM should see complete skill instructions or no skill block.

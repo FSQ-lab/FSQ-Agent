@@ -140,6 +140,7 @@ def _discover_driver_function_schemas(
                 "capability_name": definition.name,
                 "executor_kind": definition.executor_kind,
                 "driver_method": driver_method,
+                "owner": definition.owner,
                 "step_kind": definition.step_kind,
                 "replay": definition.replay.model_dump(mode="json") if definition.replay else None,
             }

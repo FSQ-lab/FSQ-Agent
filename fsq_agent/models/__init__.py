@@ -132,6 +132,9 @@ from fsq_agent.models._task import (
     VerificationStatus,
 )
 from fsq_agent.models._tools import (
+    AgentToolCall,
+    AgentToolDefinition,
+    AgentToolResult,
     CapabilityDefinition,
     CapabilityExecutionResult,
     CapabilityExecutorKind,
@@ -248,6 +251,9 @@ __all__ = [
     "PageKnowledgePage",
     "GoalKeyAction",
     "GoalPrePlan",
+    "AgentToolDefinition",
+    "AgentToolCall",
+    "AgentToolResult",
     "CapabilityDefinition",
     "CapabilityExecutionResult",
     "CapabilityExecutorKind",

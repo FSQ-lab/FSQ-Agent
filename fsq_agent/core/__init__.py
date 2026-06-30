@@ -1,8 +1,9 @@
-from fsq_agent.core._capabilities import CapabilityExecutorBindings, CapabilityRegistry
+from fsq_agent.core._capabilities import CapabilityRegistry
 from fsq_agent.core._default_capabilities import (
     android_capability_definitions,
     web_capability_definitions,
 )
+from fsq_agent.core._platform_tools import CommonPlatformTools
 from fsq_agent.core.evidence import ArtifactStore, EvidenceRecorder
 from fsq_agent.core.harness import (
     AndroidDriverInterface,
@@ -21,8 +22,8 @@ __all__ = [
     "AndroidHarness",
     "AIAssertionEvaluatorProtocol",
     "ArtifactStore",
-    "CapabilityExecutorBindings",
     "CapabilityRegistry",
+    "CommonPlatformTools",
     "EvidenceRecorder",
     "HarnessInterface",
     "PlaywrightWebDriver",

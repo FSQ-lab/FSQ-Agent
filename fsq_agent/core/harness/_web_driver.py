@@ -4,6 +4,7 @@ from fsq_agent.models import (
     WebAssertNotVisibleParams,
     WebAssertTextParams,
     WebAssertVisibleParams,
+    WebAssertWithAIParams,
     WebCloseBrowserParams,
     WebClickOnParams,
     WebHoverOnParams,
@@ -67,6 +68,9 @@ class WebDriverInterface(Protocol):
         ...
 
     def assert_text(self, params: WebAssertTextParams) -> dict[str, object]:
+        ...
+
+    def assert_with_ai(self, params: WebAssertWithAIParams) -> dict[str, object]:
         ...
 
     def screenshot(self, params: WebTakeScreenshotParams | None = None) -> bytes:

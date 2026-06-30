@@ -8,14 +8,15 @@ from fsq_agent.capabilities import (
     CapabilityActionDefinition,
     common_capability,
     discover_capability_definitions,
+    platform_capability,
     platform_driver_capability,
 )
 from fsq_agent._capability_bootstrap import build_capability_registry
+from fsq_agent.core import CommonPlatformTools
 from fsq_agent.core.harness._driver_tools import _discover_driver_capability_definitions
 from fsq_agent.core.harness._playwright_driver import PlaywrightWebDriver
 from fsq_agent.core.harness._uiautomator2_driver import UiAutomator2AndroidDriver
 from fsq_agent.models import ConfigurationError, ReplayPolicy
-from fsq_agent.tools import DefaultCommonToolProvider
 
 
 class ExampleParams(BaseModel):
@@ -48,7 +49,7 @@ def test_common_capability_discovery_returns_serializable_definition() -> None:
     assert definition.name == "example_tool"
     assert definition.aliases == ["exampleTool"]
     assert definition.executor_kind == "common"
-    assert definition.owner == "tools"
+    assert definition.owner == "common"
     assert definition.capture_evidence is True
     assert definition.post_action_delay_seconds == 0.5
     assert definition.params_model is ExampleParams
@@ -56,15 +57,39 @@ def test_common_capability_discovery_returns_serializable_definition() -> None:
     assert definition.safe_metadata()["origin"] == "test"
 
 
-def test_default_common_tool_provider_uses_shared_declaration_layer() -> None:
-    definitions = {definition.name: definition for definition in DefaultCommonToolProvider.capability_definitions()}
+def test_common_platform_tools_use_shared_declaration_layer() -> None:
+    definitions = {definition.name: definition for definition in CommonPlatformTools.capability_definitions()}
 
     assert definitions["wait_ms"].aliases == ["waitMs"]
     assert definitions["wait_ms"].executor_kind == "common"
-    assert definitions["wait_ms"].owner == "tools"
+    assert definitions["wait_ms"].owner == "common"
     assert definitions["wait_ms"].replay == ReplayPolicy(kind="fsq_command", alias="waitMs")
     assert definitions["get_runtime_secret"].sensitivity is True
     assert definitions["get_runtime_secret"].replay == ReplayPolicy(kind="dependency", alias="runtimeSecret")
+
+
+def test_platform_capability_declares_platform_owned_harness_routed_capability() -> None:
+    class Provider:
+        @platform_capability(
+            name="assert_with_ai",
+            description="Assert with AI.",
+            params_model=ExampleParams,
+            aliases=["assertWithAI"],
+            platform="android",
+            step_kind="assertion",
+            replay=ReplayPolicy(kind="fsq_command", alias="assertWithAI"),
+        )
+        def assert_with_ai(self, params: ExampleParams) -> dict[str, object]:
+            return {}
+
+    definition = discover_capability_definitions(Provider)[0]
+
+    assert definition.name == "assert_with_ai"
+    assert definition.aliases == ["assertWithAI"]
+    assert definition.executor_kind == "harness"
+    assert definition.owner == "platform"
+    assert definition.platform == "android"
+    assert definition.step_kind == "assertion"
 
 
 def test_platform_driver_capability_validates_catalog_method_name() -> None:
@@ -221,7 +246,10 @@ def test_playwright_web_driver_declarations_keep_catalog_backed_metadata() -> No
     assert definitions["page_snapshot"].step_kind == "observation"
     assert definitions["page_snapshot"].capture_evidence is False
     assert definitions["assert_visible"].step_kind == "assertion"
-    assert "assert_with_ai" not in definitions
+    assert definitions["assert_with_ai"].aliases == ["assertWithAI"]
+    assert definitions["assert_with_ai"].executor_kind == "driver"
+    assert definitions["assert_with_ai"].owner == "driver"
+    assert definitions["assert_with_ai"].metadata["driver_method"] == "assert_with_ai"
 
 
 def test_web_registry_uses_web_only_platform_capabilities_without_playwright_import() -> None:
@@ -239,7 +267,8 @@ def test_web_registry_uses_web_only_platform_capabilities_without_playwright_imp
     assert definitions["click_on"].metadata["driver_method"] == "click_on"
     assert definitions["page_snapshot"].aliases == ["pageSnapshot"]
     assert definitions["page_snapshot"].step_kind == "observation"
-    assert definitions["assert_with_ai"].executor_kind == "harness"
+    assert definitions["assert_with_ai"].executor_kind == "driver"
+    assert definitions["assert_with_ai"].owner == "driver"
     assert snapshot.resolve("clickOn") is definitions["click_on"]
 
 

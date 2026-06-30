@@ -515,7 +515,7 @@ class AndroidActionDefinition:
     driver_method: str
     params_model: type[BaseModel]
     step_kind: ExecutableStepKind
-    owner: Literal["driver", "harness"] = "driver"
+    owner: Literal["driver", "platform", "harness"] = "driver"
     strict: bool = True
 
 
@@ -532,7 +532,7 @@ ANDROID_ACTION_DEFINITIONS: tuple[AndroidActionDefinition, ...] = (
     AndroidActionDefinition("longPressOn", "long_press_on", AndroidLongPressOnParams, "action"),
     AndroidActionDefinition("swipe", "swipe", AndroidSwipeParams, "action"),
     AndroidActionDefinition("uiTree", "ui_tree", AndroidUiTreeParams, "observation"),
-    AndroidActionDefinition("assertWithAI", "assert_with_ai", AndroidAssertWithAIParams, "assertion", "harness"),
+    AndroidActionDefinition("assertWithAI", "assert_with_ai", AndroidAssertWithAIParams, "assertion"),
 )
 ANDROID_ACTION_DEFINITIONS_BY_NAME: dict[str, AndroidActionDefinition] = {
     definition.fsq_action_name: definition for definition in ANDROID_ACTION_DEFINITIONS
@@ -545,7 +545,7 @@ class WebActionDefinition:
     driver_method: str
     params_model: type[BaseModel]
     step_kind: ExecutableStepKind
-    owner: Literal["driver", "harness"] = "driver"
+    owner: Literal["driver", "platform", "harness"] = "driver"
     strict: bool = True
     capture_evidence: bool = False
 
@@ -566,7 +566,7 @@ WEB_ACTION_DEFINITIONS: tuple[WebActionDefinition, ...] = (
     WebActionDefinition("assertVisible", "assert_visible", WebAssertVisibleParams, "assertion"),
     WebActionDefinition("assertNotVisible", "assert_not_visible", WebAssertNotVisibleParams, "assertion"),
     WebActionDefinition("assertText", "assert_text", WebAssertTextParams, "assertion"),
-    WebActionDefinition("assertWithAI", "assert_with_ai", WebAssertWithAIParams, "assertion", "harness"),
+    WebActionDefinition("assertWithAI", "assert_with_ai", WebAssertWithAIParams, "assertion"),
 )
 WEB_ACTION_DEFINITIONS_BY_NAME: dict[str, WebActionDefinition] = {
     definition.fsq_action_name: definition for definition in WEB_ACTION_DEFINITIONS

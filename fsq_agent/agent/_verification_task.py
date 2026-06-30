@@ -50,7 +50,7 @@ class VerificationEvidenceBuilder:
                 "Mark the verification_goal satisfied only when supplied events, tool outputs, or artifact excerpts support it.",
                 "Mark the verification_goal unmet only when supplied evidence proves it did not happen or the required final state is false.",
                 "If evidence is missing, truncated, ambiguous, or outside the supplied bundle, use status=inconclusive.",
-                "For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. Verify that execution evidence contains the harness-owned AI assertion tool result, including verdict metadata and screenshot artifact references, and that no supplied evidence contradicts that result.",
+                "For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. Verify that execution evidence contains the backend AI assertion tool result, including verdict metadata and screenshot artifact references, and that no supplied evidence contradicts that result.",
                 "Do not transform key actions into independent final verification requirements.",
             ],
         )
@@ -171,7 +171,7 @@ class VerificationEvidenceBuilder:
         return self._preview(str(value))
 
     def _tool_origin(self, tool_name: str, explicit_origin: Any) -> str:
-        if explicit_origin in {"harness", "common", "runtime", "unknown"}:
+        if explicit_origin in {"agent_tool", "common", "platform", "harness", "runtime", "unknown"}:
             return str(explicit_origin)
         if tool_name == "unknown":
             return "unknown"
@@ -190,7 +190,7 @@ Rules:
 - Mark the verification_goal as satisfied only when the supplied evidence supports it.
 - Mark the verification_goal as unmet only when the supplied evidence proves the required action/state did not occur or a permanent execution failure prevents it.
 - If evidence is insufficient or ambiguous, explain it in evidence/errors and use status=inconclusive unless the verification_goal is proven unmet.
-- For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. The execution stage evaluates authored visual assertions through the harness-owned platform AI assertion action. Verify that execution records contain the harness AI assertion result, verdict metadata, and screenshot artifact reference, that the main agent's structured output reports the corresponding result, and that no supplied evidence contradicts that result.
+- For visual assertions such as assertWithAI, do not re-inspect screenshot pixels. The execution stage evaluates authored visual assertions through the active backend AI assertion tool. Verify that execution records contain the AI assertion result, verdict metadata, and screenshot artifact reference, that the main agent's structured output reports the corresponding result, and that no supplied evidence contradicts that result.
 - Final status must be success only when verification_goal is satisfied; failed only when verification_goal is proven unmet; inconclusive when verification_goal is not proven either way.
 
 Return only the configured structured final output. Do not perform external actions.

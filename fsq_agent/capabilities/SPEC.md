@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Own the neutral capability declaration layer for fsq-agent. This module provides shared decorators, thin domain helper decorators, platform action catalog contracts, catalog-backed validation, and decorated-method discovery helpers that produce serializable `CapabilityDefinition` records for CommonTool, harness-owned, and driver/platform capabilities.
+Own the neutral capability declaration layer for fsq-agent. This module provides shared decorators, thin domain helper decorators, platform action catalog contracts, catalog-backed validation, and decorated-method discovery helpers that produce serializable `CapabilityDefinition` records for recordable CommonTool and PlatformTool capabilities.
 
-This module does not execute capabilities, invoke CommonTool providers, call harnesses or drivers, construct SDK tools, parse FSQ YAML, build registries, or generate reports. Execution ownership remains in `tools`, `core`, `agent`, `cli`, and entry-layer bootstrap code.
+This module does not execute capabilities, invoke CommonTool or PlatformTool providers, call harnesses or drivers, construct SDK tools, parse FSQ YAML, build registries, or generate reports. Execution ownership remains in `core`, `agent`, `cli`, and entry-layer bootstrap code. Dynamic-only AgentTools are outside this declaration layer.
 
 ## Dependencies
 
@@ -18,14 +18,15 @@ Target `__init__.py` exports via `__all__`:
 
 - `CapabilityActionDefinition`: Lightweight catalog entry for authored platform actions. It describes authored action name, canonical capability name, executor kind, owner, parameter model, optional required method name, step kind, replay policy, default evidence policy, optional post-action delay override, and safe metadata defaults.
 - `CapabilityActionCatalog`: Mapping type alias from authored action name to `CapabilityActionDefinition`.
-- `capability`: Neutral low-level decorator that attaches capability declaration metadata to a function or method. It can declare common, harness, or driver capabilities, but it does not register or execute them.
-- `common_capability`: Thin helper around `capability` for `executor_kind="common"` declarations owned by `tools`.
-- `driver_capability`: Thin helper around `capability` for explicit driver declarations that do not need a platform action catalog.
-- `harness_capability`: Thin helper around `capability` for harness-owned capabilities such as platform AI assertions.
-- `platform_driver_capability`: Factory that binds a platform/backend/catalog and returns a decorator for catalog-backed driver method declarations.
+- `capability`: Neutral low-level decorator that attaches capability declaration metadata to a function or method. It can declare CommonTool or PlatformTool capabilities, but it does not register or execute them.
+- `common_capability`: Thin helper around `capability` for CommonTool declarations owned by core platform tool providers.
+- `platform_capability`: Thin helper around `capability` for non-driver platform-level PlatformTool declarations. Current Android/Web backend actions, including `assert_with_ai`, use catalog-backed driver declarations instead.
+- `harness_capability`: Backward-compatible helper for legacy harness-owned declarations; new platform behavior should use `platform_capability` or catalog-backed `platform_driver_capability`.
+- `driver_capability`: Compatibility helper for explicit driver-backed PlatformTool declarations that do not need a platform action catalog.
+- `platform_driver_capability`: Factory that binds a platform/backend/catalog and returns a decorator for catalog-backed driver-backed PlatformTool declarations.
 - `discover_capability_definitions(target: object, *, metadata: dict[str, object] | None = None) -> list[CapabilityDefinition]`: Inspect a decorated class or instance without invoking methods and return serializable capability definitions.
 
-The neutral decorator API accepts canonical name, aliases, executor kind, owner, parameter model, description, platform, backend, step kind, evidence flag, optional post-action delay override, sensitivity flag, replay policy, strict schema flag, safe metadata, and optional catalog/action name inputs. `post_action_delay_seconds=None` means inherit the configured executor-kind default; `0` explicitly disables runner-owned post-action delay for that capability; positive values override the configured default. Domain helpers should be preferred at call sites so CommonTool and platform-driver declarations remain readable. Android and Web platform actions must be declared through catalog-backed `platform_driver_capability` helpers rather than platform-specific decorator semantics.
+The neutral decorator API accepts canonical name, aliases, tool family or compatibility executor kind, owner, parameter model, description, platform, backend, step kind, evidence flag, optional post-action delay override, sensitivity flag, replay policy, strict schema flag, safe metadata, and optional catalog/action name inputs. `post_action_delay_seconds=None` means inherit the configured family default; `0` explicitly disables runner-owned post-action delay for that capability; positive values override the configured default. Domain helpers should be preferred at call sites so CommonTool and PlatformTool declarations remain readable. Android and Web platform actions must be declared through catalog-backed `platform_driver_capability` helpers rather than platform-specific decorator semantics.
 
 ## Platform Declaration Blocks
 
@@ -38,12 +39,12 @@ Shared declaration rules:
 Android declaration block:
 
 - Android uiautomator2 driver methods use catalog-backed `platform_driver_capability` entries with Android aliases and parameter models.
-- Android harness-owned assertions use `harness_capability` when behavior is not a backend driver method.
+- Android platform-level assertions use `platform_capability` when behavior is not a backend driver method.
 
 Web declaration block:
 
 - Web Playwright driver methods use catalog-backed `platform_driver_capability` entries with Web aliases and parameter models, including explicit browser lifecycle actions `startBrowser`/`closeBrowser` alongside page actions such as `navigateTo` and `pageSnapshot`.
-- Web harness-owned assertions use `harness_capability` when behavior is not a backend driver method.
+- Web platform-level assertions use `platform_capability` when behavior is not a backend driver method.
 
 Future platform declaration block:
 
@@ -63,9 +64,9 @@ Future platform declaration block:
 - Architecture level: 2 Simple Package.
 - Public API: declaration decorators, catalog entry types, and discovery helpers exported from `__init__.py`.
 - Internal modules: `_decorators.py`, `_catalog.py`, and `_discovery.py` are private implementation modules.
-- Domain boundaries: this module owns declaration metadata and validation only. CommonTool safety and invocation live in `tools`; runner routing, harness/driver dispatch, and evidence live in `core`; SDK adapters live in `agent` and `tools`; strict FSQ parsing lives in `fsq` and entry modules.
+- Domain boundaries: this module owns declaration metadata and validation only. CommonTool and PlatformTool safety/invocation live in `core`; AgentTool behavior and SDK helper adaptation live in `tools`; runner routing, harness/provider dispatch, and evidence live in `core`; strict FSQ parsing lives in `fsq` and entry modules.
 - Boundary models: serializable capability contracts come from `models`. Decorator marker objects and catalog helper dataclasses are not persisted as runtime results.
-- Dependency direction: imports public `models` only; may be imported by `tools` and `core`; must not import any execution or entry-layer module.
+- Dependency direction: imports public `models` only; may be imported by `core`; must not import `tools` or any execution or entry-layer module.
 - Rationale: the module is a focused reusable declaration utility with validation and reflection only, so Level 2 is sufficient and a higher architecture level would add ceremony without isolating additional side effects.
 
 ## Error Handling
@@ -81,21 +82,21 @@ Declaration and discovery fail fast with `ConfigurationError` when a decorated c
 - Negative post-action delay values in decorator arguments or catalog entries.
 - Capability metadata attempts to store non-serializable runtime objects.
 
-Duplicate capability names, alias conflicts, ambiguous aliases, and missing executor bindings remain registry/bootstrap concerns owned by `core` and entry-layer code.
+Duplicate capability names, alias conflicts, ambiguous aliases, and executable routing validation remain registry/bootstrap concerns owned by `core` and entry-layer code.
 
 ## Testing Contract
 
 - Unit tests: neutral decorator metadata, domain helper defaults, post-action delay override validation, catalog lookup/validation, method-name and parameter-model validation, discovery from class and instance targets, safe metadata merging, and no method invocation during discovery.
-- Regression tests: `common_capability` produces the same `CapabilityDefinition` shape expected by CommonTool registry/bootstrap; catalog-backed Android and Web declarations produce the expected canonical names, aliases, parameter models, replay metadata, owner, platform/backend, evidence flags, and post-action delay overrides.
+- Regression tests: `common_capability` produces the `CapabilityDefinition` shape expected by platform provider registry/bootstrap; catalog-backed Android and Web PlatformTool declarations produce the expected canonical names, aliases, parameter models, replay metadata, owner, platform/backend, evidence flags, and post-action delay overrides.
 - Boundary tests: `capabilities` imports only `models` among project modules and has no dependency on `core`, `tools`, SDK objects, or concrete backend libraries.
 - Verification commands: `./.venv/Scripts/python.exe -m pytest tests/test_capabilities.py tests/test_tools.py tests/test_android_harness.py` plus broader capability/runner tests when implementations change.
 
 ## Design Decisions
 
-- One declaration mechanism prevents CommonTool, Android, future web, future desktop, and future iOS capabilities from growing separate decorator semantics.
+- One declaration mechanism prevents CommonTool, Android, Web, future desktop, and future iOS PlatformTool capabilities from growing separate decorator semantics.
 - Domain helper decorators are intentionally thin wrappers around the neutral decorator. They preserve readability while keeping one metadata format.
 - Platform differences belong in action catalogs, not in per-platform decorator implementations. Android and Web catalogs reuse `platform_driver_capability`; future platforms should follow the same pattern.
 - `CapabilityDefinition` remains the runtime contract and registry input. Decorators attach declaration metadata to functions, including optional post-action delay overrides; discovery converts that metadata into serializable definitions.
 - Discovery must be side-effect free. It may inspect method signatures and type hints, but it must not call methods, connect to devices, instantiate SDK tools, or build providers.
-- Runtime routing is out of scope. `executor_kind` is metadata consumed by `core.StepRunner` and executor bindings; `capabilities` never invokes the selected executor.
+- Runtime routing is out of scope. Tool family or compatibility `executor_kind` metadata is consumed by `core.StepRunner`; `capabilities` never invokes the selected provider or executor.
 - `models` stays contract-only. Keeping decorator behavior out of `models` avoids turning the shared schema module into a reflection/behavior layer.

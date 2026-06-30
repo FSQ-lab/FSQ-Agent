@@ -3,7 +3,7 @@ import json
 import time
 from typing import Any
 
-from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent._capability_bootstrap import build_capability_registry
 from fsq_agent.core import HarnessInterface, StepRunner
 from fsq_agent.models import CapabilityDefinition, ConfigurationError, ExecutableStep, HarnessFunctionSchema, HarnessPlatform, PostActionDelaySettings, RunnerStepResult
 
@@ -15,7 +15,6 @@ class HarnessToolAdapter:
         *,
         run_id: str,
         reserved_tool_names: set[str] | None = None,
-        common_tool_providers: list[Any] | None = None,
         post_action_delay_seconds: PostActionDelaySettings | None = None,
         platform: HarnessPlatform = "android",
     ) -> None:
@@ -25,7 +24,6 @@ class HarnessToolAdapter:
         self.runner = StepRunner(
             harness=harness,
             capability_registry=self._capability_registry,
-            executor_bindings=build_capability_executor_bindings(common_tool_providers=common_tool_providers),
             post_action_delay_seconds=post_action_delay_seconds,
         )
         self.reserved_tool_names = reserved_tool_names or set()
@@ -81,7 +79,7 @@ class HarnessToolAdapter:
                     params=params,
                     metadata={
                         "run_id": self.run_id,
-                        "tool_origin": "harness",
+                        "tool_origin": self._tool_origin(schema),
                         "tool_name": schema.name,
                         "capability_name": action_name,
                         "executor_kind": schema.metadata.get("executor_kind"),
@@ -138,7 +136,7 @@ class HarnessToolAdapter:
         result_summary = self._result_summary(schema, step, runner_result, artifact_refs)
         payload = {
             "tool_name": schema.name,
-            "tool_origin": "harness",
+            "tool_origin": self._tool_origin(schema),
             "capability_name": self._capability_name(schema),
             "executor_kind": schema.metadata.get("executor_kind"),
             "replay": schema.metadata.get("replay"),
@@ -166,7 +164,7 @@ class HarnessToolAdapter:
     ) -> dict[str, Any]:
         invoke_metadata = self._invoke_metadata(runner_result)
         metadata: dict[str, Any] = {
-            "tool_origin": "harness",
+            "tool_origin": self._tool_origin(schema),
             "tool_name": schema.name,
             "capability_name": self._capability_name(schema),
             "executor_kind": schema.metadata.get("executor_kind"),
@@ -208,10 +206,10 @@ class HarnessToolAdapter:
         return json.dumps(
             {
                 "tool_name": schema.name,
-                "tool_origin": "harness",
-            "capability_name": action_name,
-            "executor_kind": schema.metadata.get("executor_kind"),
-            "replay": schema.metadata.get("replay"),
+                "tool_origin": self._tool_origin(schema),
+                "capability_name": action_name,
+                "executor_kind": schema.metadata.get("executor_kind"),
+                "replay": schema.metadata.get("replay"),
                 "platform": schema.platform,
                 "driver_method": schema.driver_method,
                 "fsq_action_name": schema.fsq_action_name,
@@ -226,7 +224,7 @@ class HarnessToolAdapter:
                     "error_message": error_message,
                     "failure_category": "harness_error",
                     "metadata": {
-                        "tool_origin": "harness",
+                        "tool_origin": self._tool_origin(schema),
                         "tool_name": schema.name,
                         "capability_name": action_name,
                         "executor_kind": schema.metadata.get("executor_kind"),
@@ -243,3 +241,6 @@ class HarnessToolAdapter:
             ensure_ascii=False,
             default=str,
         )
+
+    def _tool_origin(self, schema: HarnessFunctionSchema) -> str:
+        return "common" if schema.metadata.get("executor_kind") == "common" else "platform"

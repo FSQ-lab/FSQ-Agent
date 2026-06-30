@@ -51,7 +51,7 @@ class ToolCallRecord(BaseModel):
 
     tool_call_id: str | None = None
     tool_name: str
-    tool_origin: Literal["harness", "common", "runtime", "unknown"] = "unknown"
+    tool_origin: Literal["agent_tool", "common", "platform", "harness", "runtime", "unknown"] = "unknown"
     status: Literal["completed", "failed"]
     arguments: dict[str, Any] | str | None = None
     output_preview: str | None = None

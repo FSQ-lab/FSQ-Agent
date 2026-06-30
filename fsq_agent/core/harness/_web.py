@@ -1,11 +1,11 @@
 from pydantic import BaseModel, ValidationError
 
 from fsq_agent.core.evidence import ArtifactStore
+from fsq_agent.core._platform_tools import CommonPlatformTools
 from fsq_agent.core.harness._driver_tools import _discover_driver_capability_definitions
 from fsq_agent.core.harness._interface import AIAssertionEvaluatorProtocol
 from fsq_agent.core.harness._web_driver import WebDriverInterface
 from fsq_agent.models import (
-    AIAssertionRequest,
     CapabilityDefinition,
     ExecutableStep,
     FailureCategory,
@@ -13,9 +13,8 @@ from fsq_agent.models import (
     HarnessArtifactRef,
     HarnessContext,
     HarnessFunctionSchema,
-    ReplayPolicy,
+    RuntimeSecretSettings,
     StepPhase,
-    WebAssertWithAIParams,
     WebPageSnapshotParams,
     WebTakeScreenshotParams,
 )
@@ -42,10 +41,16 @@ class WebHarness:
         driver: WebDriverInterface,
         artifact_store: ArtifactStore | None = None,
         ai_assertion_evaluator: AIAssertionEvaluatorProtocol | None = None,
+        runtime_secret_settings: RuntimeSecretSettings | None = None,
     ) -> None:
         self.driver = driver
         self.artifact_store = artifact_store
         self.ai_assertion_evaluator = ai_assertion_evaluator
+        self.common_tools = CommonPlatformTools(
+            runtime_secret_settings=runtime_secret_settings,
+            platform="web",
+        )
+        self._configure_driver_ai_assertion_tool()
 
     def get_context(self) -> HarnessContext:
         context = self.driver.context()
@@ -62,12 +67,14 @@ class WebHarness:
         definitions = self._capability_definitions()
         if self.ai_assertion_evaluator is None:
             definitions = [definition for definition in definitions if definition.name != "assert_with_ai"]
-        return [self._schema_from_capability(definition) for definition in definitions]
+        return [*self.common_tools.common_action_space(), *[self._schema_from_capability(definition) for definition in definitions]]
 
     def before_action(self, step: ExecutableStep, context: HarnessContext) -> None:
         return None
 
     def invoke_action(self, step: ExecutableStep, context: HarnessContext) -> HarnessActionResult:
+        if self.common_tools.common_capability_for(step.action_name) is not None:
+            return self.common_tools.invoke_common_tool(step)
         capability = self._capability_for(step.action_name)
         if capability is None:
             return HarnessActionResult(
@@ -76,15 +83,17 @@ class WebHarness:
                 failure_category="configuration_error",
                 error_message=f"Unsupported Web action: {step.action_name}",
             )
-        if capability.executor_kind == "harness":
-            return self._assert_with_ai(step, context, capability)
         if capability.executor_kind == "driver":
             params = self._validate_params(step, capability.params_model)
             if isinstance(params, HarnessActionResult):
                 return params
             driver_method_name = str(capability.metadata.get("driver_method") or capability.name)
             driver_method = getattr(self.driver, driver_method_name)
-            output = driver_method(params)
+            self._prepare_driver_ai_assertion_tool_invocation(step, context)
+            try:
+                output = driver_method(params)
+            finally:
+                self._clear_driver_ai_assertion_tool_invocation()
             return self._result_from_driver_output(step.action_name, output)
         return HarnessActionResult(
             status="failed",
@@ -157,7 +166,7 @@ class WebHarness:
     def _to_harness_artifact_ref(self, ref: object) -> HarnessArtifactRef:
         if isinstance(ref, HarnessArtifactRef):
             return ref
-        data = ref.model_dump()  # type: ignore[attr-defined]
+        data = ref if isinstance(ref, dict) else ref.model_dump()  # type: ignore[attr-defined]
         return HarnessArtifactRef(
             artifact_id=data["artifact_id"],
             kind=data["kind"],
@@ -166,73 +175,6 @@ class WebHarness:
             created_at=data["created_at"],
             metadata=dict(data.get("metadata") or {}),
         )
-
-    def _assert_with_ai(self, step: ExecutableStep, context: HarnessContext, capability: CapabilityDefinition) -> HarnessActionResult:
-        params = self._validate_params(step, capability.params_model)
-        if isinstance(params, HarnessActionResult):
-            return params
-        if self.ai_assertion_evaluator is None:
-            return HarnessActionResult(
-                status="failed",
-                action_name=step.action_name,
-                failure_category="configuration_error",
-                error_message="assertWithAI requires an AI assertion evaluator.",
-            )
-        try:
-            screenshot_ref = self.capture_artifact(
-                kind="screenshot",
-                reason="assert-with-ai",
-                context=context,
-                step_id=step.step_id,
-                phase="invoke",
-            )
-        except Exception as exc:
-            return HarnessActionResult(
-                status="failed",
-                action_name=step.action_name,
-                failure_category="artifact_error",
-                error_message=str(exc) or exc.__class__.__name__,
-            )
-        request = AIAssertionRequest(
-            platform="web",
-            prompt=params.prompt,
-            screenshot_path=(self.artifact_store.run_dir / screenshot_ref.path) if self.artifact_store else screenshot_ref.path,
-            screenshot_artifact_ref=screenshot_ref,
-            ui_context=context.model_dump(mode="json"),
-            step_id=step.step_id,
-            action_name=step.action_name,
-            metadata=step.metadata,
-        )
-        result = self.ai_assertion_evaluator.evaluate(request)
-        status = "passed" if result.passed else "failed"
-        failure_category: FailureCategory | None = None
-        if not result.passed:
-            failure_category = "assertion_error" if result.status == "failed" else "harness_error"
-        artifact_refs = self._unique_artifact_refs([screenshot_ref, *result.artifact_refs])
-        return HarnessActionResult(
-            status=status,
-            action_name=step.action_name,
-            output=result.model_dump(mode="json"),
-            artifact_refs=artifact_refs,
-            failure_category=failure_category,
-            error_message=result.error,
-            metadata={
-                "ai_assertion": result.model_dump(mode="json"),
-                "prompt": params.prompt,
-                "optional": params.optional,
-                "owner": "harness",
-            },
-        )
-
-    def _unique_artifact_refs(self, refs: list[HarnessArtifactRef]) -> list[HarnessArtifactRef]:
-        seen: set[str] = set()
-        unique: list[HarnessArtifactRef] = []
-        for ref in refs:
-            if ref.artifact_id in seen:
-                continue
-            seen.add(ref.artifact_id)
-            unique.append(ref)
-        return unique
 
     def _capability_for(self, name_or_alias: str) -> CapabilityDefinition | None:
         for capability in self._capability_definitions():
@@ -251,8 +193,32 @@ class WebHarness:
             platform="web",
             metadata=updates,
         )
-        definitions.append(self._assert_with_ai_capability())
         return [self._with_driver_metadata(definition, updates) for definition in definitions]
+
+    def _configure_driver_ai_assertion_tool(self) -> None:
+        configure = getattr(self.driver, "configure_ai_assertion_tool", None)
+        if callable(configure):
+            configure(
+                platform="web",
+                artifact_store=self.artifact_store,
+                ai_assertion_evaluator=self.ai_assertion_evaluator,
+            )
+
+    def _prepare_driver_ai_assertion_tool_invocation(self, step: ExecutableStep, context: HarnessContext) -> None:
+        prepare = getattr(self.driver, "prepare_ai_assertion_tool_invocation", None)
+        if callable(prepare):
+            prepare(
+                context=context,
+                step_id=step.step_id,
+                action_name=step.action_name,
+                metadata=step.metadata,
+                capture_artifact=self.capture_artifact,
+            )
+
+    def _clear_driver_ai_assertion_tool_invocation(self) -> None:
+        clear = getattr(self.driver, "clear_ai_assertion_tool_invocation", None)
+        if callable(clear):
+            clear()
 
     def _with_driver_metadata(self, definition: CapabilityDefinition, updates: dict[str, object]) -> CapabilityDefinition:
         metadata = dict(definition.metadata)
@@ -263,25 +229,6 @@ class WebHarness:
             model_updates["backend"] = backend
         return definition.model_copy(update=model_updates)
 
-    def _assert_with_ai_capability(self) -> CapabilityDefinition:
-        capability_metadata = {"owner": "harness", "driver_method": "assert_with_ai", "fsq_action_name": "assertWithAI"}
-        backend = getattr(self.driver, "backend", None)
-        if isinstance(backend, str):
-            capability_metadata["backend"] = backend
-        return CapabilityDefinition(
-            name="assert_with_ai",
-            aliases=["assertWithAI"],
-            executor_kind="harness",
-            params_model=WebAssertWithAIParams,
-            step_kind="assertion",
-            description="Evaluate an explicit Web visual assertion with a fresh screenshot and the configured AI evaluator.",
-            platform="web",
-            backend=backend if isinstance(backend, str) else None,
-            owner="harness",
-            replay=ReplayPolicy(kind="fsq_command", alias="assertWithAI"),
-            metadata=capability_metadata,
-        )
-
     def _schema_from_capability(self, definition: CapabilityDefinition) -> HarnessFunctionSchema:
         driver_method = self._metadata_str(definition.metadata, "driver_method") or definition.name
         fsq_action_name = self._metadata_str(definition.metadata, "fsq_action_name")
@@ -291,6 +238,7 @@ class WebHarness:
                 "capability_name": definition.name,
                 "executor_kind": definition.executor_kind,
                 "driver_method": driver_method,
+                "owner": definition.owner,
                 "step_kind": definition.step_kind,
                 "replay": definition.replay.model_dump(mode="json") if definition.replay else None,
             }
@@ -338,10 +286,13 @@ class WebHarness:
         )
         error_message_value = output.get("error_message")
         metadata_value = output.get("metadata")
+        artifact_refs_value = output.get("artifact_refs")
+        artifact_refs = [self._to_harness_artifact_ref(ref) for ref in artifact_refs_value] if isinstance(artifact_refs_value, list) else []
         return HarnessActionResult(
             status=status,
             action_name=action_name,
             output=output.get("output"),
+            artifact_refs=artifact_refs,
             error_message=error_message_value if isinstance(error_message_value, str) else None,
             failure_category=failure_category,
             metadata=metadata_value if isinstance(metadata_value, dict) else {},

@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
-from fsq_agent._capability_bootstrap import build_capability_executor_bindings, build_capability_registry
+from fsq_agent._capability_bootstrap import build_capability_registry
 from fsq_agent.agent import FsqAgent
 from fsq_agent.config import Settings, validate_runtime_settings, validate_strict_core_settings
 from fsq_agent.core import AndroidHarness, ArtifactStore, EvidenceRecorder, PlaywrightWebDriver, StepRunner, StepSequenceRunner, UiAutomator2AndroidDriver, WebHarness
@@ -309,7 +309,6 @@ def _run_strict_case_yaml(
 	case = FsqCaseLoader().load_case(case_path)
 	_validate_strict_case_platform(settings, case)
 	registry = build_capability_registry(platform=settings.harness.platform)
-	executors = build_capability_executor_bindings()
 	registry_snapshot = registry.snapshot()
 	requires_ai_assertion = _case_requires_ai_assertion(case, registry_snapshot)
 	validate_strict_core_settings(settings, requires_ai_assertion=requires_ai_assertion)
@@ -335,7 +334,6 @@ def _run_strict_case_yaml(
 		run_id=run_id,
 		steps=steps,
 		registry=registry,
-		executors=executors,
 		post_action_delay_seconds=settings.execution.post_action_delay_seconds,
 		state=state,
 		request_id=request_id,
@@ -414,7 +412,6 @@ def _run_strict_core_steps(
 	run_id: str,
 	steps: list[ExecutableStep],
 	registry,
-	executors,
 	post_action_delay_seconds: PostActionDelaySettings,
 	state: PlaygroundState,
 	request_id: str,
@@ -425,7 +422,6 @@ def _run_strict_core_steps(
 		step_runner=StepRunner(
 			harness=harness,
 			capability_registry=registry,
-			executor_bindings=executors,
 			post_action_delay_seconds=post_action_delay_seconds,
 		),
 		evidence_recorder=recorder,
@@ -551,6 +547,7 @@ def _build_strict_harness(settings: Settings, case, run_dir: Path, requires_ai_a
 			driver=UiAutomator2AndroidDriver(app_id=app_id, serial=settings.harness.android.serial),
 			artifact_store=ArtifactStore(run_dir=run_dir),
 			ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
+			runtime_secret_settings=settings.runtime_secrets,
 		)
 	if settings.harness.platform == "web":
 		return _build_web_harness(settings, run_dir, requires_ai_assertion=requires_ai_assertion)
@@ -583,6 +580,7 @@ def _build_web_harness(settings: Settings, run_dir: Path, *, requires_ai_asserti
 		),
 		artifact_store=ArtifactStore(run_dir=run_dir),
 		ai_assertion_evaluator=build_ai_assertion_evaluator(settings) if requires_ai_assertion else None,
+		runtime_secret_settings=settings.runtime_secrets,
 	)
 
 

@@ -3,10 +3,11 @@ from typing import Any
 import pytest
 
 from fsq_agent.core import AndroidHarness, ArtifactStore, HarnessInterface, UiAutomator2AndroidDriver
+from fsq_agent.core.harness._ai_assertion_tool import AIAssertionBackendToolMixin
 from fsq_agent.models import AIAssertionRequest, AIAssertionResult, ExecutableStep, HarnessContext
 
 
-class FakeAndroidDriver:
+class FakeAndroidDriver(AIAssertionBackendToolMixin):
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
 
@@ -60,7 +61,7 @@ class FakeAndroidDriver:
         return self._record("assert_state", params)
 
     def assert_with_ai(self, params: dict[str, object]) -> dict[str, object]:
-        return self._record("assert_with_ai", params)
+        return self._run_ai_assertion_tool(params)
 
     def screenshot(self) -> bytes:
         self.calls.append(("screenshot", None))
@@ -311,7 +312,7 @@ def test_android_harness_assert_with_ai_uses_injected_evaluator(tmp_path) -> Non
     result = harness.invoke_action(_step("assertWithAI", {"prompt": "Verify Bing homepage"}), context)
 
     assert "assert_with_ai" in schemas
-    assert schemas["assert_with_ai"].metadata["owner"] == "harness"
+    assert schemas["assert_with_ai"].metadata["owner"] == "driver"
     assert result.status == "passed"
     assert result.output["passed"] is True
     assert result.metadata["ai_assertion"]["provider"] == "fake"

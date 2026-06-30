@@ -5,7 +5,8 @@ from typing import Any
 import pytest
 
 from fsq_agent.core import AndroidDriverInterface, UiAutomator2AndroidDriver
-from fsq_agent.models import ConfigurationError
+from fsq_agent.core.harness._driver_tools import _discover_driver_capability_definitions
+from fsq_agent.models import AndroidAssertWithAIParams, ConfigurationError
 
 
 class FakeSelector:
@@ -389,10 +390,24 @@ def test_uiautomator2_driver_reports_unimplemented_backend_operations() -> None:
     assert perform_result["failure_category"] == "configuration_error"
 
 
-def test_uiautomator2_driver_does_not_own_ai_assertion() -> None:
+def test_uiautomator2_driver_owns_ai_assertion_backend_tool() -> None:
     driver = UiAutomator2AndroidDriver(app_id="com.example.app", device=FakeDevice())
 
-    assert not hasattr(driver, "assert_with_ai")
+    definitions = {
+        definition.name: definition
+        for definition in _discover_driver_capability_definitions(
+            UiAutomator2AndroidDriver,
+            platform="android",
+            metadata={"driver_class": "UiAutomator2AndroidDriver", "backend": "uiautomator2"},
+        )
+    }
+    result = driver.assert_with_ai(AndroidAssertWithAIParams(prompt="Verify the screen."))
+
+    assert definitions["assert_with_ai"].aliases == ["assertWithAI"]
+    assert definitions["assert_with_ai"].executor_kind == "driver"
+    assert definitions["assert_with_ai"].owner == "driver"
+    assert result["status"] == "failed"
+    assert result["failure_category"] == "configuration_error"
 
 
 def test_uiautomator2_driver_raises_configuration_error_when_dependency_missing(monkeypatch) -> None:

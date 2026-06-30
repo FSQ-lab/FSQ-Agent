@@ -57,7 +57,7 @@ def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_
             tool_name="input_text",
             tool_call_id="call-1",
             tool_arguments={"text": "***", "target": "Password field"},
-            payload={"tool_origin": "harness", "capability_name": "input_text", "replay": {"kind": "fsq_command", "alias": "inputText"}},
+            payload={"tool_origin": "platform", "capability_name": "input_text", "replay": {"kind": "fsq_command", "alias": "inputText"}},
         ),
     )
     _write_event(
@@ -69,7 +69,7 @@ def test_record_dynamic_run_writes_strict_yaml_with_runtime_secret_and_wait(tmp_
             title="Tool call completed",
             tool_name="input_text",
             tool_call_id="call-1",
-            payload={"tool_origin": "harness", "capability_name": "input_text", "replay": {"kind": "fsq_command", "alias": "inputText"}, "status": "passed"},
+            payload={"tool_origin": "platform", "capability_name": "input_text", "replay": {"kind": "fsq_command", "alias": "inputText"}, "status": "passed"},
         ),
     )
     _write_event(
@@ -125,7 +125,7 @@ def test_record_dynamic_web_run_validates_against_web_registry(tmp_path: Path) -
             tool_name="click_on",
             tool_call_id="call-1",
             tool_arguments={"target": "Search"},
-            payload={"tool_origin": "harness", "capability_name": "click_on", "replay": {"kind": "fsq_command", "alias": "clickOn"}},
+            payload={"tool_origin": "platform", "capability_name": "click_on", "replay": {"kind": "fsq_command", "alias": "clickOn"}},
         ),
     )
     _write_event(
@@ -137,7 +137,7 @@ def test_record_dynamic_web_run_validates_against_web_registry(tmp_path: Path) -
             title="Tool call completed",
             tool_name="click_on",
             tool_call_id="call-1",
-            payload={"tool_origin": "harness", "capability_name": "click_on", "replay": {"kind": "fsq_command", "alias": "clickOn"}, "status": "passed"},
+            payload={"tool_origin": "platform", "capability_name": "click_on", "replay": {"kind": "fsq_command", "alias": "clickOn"}, "status": "passed"},
         ),
     )
 

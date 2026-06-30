@@ -2,7 +2,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from fsq_agent.core._capabilities import CapabilityExecutorBindings, CapabilityRegistry
+from fsq_agent.core._capabilities import CapabilityRegistry
 from fsq_agent.core.harness import HarnessInterface
 from fsq_agent.models import (
     CapabilityDefinition,
@@ -14,6 +14,7 @@ from fsq_agent.models import (
     HarnessActionResult,
     HarnessArtifactRef,
     PostActionDelaySettings,
+    ReplayPolicy,
     RunnerEvent,
     RunnerEventType,
     RunnerStatus,
@@ -38,12 +39,10 @@ class StepRunner:
         harness: HarnessInterface,
         *,
         capability_registry: CapabilityRegistry | None = None,
-        executor_bindings: CapabilityExecutorBindings | None = None,
         post_action_delay_seconds: PostActionDelaySettings | None = None,
     ) -> None:
         self.harness = harness
         self.capability_registry = capability_registry or CapabilityRegistry()
-        self.executor_bindings = executor_bindings or CapabilityExecutorBindings()
         self.post_action_delay_seconds = post_action_delay_seconds or PostActionDelaySettings(platform=0.0, common=0.0)
         self._events: list[RunnerEvent] = []
         self._last_capability_execution_result: CapabilityExecutionResult | None = None
@@ -62,9 +61,6 @@ class StepRunner:
         capability, step = self._resolve_capability_step(step)
         step = self._with_effective_evidence_policy(step, capability)
         state = self._start_step(run_id, step)
-        if capability is not None and capability.executor_kind == "common":
-            return self._run_common_step(run_id, step, capability, state)
-
         return self._run_harness_step(run_id, step, capability, state)
 
     def _resolve_capability_step(self, step: ExecutableStep) -> tuple[CapabilityDefinition | None, ExecutableStep]:
@@ -163,6 +159,7 @@ class StepRunner:
         phase_status: RunnerStatus = "failed"
         try:
             action_result = self.harness.invoke_action(step, context)
+            self._last_capability_execution_result = self._common_capability_execution_result(action_result)
             phase_status = action_result.status
             self._emit(run_id=run_id, event_type="harness_call_finish", step=step, phase="invoke")
             if action_result.status in {"failed", "cancelled", "skipped"}:
@@ -250,71 +247,6 @@ class StepRunner:
         )
         self._emit(run_id=run_id, event_type="phase_finish", step=step, phase="finalize")
 
-    def _run_common_step(
-        self,
-        run_id: str,
-        step: ExecutableStep,
-        capability: CapabilityDefinition,
-        state: _StepExecutionState,
-    ) -> RunnerStepResult:
-        self._record_passed_empty_phase(run_id, step, state, "prepare")
-        delay_seconds = self._effective_post_action_delay_seconds(capability)
-        status = self._run_common_invoke_phase(run_id, step, capability, state, delay_seconds)
-        self._apply_post_action_delay(delay_seconds)
-        self._record_passed_empty_phase(run_id, step, state, "finalize")
-        return self._finish_step(
-            run_id,
-            step,
-            state,
-            status=status,
-            failure_category=state.failure_category,
-            error_message=state.error_message,
-        )
-
-    def _run_common_invoke_phase(
-        self,
-        run_id: str,
-        step: ExecutableStep,
-        capability: CapabilityDefinition,
-        state: _StepExecutionState,
-        delay_seconds: float,
-    ) -> RunnerStatus:
-        self._emit(run_id=run_id, event_type="phase_start", step=step, phase="invoke")
-        metadata: dict[str, object] = {}
-        status: RunnerStatus = "passed"
-        try:
-            result = self._execute_common_capability(step, capability)
-            status = result.status
-            state.failure_category = result.failure_category
-            state.error_message = result.error_message
-            self._last_capability_execution_result = result
-            metadata = self._common_result_metadata(result)
-        except Exception as exc:  # noqa: BLE001 - common capability failures are reported as structured step failures.
-            status = "failed"
-            state.failure_category = "configuration_error"
-            state.error_message = str(exc) or exc.__class__.__name__
-        metadata = self._with_post_action_delay_metadata(metadata, delay_seconds)
-        if status in {"failed", "cancelled", "skipped"} or state.failure_category:
-            self._emit(run_id=run_id, event_type="step_error", step=step, phase="invoke")
-        self._append_phase_report(
-            state,
-            step=step,
-            phase="invoke",
-            status=status,
-            duration_ms=metadata.get("duration_ms", 0) if isinstance(metadata.get("duration_ms"), int) else 0,
-            failure_category=state.failure_category,
-            error_message=state.error_message,
-            metadata=metadata,
-        )
-        self._emit(
-            run_id=run_id,
-            event_type="phase_finish",
-            step=step,
-            phase="invoke",
-            payload={"status": status, "post_action_delay_seconds": delay_seconds},
-        )
-        return status
-
     def _record_passed_empty_phase(
         self,
         run_id: str,
@@ -373,37 +305,6 @@ class StepRunner:
             failure_category=failure_category,
             error_message=error_message,
         )
-
-    def _execute_common_capability(self, step: ExecutableStep, capability: CapabilityDefinition) -> CapabilityExecutionResult:
-        executor = self.executor_bindings.common_executor(capability.name)
-        if executor is None:
-            return CapabilityExecutionResult(
-                capability_name=capability.name,
-                executor_kind="common",
-                status="failed",
-                failure_category="configuration_error",
-                error_message=f"No executor is bound for common capability: {capability.name}",
-            )
-        result = executor(step)
-        if hasattr(result, "__await__"):
-            raise RuntimeError("Async common capability executors are not supported by synchronous StepRunner.")
-        return result
-
-    def _common_result_metadata(self, result: CapabilityExecutionResult) -> dict[str, object]:
-        metadata: dict[str, object] = dict(result.metadata)
-        metadata["capability_name"] = result.capability_name
-        metadata["executor_kind"] = result.executor_kind
-        metadata["sensitivity"] = result.sensitivity
-        if result.replay is not None:
-            metadata["replay"] = result.replay.model_dump(mode="json")
-        if result.safe_replay_params:
-            metadata["safe_replay_params"] = dict(result.safe_replay_params)
-        if result.output is not None and not result.sensitivity:
-            metadata["common_output"] = result.output
-        if result.sensitivity:
-            metadata["common_output_redacted"] = True
-        metadata.setdefault("duration_ms", result.duration_ms)
-        return metadata
 
     def _effective_post_action_delay_seconds(self, capability: CapabilityDefinition | None) -> float:
         if capability is None:
@@ -530,12 +431,38 @@ class StepRunner:
         return refs
 
     def _action_result_metadata(self, action_result: HarnessActionResult) -> dict[str, object]:
+        if action_result.metadata.get("executor_kind") == "common":
+            metadata = dict(action_result.metadata)
+            if action_result.output is not None and not metadata.get("sensitivity"):
+                metadata.setdefault("common_output", action_result.output)
+            return metadata
         metadata: dict[str, object] = {}
         if action_result.metadata:
             metadata["harness_metadata"] = action_result.metadata
         if action_result.output is not None:
             metadata["harness_output"] = action_result.output
         return metadata
+
+    def _common_capability_execution_result(self, action_result: HarnessActionResult) -> CapabilityExecutionResult | None:
+        metadata = action_result.metadata
+        if metadata.get("executor_kind") != "common":
+            return None
+        replay = metadata.get("replay")
+        safe_replay_params = metadata.get("safe_replay_params")
+        duration_ms = metadata.get("duration_ms")
+        return CapabilityExecutionResult(
+            capability_name=str(metadata.get("capability_name") or action_result.action_name),
+            executor_kind="common",
+            status=action_result.status,
+            output=action_result.output,
+            error_message=action_result.error_message,
+            failure_category=action_result.failure_category,
+            duration_ms=duration_ms if isinstance(duration_ms, int) else 0,
+            replay=ReplayPolicy.model_validate(replay) if isinstance(replay, dict) else None,
+            sensitivity=bool(metadata.get("sensitivity")),
+            safe_replay_params=safe_replay_params if isinstance(safe_replay_params, dict) else {},
+            metadata=dict(metadata),
+        )
 
     def _is_failed_result(
         self,

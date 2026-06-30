@@ -6,9 +6,11 @@ from urllib.parse import urljoin
 
 from pydantic import BaseModel
 
+from fsq_agent.core.harness._ai_assertion_tool import AIAssertionBackendToolMixin
 from fsq_agent.core.harness._driver_tools import _web_driver_tool
 from fsq_agent.models import (
     ConfigurationError,
+    WebAssertWithAIParams,
     WebAssertNotVisibleParams,
     WebAssertTextParams,
     WebAssertVisibleParams,
@@ -32,7 +34,7 @@ _BROWSER_NOT_STARTED_MESSAGE = "Browser is not started. Call startBrowser before
 _T = TypeVar("_T")
 
 
-class PlaywrightWebDriver:
+class PlaywrightWebDriver(AIAssertionBackendToolMixin):
     backend = "playwright"
 
     def __init__(
@@ -320,6 +322,10 @@ class PlaywrightWebDriver:
         if isinstance(equals, str) and equals == actual:
             return self._passed({"text": actual})
         return self._failed("assertion_error", "Text assertion failed.", output={"text": actual})
+
+    @_web_driver_tool("assertWithAI", description="Evaluate an explicit Web visual assertion with AI.")
+    def assert_with_ai(self, params: WebAssertWithAIParams) -> dict[str, object]:
+        return self._run_ai_assertion_tool(params)
 
     def screenshot(self, params: WebTakeScreenshotParams | None = None) -> bytes:
         return self._run_sync(lambda: self._screenshot(params))
