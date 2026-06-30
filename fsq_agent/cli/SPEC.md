@@ -133,7 +133,7 @@ This helper is not a public CLI command. It reads a completed dynamic run direct
 - `_core_execution.py`: Internal composition helper for deterministic FSQ case execution through `core` with a caller-supplied registry and harness/backend binding.
 - `_strict_case_recording.py`: Internal post-run recorder that converts dynamic run capability events into run-local `recorded.codex.yaml` and `recording.json` artifacts.
 - `_strict_replay.py`: Internal strict-entry helper that validates and resolves strict replay refs, including runtime-secret refs, before deterministic core execution.
-- `_formatting.py`: Logging-backed CLI rendering helpers for task results, live events, strict run summaries, and report paths.
+- `_formatting.py`: Logging-backed CLI rendering helpers for task results, concise phase-tagged rich live events, strict run summaries, and report paths. Rich live-event rendering is a human display concern only; it must not mutate `RunEvent` values or persisted run artifacts.
 - `_logging.py`: CLI logging configuration.
 - `playground` command handler in `_main.py`: Thin adapter that loads settings, maps host/port/browser flags into `PlaygroundServerOptions`, and calls `run_playground` without reimplementing playground routing or execution.
 - `SPEC.md`: Module design.
@@ -156,6 +156,12 @@ Input validation failures, including missing input source, multiple input source
 
 Recording failures happen after a dynamic run and must not change that dynamic run's status. The CLI should log and summarize recording errors, including no replayable commands, ambiguous secret binding, redacted values with no matching runtime secret, unsupported replay commands, generated YAML validation failures, and existing `recorded.codex.yaml` conflicts. Directory runs continue after per-case recording failures.
 
+## Testing Contract
+
+- Unit tests should cover CLI input validation, dynamic raw-case task construction, strict-case entry behavior, recording handoff behavior, report lookup, and live event formatting.
+- Live event formatting tests should construct representative `RunEvent` values and verify that rich output renders clear phase labels for pre-plan, startup, execution, verification, and run-level events; tool-started lines include the tool name and compact redacted arguments; tool-completed lines include derived status, tool identity, duration, and artifact hints without dumping verbose JSON output; failed tool outcomes include failure category and error message; reasoning summaries remain visible as safe single-line model reason summaries; and `stream_format="jsonl"` still emits raw serialized event JSON without rich prefixes or display compaction.
+- Focused verification for CLI log-output changes should include `./.venv/Scripts/python.exe -m pytest tests/test_cli.py` and any dedicated CLI formatting test file added during implementation.
+
 ## Design Decisions
 
 - CLI commands are thin adapters over module APIs, not a second orchestration layer.
@@ -163,7 +169,8 @@ Recording failures happen after a dynamic run and must not change that dynamic r
 - The public command surface is intentionally limited to `init`, `run`, `report`, and `playground`. Deleted command names are not retained as compatibility aliases.
 - `run` applies `--tracing` or `--no-tracing` as a one-run override after `load_settings` returns and before LLM or provider-backed AI assertion validation. Sensitive tracing is never enabled by CLI.
 - Android app id and serial are local environment-backed settings resolved by `config` from `FSQ_ANDROID_APP_ID` and `FSQ_ANDROID_SERIAL`; CLI does not expose app id or serial flags.
-- Streaming CLI output logs live `RunEvent` values from the agent. Rich format is optimized for humans and includes `HH:MM:SS LEVEL` log prefixes so operators can distinguish informational, warning, and error events. JSONL format emits one raw serialized event per log message for CI and log processors; the CLI formatter bypasses prefixes for those raw JSONL records so the stream remains machine-readable.
+- Streaming CLI output logs live `RunEvent` values from the agent. Rich format is optimized for humans and includes `HH:MM:SS LEVEL` log prefixes so operators can distinguish informational, warning, and error events. Rich event rendering must also derive concise display phase labels from existing event type/title data, including pre-plan, startup, execution, verification, report, and run-level fallbacks; derive tool identity from existing event tool fields and safe payload metadata; derive tool outcome from existing payload status, runner-result status, or event type; keep arguments compact and redacted; preserve safe reasoning-summary messages as concise model reason summaries; and suppress verbose `tool_output_preview` JSON unless it is short and no better summary exists. When verbose output is suppressed, the rich log should point to existing artifact/report/run-output hints when available and must not invent new artifacts or files.
+- Rich log cleanup is a presentation-only behavior. It must not change dynamic execution flow, `RunEvent` model fields, persisted `events.jsonl`, reports, recording manifests, generated strict YAML, tool artifacts, or intermediate run outputs. JSONL format emits one raw serialized event per log message for CI and log processors; the CLI formatter bypasses prefixes and rich compaction for those raw JSONL records so the stream remains machine-readable.
 - Normal `run` is always dynamic LLM goal/reference execution. `--goal` supplies the user goal text. `--case-yaml` and `--case-dir` supply raw file content as reference material and must not use `FsqCaseLoader` or `FsqTaskAdapter`.
 - Dynamic task construction separates planning references from final verification. `--goal` tasks use `planning_reference_kind="goal"` with the normalized goal text. Raw case tasks use `planning_reference_kind="raw_case"` with source path plus complete raw file content. The CLI does not derive final verifier requirements itself; pre-plan must summarize one `verification_goal` before external UI actions.
 - Dynamic run recording is post-run evidence transformation, not task execution. It reads persisted normalized capability events after `FsqAgent.run` returns and writes only under that run directory.
